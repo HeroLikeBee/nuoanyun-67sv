@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "format": "axhub-published-source",
+  "sourceRoot": "source",
+  "entry": "index.tsx",
+  "files": [
+    {
+      "path": "assets/images/8PV4TGAAAAAElFTkSuQmCC.png",
+      "kind": "source"
+    },
+    {
+      "path": "assets/images/D17GaJpLrMCVAAAAAElFTkSuQmCC.png",
+      "kind": "source"
+    },
+    {
+      "path": "content.md",
+      "kind": "source"
+    },
+    {
+      "path": "hack.css",
+      "kind": "source"
+    },
+    {
+      "path": "index.tsx",
+      "kind": "entry"
+    },
+    {
+      "path": "screenshot.png",
+      "kind": "source"
+    },
+    {
+      "path": "style.css",
+      "kind": "source"
+    },
+    {
+      "path": "theme.json",
+      "kind": "source"
+    }
+  ]
+}

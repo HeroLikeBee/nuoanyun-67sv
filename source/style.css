@@ -1,0 +1,3502 @@
+@import "tailwindcss";
+
+/* 样式类定义（来自 style.css）*/
+.style_1 {
+  margin: 0px 8px;
+  margin-inline-start: 8px;
+  margin-inline-end: 8px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px none rgba(0, 0, 0, 0.85);
+  border-color: rgba(0, 0, 0, 0.85);
+  border-radius: 4px;
+  overflow: clip;
+}
+
+.style_2 {
+  margin: 0px 0px 0px 8px;
+  margin-inline-start: 8px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 21px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: ellipsis;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_3 {
+  min-width: 192px;
+  padding: 3px 10px 0px;
+  padding-inline-start: 10px;
+  padding-inline-end: 10px;
+  padding-block-start: 3px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border-top: 0px solid rgba(0, 0, 0, 0.85);
+  border-right: 0px solid rgba(0, 0, 0, 0.85);
+  border-bottom: 0px none rgba(0, 0, 0, 0.85);
+  border-left: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid solid none;
+  border-color: rgba(0, 0, 0, 0.85);
+  transition: 0.2s;
+}
+
+.style_4 {
+  color: rgb(255, 255, 255);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  line-height: 64px;
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgb(255, 255, 255);
+  border-style: solid;
+  border-color: rgb(255, 255, 255);
+}
+
+.style_5 {
+  color: rgb(98, 111, 129);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgb(98, 111, 129);
+  border-style: solid;
+  border-color: rgb(98, 111, 129);
+}
+
+.style_6 {
+  min-width: 0px;
+  min-height: 0px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgb(98, 111, 129);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgb(98, 111, 129);
+  border-style: solid;
+  border-color: rgb(98, 111, 129);
+}
+
+.style_7 {
+  min-width: 0px;
+  min-height: 0px;
+  color: rgb(98, 111, 129);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgb(98, 111, 129);
+  border-style: solid;
+  border-color: rgb(98, 111, 129);
+  transition: color 0.3s;
+}
+
+.style_8 {
+  margin: -1px 0px 0px;
+  padding: 0px 24px;
+  margin-block-start: -1px;
+  padding-inline-start: 24px;
+  padding-inline-end: 24px;
+  top: 1px;
+  right: 0px;
+  bottom: -1px;
+  left: 0px;
+  inset-block-start: 1px;
+  inset-block-end: -1px;
+  color: rgb(98, 111, 129);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgb(98, 111, 129);
+  border-style: solid;
+  border-color: rgb(98, 111, 129);
+}
+
+.style_9 {
+  min-width: 0px;
+  min-height: 0px;
+  top: 0px;
+  right: -10px;
+  bottom: 12px;
+  left: 44px;
+  inset-inline-start: 44px;
+  inset-inline-end: -10px;
+  inset-block-end: 12px;
+  color: rgb(98, 111, 129);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgb(98, 111, 129);
+  border-style: solid;
+  border-color: rgb(98, 111, 129);
+  border-radius: 50%;
+  background: rgb(255, 77, 80) none repeat scroll 0% 0% / auto padding-box border-box;
+  background-color: rgb(255, 77, 80);
+}
+
+.style_10 {
+  min-width: 0px;
+  min-height: 0px;
+  top: 0px;
+  right: -10px;
+  bottom: 12px;
+  left: 58px;
+  inset-inline-start: 58px;
+  inset-inline-end: -10px;
+  inset-block-end: 12px;
+  color: rgb(98, 111, 129);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgb(98, 111, 129);
+  border-style: solid;
+  border-color: rgb(98, 111, 129);
+  border-radius: 50%;
+  background: rgb(255, 77, 80) none repeat scroll 0% 0% / auto padding-box border-box;
+  background-color: rgb(255, 77, 80);
+}
+
+.style_11 {
+  color: rgb(27, 118, 255);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgb(27, 118, 255);
+  border-style: solid;
+  border-color: rgb(27, 118, 255);
+}
+
+.style_12 {
+  min-width: 0px;
+  min-height: 0px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgb(27, 118, 255);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgb(27, 118, 255);
+  border-style: solid;
+  border-color: rgb(27, 118, 255);
+}
+
+.style_13 {
+  min-width: 0px;
+  min-height: 0px;
+  color: rgb(27, 118, 255);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgb(27, 118, 255);
+  border-style: solid;
+  border-color: rgb(27, 118, 255);
+  transition: color 0.3s;
+}
+
+.style_14 {
+  margin: -1px 0px 0px;
+  padding: 0px 24px;
+  margin-block-start: -1px;
+  padding-inline-start: 24px;
+  padding-inline-end: 24px;
+  top: 1px;
+  right: 0px;
+  bottom: -1px;
+  left: 0px;
+  inset-block-start: 1px;
+  inset-block-end: -1px;
+  color: rgb(27, 118, 255);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgb(27, 118, 255);
+  border-style: solid;
+  border-color: rgb(27, 118, 255);
+}
+
+.style_15 {
+  min-width: 14px;
+  min-height: 0px;
+  color: rgba(0, 0, 0, 0.25);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.25);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.25);
+  transition: font-size 0.15s cubic-bezier(0.215, 0.61, 0.355, 1), margin 0.3s cubic-bezier(0.645, 0.045, 0.355, 1), color 0.3s;
+}
+
+.style_16 {
+  min-width: 0px;
+  min-height: 0px;
+  color: rgba(0, 0, 0, 0.25);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.25);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.25);
+  transition: color 0.3s;
+}
+
+.style_17 {
+  min-width: 0px;
+  min-height: 0px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.25);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.25);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.25);
+  transition: border-color 0.3s, background 0.3s;
+}
+
+.style_18 {
+  min-width: 0px;
+  min-height: 0px;
+  margin: -1px 0px 0px;
+  padding: 0px 20px;
+  margin-block-start: -1px;
+  padding-inline-start: 20px;
+  padding-inline-end: 20px;
+  top: 1px;
+  right: 2276px;
+  bottom: 60px;
+  left: 222px;
+  inset-inline-start: 222px;
+  inset-inline-end: 2276px;
+  inset-block-start: 1px;
+  inset-block-end: 60px;
+  color: rgba(0, 0, 0, 0.25);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.25);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.25);
+  overflow: auto hidden;
+}
+
+.style_19 {
+  min-width: 0px;
+  min-height: 0px;
+  line-height: 20px;
+  color: rgb(98, 111, 129);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px none rgb(98, 111, 129);
+  border-color: rgb(98, 111, 129);
+  transition: background 0.3s, width 0.3s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.style_20 {
+  min-width: 0px;
+  padding: 0px 0px 0px 30px;
+  padding-inline-start: 30px;
+  color: rgb(255, 255, 255);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  line-height: 64px;
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgb(255, 255, 255);
+  border-style: solid;
+  border-color: rgb(255, 255, 255);
+}
+
+.style_21 {
+  min-width: 0px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: ellipsis;
+  border: 0px none rgba(0, 0, 0, 0.85);
+  border-color: rgba(0, 0, 0, 0.85);
+  border-radius: 2px;
+  background: rgb(255, 255, 255) none repeat scroll 0% 0% / auto padding-box border-box;
+  background-color: rgb(255, 255, 255);
+  overflow: clip;
+  transition: 0.3s;
+}
+
+.style_22 {
+  padding: 0px 8px;
+  padding-inline-start: 8px;
+  padding-inline-end: 8px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 20px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_23 {
+  margin: 0px 0px 0px 4px;
+  margin-inline-start: 4px;
+  right: 9px;
+  inset-inline-end: 9px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_24 {
+  min-width: 0px;
+  padding: 4px 11px;
+  padding-inline-start: 11px;
+  padding-inline-end: 11px;
+  padding-block-start: 4px;
+  padding-block-end: 4px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 1px solid rgb(217, 217, 217);
+  border-style: solid;
+  border-color: rgb(217, 217, 217);
+  border-radius: 16px;
+  background: rgb(255, 255, 255) none repeat scroll 0% 0% / auto padding-box border-box;
+  background-color: rgb(255, 255, 255);
+  transition: 0.3s;
+}
+
+.style_25 {
+  padding: 0px 2px;
+  padding-inline-start: 2px;
+  padding-inline-end: 2px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 16.8px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  line-height: 64px;
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_26 {
+  min-width: 0px;
+  min-height: 0px;
+  padding: 0px 8px;
+  padding-inline-start: 8px;
+  padding-inline-end: 8px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 20px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_27 {
+  min-width: 16px;
+  min-height: 0px;
+  padding: 0px 4px;
+  padding-inline-start: 4px;
+  padding-inline-end: 4px;
+  top: 14px;
+  right: 10px;
+  bottom: 34px;
+  left: 5.0625px;
+  inset-inline-start: 5.0625px;
+  inset-inline-end: 10px;
+  inset-block-start: 14px;
+  inset-block-end: 34px;
+  color: rgb(255, 255, 255);
+  font-size: 12px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgb(255, 255, 255);
+  border-style: solid;
+  border-color: rgb(255, 255, 255);
+  border-radius: 8px;
+  background: rgb(255, 77, 79) none repeat scroll 0% 0% / auto padding-box border-box;
+  background-color: rgb(255, 77, 79);
+  transform: matrix(1, 0, 0, 1, 10.4688, -8);
+}
+
+.style_28 {
+  min-width: 0px;
+  min-height: 0px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 16.8px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  line-height: 64px;
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_29 {
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 16.8px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  line-height: 64px;
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_30 {
+  margin: 0px 0px 0px 10px;
+  padding: 0px 2px;
+  margin-inline-start: 10px;
+  padding-inline-start: 2px;
+  padding-inline-end: 2px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 16.8px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  line-height: 64px;
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_31 {
+  min-width: 0px;
+  min-height: 0px;
+  padding: 0px 8px;
+  padding-inline-start: 8px;
+  padding-inline-end: 8px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_32 {
+  color: rgb(255, 255, 255);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  line-height: 64px;
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgb(255, 255, 255);
+  border-style: solid;
+  border-color: rgb(255, 255, 255);
+}
+
+.style_33 {
+  padding: 0px 8px;
+  padding-inline-start: 8px;
+  padding-inline-end: 8px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 16.8px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_34 {
+  margin: 0px 10px 0px 0px;
+  margin-inline-end: 10px;
+  color: rgb(255, 255, 255);
+  font-size: 12px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  line-height: 64px;
+  text-align: start;
+  text-overflow: clip;
+  border: 0px none rgb(255, 255, 255);
+  border-color: rgb(255, 255, 255);
+  border-radius: 50%;
+  overflow: clip;
+}
+
+.style_35 {
+  min-width: 0px;
+  min-height: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 15px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: ellipsis;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_36 {
+  color: rgb(255, 255, 255);
+  font-size: 12px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  line-height: 64px;
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgb(255, 255, 255);
+  border-style: solid;
+  border-color: rgb(255, 255, 255);
+}
+
+.style_37 {
+  margin: 0px 0px 0px 10px;
+  padding: 5px 0px 0px;
+  margin-inline-start: 10px;
+  padding-block-start: 5px;
+  color: rgb(99, 115, 129);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgb(99, 115, 129);
+  border-style: solid;
+  border-color: rgb(99, 115, 129);
+}
+
+.style_38 {
+  margin: 0px 0px 0px 10px;
+  padding: 0px 10px;
+  margin-inline-start: 10px;
+  padding-inline-start: 10px;
+  padding-inline-end: 10px;
+  color: rgb(255, 255, 255);
+  font-size: 12px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  line-height: 64px;
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgb(255, 255, 255);
+  border-style: solid;
+  border-color: rgb(255, 255, 255);
+}
+
+.style_39 {
+  min-width: 180px;
+  padding: 0px 20px;
+  padding-inline-start: 20px;
+  padding-inline-end: 20px;
+  color: rgb(255, 255, 255);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  line-height: 64px;
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgb(255, 255, 255);
+  border-style: solid;
+  border-color: rgb(255, 255, 255);
+}
+
+.style_40 {
+  color: rgb(255, 255, 255);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  line-height: 64px;
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgb(255, 255, 255);
+  border-style: solid;
+  border-color: rgb(255, 255, 255);
+}
+
+.style_41 {
+  min-width: 0px;
+  min-height: 0px;
+  margin: 0px 0px 0px -1px;
+  margin-inline-start: -1px;
+  top: 0px;
+  right: 1px;
+  bottom: 1249px;
+  left: 0px;
+  inset-inline-end: 1px;
+  inset-block-end: 1249px;
+  color: rgb(255, 255, 255);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  line-height: 64px;
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgb(255, 255, 255);
+  border-style: solid;
+  border-color: rgb(255, 255, 255);
+}
+
+.style_42 {
+  min-width: 210px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+  transition: 0.2s;
+}
+
+.style_43 {
+  min-width: 0px;
+  min-height: 0px;
+  padding: 0px 0px 5px;
+  padding-block-end: 5px;
+  color: rgb(177, 177, 177);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgb(177, 177, 177);
+  border-style: solid;
+  border-color: rgb(177, 177, 177);
+}
+
+.style_44 {
+  color: rgb(138, 145, 156);
+  font-size: 16px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgb(138, 145, 156);
+  border-style: solid;
+  border-color: rgb(138, 145, 156);
+}
+
+.style_45 {
+  margin: 0px 0px 0px 8px;
+  margin-inline-start: 8px;
+  color: rgb(85, 85, 85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: ellipsis;
+  border: 0px solid rgb(85, 85, 85);
+  border-style: solid;
+  border-color: rgb(85, 85, 85);
+  transition: 0.3s;
+}
+
+.style_46 {
+  min-width: 0px;
+  min-height: 0px;
+  padding: 12px 12px 12px 16px;
+  padding-inline-start: 16px;
+  padding-inline-end: 12px;
+  padding-block-start: 12px;
+  padding-block-end: 12px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgb(85, 85, 85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: ellipsis;
+  border: 0px solid rgb(85, 85, 85);
+  border-style: solid;
+  border-color: rgb(85, 85, 85);
+  background: rgb(255, 255, 255) none repeat scroll 0% 0% / auto padding-box border-box;
+  background-color: rgb(255, 255, 255);
+}
+
+.style_47 {
+  min-width: 0px;
+  min-height: 0px;
+  margin: 0px 0px 10px;
+  padding: 0px 20px;
+  margin-block-end: 10px;
+  padding-inline-start: 20px;
+  padding-inline-end: 20px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_48 {
+  color: rgb(24, 144, 255);
+  font-size: 16px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgb(24, 144, 255);
+  border-style: solid;
+  border-color: rgb(24, 144, 255);
+}
+
+.style_49 {
+  margin: 0px 0px 0px 8px;
+  margin-inline-start: 8px;
+  color: rgb(24, 144, 255);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: ellipsis;
+  border: 0px solid rgb(24, 144, 255);
+  border-style: solid;
+  border-color: rgb(24, 144, 255);
+  transition: 0.3s;
+}
+
+.style_50 {
+  min-width: 0px;
+  min-height: 0px;
+  padding: 12px 12px 12px 16px;
+  padding-inline-start: 16px;
+  padding-inline-end: 12px;
+  padding-block-start: 12px;
+  padding-block-end: 12px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgb(24, 144, 255);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: ellipsis;
+  border: 0px solid rgb(24, 144, 255);
+  border-style: solid;
+  border-color: rgb(24, 144, 255);
+  border-radius: 7px;
+  background: rgba(24, 144, 255, 0.05) none repeat scroll 0% 0% / auto padding-box border-box;
+  background-color: rgba(24, 144, 255, 0.05);
+}
+
+.style_51 {
+  min-width: 0px;
+  min-height: 0px;
+  padding: 20px 0px;
+  padding-block-start: 20px;
+  padding-block-end: 20px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_52 {
+  min-width: 0px;
+  min-height: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_53 {
+  min-width: 0px;
+  min-height: 0px;
+  margin: 0px 0px 18px;
+  margin-block-end: 18px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+  overflow: hidden auto;
+}
+
+.style_54 {
+  min-width: 0px;
+  min-height: 0px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+  border-radius: 4px;
+  background: rgba(144, 147, 153, 0.3) none repeat scroll 0% 0% / auto padding-box border-box;
+  background-color: rgba(144, 147, 153, 0.3);
+  transform: matrix(1, 0, 0, 1, 0, 0);
+  transition: background-color 0.3s;
+}
+
+.style_55 {
+  min-width: 0px;
+  min-height: 0px;
+  top: 1230.91px;
+  right: 2px;
+  bottom: 2px;
+  left: 2px;
+  inset-inline-start: 2px;
+  inset-inline-end: 2px;
+  inset-block-start: 1230.91px;
+  inset-block-end: 2px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+  border-radius: 4px;
+  transition: opacity 0.08s;
+}
+
+.style_56 {
+  min-width: 0px;
+  min-height: 0px;
+  top: 2px;
+  right: 2px;
+  bottom: 2px;
+  left: 187px;
+  inset-inline-start: 187px;
+  inset-inline-end: 2px;
+  inset-block-start: 2px;
+  inset-block-end: 2px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+  border-radius: 4px;
+  transition: opacity 0.08s;
+}
+
+.style_57 {
+  min-width: 0px;
+  min-height: 0px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_58 {
+  min-width: 0px;
+  min-height: 0px;
+  margin: -0.1px 0px 0px 15px;
+  padding: 0.1px 0px 0px;
+  margin-inline-start: 15px;
+  margin-block-start: -0.1px;
+  padding-block-start: 0.1px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+  border-radius: 13px;
+  background: rgb(255, 255, 255) none repeat scroll 0% 0% / auto padding-box border-box;
+  background-color: rgb(255, 255, 255);
+}
+
+.style_59 {
+  min-width: 210px;
+  min-height: 0px;
+  padding: 0px 0px 10px;
+  padding-block-end: 10px;
+  top: 60px;
+  right: 2342px;
+  bottom: 0px;
+  left: 0px;
+  inset-inline-end: 2342px;
+  inset-block-start: 60px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+  transition: 0.2s;
+}
+
+.style_60 {
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_61 {
+  min-width: 0px;
+  min-height: 0px;
+  margin: 0px 0px 0px 4px;
+  margin-inline-start: 4px;
+  color: rgb(96, 109, 129);
+  font-size: 12px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgb(96, 109, 129);
+  border-style: solid;
+  border-color: rgb(96, 109, 129);
+}
+
+.style_62 {
+  margin: 0px 0px 0px -10px;
+  margin-inline-start: -10px;
+  color: rgb(96, 109, 129);
+  font-size: 12px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgb(96, 109, 129);
+  border-style: solid;
+  border-color: rgb(96, 109, 129);
+}
+
+.style_63 {
+  min-width: 0px;
+  min-height: 0px;
+  color: rgb(96, 109, 129);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgb(96, 109, 129);
+  border-style: solid;
+  border-color: rgb(96, 109, 129);
+}
+
+.style_64 {
+  color: rgb(96, 109, 129);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgb(96, 109, 129);
+  border-style: solid;
+  border-color: rgb(96, 109, 129);
+  transition: 0.3s;
+}
+
+.style_65 {
+  margin: 0px 4px 0px 0px;
+  padding: 6px 12px 6px 16px;
+  margin-inline-end: 4px;
+  padding-inline-start: 16px;
+  padding-inline-end: 12px;
+  padding-block-start: 6px;
+  padding-block-end: 6px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgb(96, 109, 129);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px none rgb(96, 109, 129);
+  border-color: rgb(96, 109, 129);
+  border-radius: 5px;
+  background: rgb(225, 234, 248) none repeat scroll 0% 0% / auto padding-box border-box;
+  background-color: rgb(225, 234, 248);
+}
+
+.style_66 {
+  min-width: 0px;
+  min-height: 0px;
+  margin: 0px 0px 0px 4px;
+  margin-inline-start: 4px;
+  color: rgb(85, 85, 85);
+  font-size: 12px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgb(85, 85, 85);
+  border-style: solid;
+  border-color: rgb(85, 85, 85);
+  text-shadow: rgb(85, 85, 85) 0px 0px 0.25px;
+}
+
+.style_67 {
+  margin: 0px 0px 0px -10px;
+  margin-inline-start: -10px;
+  color: rgb(85, 85, 85);
+  font-size: 12px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgb(85, 85, 85);
+  border-style: solid;
+  border-color: rgb(85, 85, 85);
+  text-shadow: rgb(85, 85, 85) 0px 0px 0.25px;
+}
+
+.style_68 {
+  min-width: 0px;
+  min-height: 0px;
+  color: rgb(85, 85, 85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgb(85, 85, 85);
+  border-style: solid;
+  border-color: rgb(85, 85, 85);
+  text-shadow: rgb(85, 85, 85) 0px 0px 0.25px;
+}
+
+.style_69 {
+  color: rgb(27, 118, 255);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgb(27, 118, 255);
+  border-style: solid;
+  border-color: rgb(27, 118, 255);
+  text-shadow: rgb(27, 118, 255) 0px 0px 0.25px;
+  transition: 0.3s;
+}
+
+.style_70 {
+  color: rgb(85, 85, 85);
+  font-size: 12px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgb(85, 85, 85);
+  border-style: solid;
+  border-color: rgb(85, 85, 85);
+}
+
+.style_71 {
+  margin: 1px -4px 0px 8px;
+  padding: 1px 6px;
+  margin-inline-start: 8px;
+  margin-inline-end: -4px;
+  margin-block-start: 1px;
+  padding-inline-start: 6px;
+  padding-inline-end: 6px;
+  padding-block-start: 1px;
+  padding-block-end: 1px;
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px none rgba(0, 0, 0, 0.45);
+  border-color: rgba(0, 0, 0, 0.45);
+  border-radius: 2px;
+  transition: 0.3s;
+}
+
+.style_72 {
+  margin: 0px 4px 0px 0px;
+  padding: 6px 12px 6px 16px;
+  margin-inline-end: 4px;
+  padding-inline-start: 16px;
+  padding-inline-end: 12px;
+  padding-block-start: 6px;
+  padding-block-end: 6px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgb(96, 109, 129);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border-radius: 5px 5px 0px 0px;
+  border-top-left-radius: 5px;
+  border-top-right-radius: 5px;
+  background: linear-gradient(rgb(255, 255, 255) 0%, rgba(240, 244, 252, 0.8) 100%) repeat scroll 0% 0% / auto padding-box padding-box, rgb(225, 234, 248) linear-gradient(rgb(125, 174, 248) 0%, rgb(240, 244, 252) 100%) repeat scroll 0% 0% / auto border-box border-box;
+  background-color: rgb(225, 234, 248);
+  background-image: linear-gradient(rgb(255, 255, 255) 0%, rgba(240, 244, 252, 0.8) 100%), linear-gradient(rgb(125, 174, 248) 0%, rgb(240, 244, 252) 100%);
+  background-size: auto, auto;
+  background-position: 0% 0%, 0% 0%;
+  background-repeat: repeat, repeat;
+  border: 1px 1px 0px solid solid none rgba(0, 0, 0, 0) rgba(0, 0, 0, 0) rgb(96, 109, 129);
+}
+
+.style_73 {
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+  transform: matrix(1, 0, 0, 1, 0, 0);
+  transition: transform 0.3s;
+}
+
+.style_74 {
+  padding: 0px 6px 0px 0px;
+  padding-inline-end: 6px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+  transform: matrix(1, 0, 0, 1, 0, 0);
+}
+
+.style_75 {
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px none rgba(0, 0, 0, 0.85);
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_76 {
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_77 {
+  min-width: 0px;
+  min-height: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_78 {
+  min-width: 0px;
+  min-height: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_79 {
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_80 {
+  justify-content: end;
+  min-width: 0px;
+  min-height: 0px;
+  margin: 0px 15px;
+  margin-inline-start: 15px;
+  margin-inline-end: 15px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px none rgba(0, 0, 0, 0.85);
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_81 {
+  min-width: 0px;
+  min-height: 0px;
+  top: 60px;
+  right: -1px;
+  bottom: 1215px;
+  left: 211px;
+  inset-inline-start: 211px;
+  inset-inline-end: -1px;
+  inset-block-start: 60px;
+  inset-block-end: 1215px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+  transition: width 0.2s;
+}
+
+.style_82 {
+  min-width: 0px;
+  min-height: 0px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 18px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_83 {
+  min-width: 0px;
+  min-height: 0px;
+  padding: 0px 0px 12px;
+  padding-block-end: 12px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+  background: rgb(255, 255, 255) none repeat scroll 0% 0% / auto padding-box border-box;
+  background-color: rgb(255, 255, 255);
+}
+
+.style_84 {
+  min-width: 0px;
+  min-height: 0px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_85 {
+  min-height: 1px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_86 {
+  margin: 0px 0px 0px 4px;
+  margin-inline-start: 4px;
+  right: 9px;
+  inset-inline-end: 9px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_87 {
+  min-width: 0px;
+  min-height: 0px;
+  padding: 4px 11px;
+  padding-inline-start: 11px;
+  padding-inline-end: 11px;
+  padding-block-start: 4px;
+  padding-block-end: 4px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 1px solid rgb(217, 217, 217);
+  border-style: solid;
+  border-color: rgb(217, 217, 217);
+  border-radius: 2px;
+  background: rgb(255, 255, 255) none repeat scroll 0% 0% / auto padding-box border-box;
+  background-color: rgb(255, 255, 255);
+  transition: 0.3s;
+}
+
+.style_88 {
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_89 {
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_90 {
+  min-height: 32px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_91 {
+  min-width: 0px;
+  min-height: 1px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_92 {
+  gap: 0px normal;
+  min-width: 0px;
+  min-height: 0px;
+  margin: 0px 0px 8px;
+  margin-block-end: 8px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_93 {
+  min-height: 1px;
+  max-width: 16.6667%;
+  padding: 0px 10px;
+  padding-inline-start: 10px;
+  padding-inline-end: 10px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_94 {
+  min-width: 0px;
+  min-height: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px none rgba(0, 0, 0, 0.85);
+  border-color: rgba(0, 0, 0, 0.85);
+  overflow: clip;
+}
+
+.style_95 {
+  min-width: 0px;
+  min-height: 0px;
+  top: 0px;
+  right: 25px;
+  bottom: 0px;
+  left: 11px;
+  inset-inline-start: 11px;
+  inset-inline-end: 25px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_96 {
+  padding: 0px 18px 0px 0px;
+  padding-inline-end: 18px;
+  color: rgb(191, 191, 191);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: ellipsis;
+  border: 0px solid rgb(191, 191, 191);
+  border-style: solid;
+  border-color: rgb(191, 191, 191);
+}
+
+.style_97 {
+  min-width: 0px;
+  min-height: 0px;
+  padding: 0px 11px;
+  padding-inline-start: 11px;
+  padding-inline-end: 11px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 1px solid rgb(217, 217, 217);
+  border-style: solid;
+  border-color: rgb(217, 217, 217);
+  border-radius: 2px;
+  background: rgb(255, 255, 255) none repeat scroll 0% 0% / auto padding-box border-box;
+  background-color: rgb(255, 255, 255);
+  transition: 0.3s cubic-bezier(0.645, 0.045, 0.355, 1);
+}
+
+.style_98 {
+  min-width: 0px;
+  min-height: 0px;
+  color: rgba(0, 0, 0, 0.25);
+  font-size: 12px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.25);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.25);
+  transition: transform 0.3s;
+}
+
+.style_99 {
+  min-width: 0px;
+  min-height: 0px;
+  margin: -6px 0px 0px;
+  margin-block-start: -6px;
+  top: 16px;
+  right: 11px;
+  bottom: 10px;
+  left: 303px;
+  inset-inline-start: 303px;
+  inset-inline-end: 11px;
+  inset-block-start: 16px;
+  inset-block-end: 10px;
+  color: rgba(0, 0, 0, 0.25);
+  font-size: 12px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.25);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.25);
+}
+
+.style_100 {
+  min-width: 0px;
+  min-height: 0px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_101 {
+  min-width: 1px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: ellipsis;
+  border: 0px none rgba(0, 0, 0, 0.85);
+  border-color: rgba(0, 0, 0, 0.85);
+  border-radius: 2px;
+  overflow: clip;
+  transition: 0.3s;
+}
+
+.style_102 {
+  min-width: 0px;
+  min-height: 0px;
+  color: rgba(0, 0, 0, 0.25);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.25);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.25);
+}
+
+.style_103 {
+  margin: 0px 0px 0px 4px;
+  margin-inline-start: 4px;
+  color: rgba(0, 0, 0, 0.25);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.25);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.25);
+}
+
+.style_104 {
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_105 {
+  min-width: 0px;
+  min-height: 0px;
+  padding: 4px 11px;
+  padding-inline-start: 11px;
+  padding-inline-end: 11px;
+  padding-block-start: 4px;
+  padding-block-end: 4px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 1px solid rgb(217, 217, 217);
+  border-style: solid;
+  border-color: rgb(217, 217, 217);
+  border-radius: 2px;
+  background: rgb(255, 255, 255) none repeat scroll 0% 0% / auto padding-box border-box;
+  background-color: rgb(255, 255, 255);
+  transition: border 0.3s, box-shadow 0.3s;
+}
+
+.style_106 {
+  min-height: 1px;
+  padding: 0px 10px;
+  padding-inline-start: 10px;
+  padding-inline-end: 10px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_107 {
+  min-width: 0px;
+  min-height: 0px;
+  margin: -6px 0px 0px;
+  margin-block-start: -6px;
+  top: 16px;
+  right: 11px;
+  bottom: 10px;
+  left: 275px;
+  inset-inline-start: 275px;
+  inset-inline-end: 11px;
+  inset-block-start: 16px;
+  inset-block-end: 10px;
+  color: rgba(0, 0, 0, 0.25);
+  font-size: 12px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.25);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.25);
+}
+
+.style_108 {
+  min-width: 0px;
+  min-height: 0px;
+  color: rgb(255, 255, 255);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgb(255, 255, 255);
+  border-style: solid;
+  border-color: rgb(255, 255, 255);
+  text-shadow: rgba(0, 0, 0, 0.12) 0px -1px 0px;
+  transition: margin-left 0.3s cubic-bezier(0.645, 0.045, 0.355, 1);
+}
+
+.style_109 {
+  min-width: 0px;
+  min-height: 0px;
+  margin: 0px 0px 0px 8px;
+  margin-inline-start: 8px;
+  color: rgb(255, 255, 255);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgb(255, 255, 255);
+  border-style: solid;
+  border-color: rgb(255, 255, 255);
+  text-shadow: rgba(0, 0, 0, 0.12) 0px -1px 0px;
+}
+
+.style_110 {
+  min-width: 0px;
+  min-height: 0px;
+  margin: 0px 8px 0px 0px;
+  padding: 4px 15px;
+  margin-inline-end: 8px;
+  padding-inline-start: 15px;
+  padding-inline-end: 15px;
+  padding-block-start: 4px;
+  padding-block-end: 4px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgb(255, 255, 255);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px none rgb(255, 255, 255);
+  border-color: rgb(255, 255, 255);
+  border-radius: 5px;
+  background: rgb(24, 144, 255) none repeat scroll 0% 0% / auto padding-box border-box;
+  background-color: rgb(24, 144, 255);
+  box-shadow: rgba(0, 0, 0, 0.043) 0px 2px 0px 0px;
+  text-shadow: rgba(0, 0, 0, 0.12) 0px -1px 0px;
+  transition: 0.3s cubic-bezier(0.645, 0.045, 0.355, 1);
+}
+
+.style_111 {
+  min-width: 0px;
+  min-height: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+  transition: margin-left 0.3s cubic-bezier(0.645, 0.045, 0.355, 1);
+}
+
+.style_112 {
+  min-width: 0px;
+  min-height: 0px;
+  margin: 0px 0px 0px 8px;
+  margin-inline-start: 8px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_113 {
+  min-width: 0px;
+  min-height: 0px;
+  margin: 0px 8px 0px 0px;
+  padding: 4px 15px;
+  margin-inline-end: 8px;
+  padding-inline-start: 15px;
+  padding-inline-end: 15px;
+  padding-block-start: 4px;
+  padding-block-end: 4px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 1px solid rgb(217, 217, 217);
+  border-style: solid;
+  border-color: rgb(217, 217, 217);
+  border-radius: 5px;
+  background: rgb(255, 255, 255) none repeat scroll 0% 0% / auto padding-box border-box;
+  background-color: rgb(255, 255, 255);
+  box-shadow: rgba(0, 0, 0, 0.016) 0px 2px 0px 0px;
+  transition: 0.3s cubic-bezier(0.645, 0.045, 0.355, 1);
+}
+
+.style_114 {
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_115 {
+  min-height: 32px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_116 {
+  min-width: 0px;
+  min-height: 1px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_117 {
+  gap: 0px normal;
+  min-width: 0px;
+  min-height: 0px;
+  margin: 0px 0px 8px;
+  margin-block-end: 8px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_118 {
+  min-width: 0px;
+  min-height: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_119 {
+  min-height: 1px;
+  padding: 0px 10px;
+  padding-inline-start: 10px;
+  padding-inline-end: 10px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_120 {
+  gap: 10px normal;
+  min-width: 0px;
+  min-height: 0px;
+  margin: 0px -10px;
+  margin-inline-start: -10px;
+  margin-inline-end: -10px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_121 {
+  padding: 0px 0px 5px;
+  padding-block-end: 5px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+  border-radius: 2px;
+  background: rgb(255, 255, 255) none repeat scroll 0% 0% / auto padding-box border-box;
+  background-color: rgb(255, 255, 255);
+}
+
+.style_122 {
+  min-width: 0px;
+  min-height: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_123 {
+  min-width: 0px;
+  min-height: 0px;
+  color: rgb(255, 255, 255);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgb(255, 255, 255);
+  border-style: solid;
+  border-color: rgb(255, 255, 255);
+  text-shadow: rgba(0, 0, 0, 0.12) 0px -1px 0px;
+}
+
+.style_124 {
+  min-width: 0px;
+  min-height: 0px;
+  padding: 4px 15px;
+  padding-inline-start: 15px;
+  padding-inline-end: 15px;
+  padding-block-start: 4px;
+  padding-block-end: 4px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgb(255, 255, 255);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px none rgb(255, 255, 255);
+  border-color: rgb(255, 255, 255);
+  border-radius: 5px;
+  background: rgb(24, 144, 255) none repeat scroll 0% 0% / auto padding-box border-box;
+  background-color: rgb(24, 144, 255);
+  box-shadow: rgba(0, 0, 0, 0.043) 0px 2px 0px 0px;
+  text-shadow: rgba(0, 0, 0, 0.12) 0px -1px 0px;
+  transition: 0.3s cubic-bezier(0.645, 0.045, 0.355, 1);
+}
+
+.style_125 {
+  min-width: 0px;
+  min-height: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_126 {
+  min-width: 0px;
+  min-height: 0px;
+  padding: 4px 15px;
+  padding-inline-start: 15px;
+  padding-inline-end: 15px;
+  padding-block-start: 4px;
+  padding-block-end: 4px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 1px solid rgb(217, 217, 217);
+  border-style: solid;
+  border-color: rgb(217, 217, 217);
+  border-radius: 5px;
+  background: rgb(255, 255, 255) none repeat scroll 0% 0% / auto padding-box border-box;
+  background-color: rgb(255, 255, 255);
+  box-shadow: rgba(0, 0, 0, 0.016) 0px 2px 0px 0px;
+  transition: 0.3s cubic-bezier(0.645, 0.045, 0.355, 1);
+}
+
+.style_127 {
+  margin: 0px 8px 0px 0px;
+  margin-inline-end: 8px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_128 {
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_129 {
+  min-width: 0px;
+  min-height: 0px;
+  margin: 0px 0px 8px;
+  margin-block-end: 8px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_130 {
+  min-width: 0px;
+  min-height: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px none rgba(0, 0, 0, 0.85);
+  border-color: rgba(0, 0, 0, 0.85);
+  border-radius: 2px 2px 0px 0px;
+  border-top-left-radius: 2px;
+  border-top-right-radius: 2px;
+}
+
+.style_131 {
+  display: table-column;
+  min-width: 0px;
+  min-height: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_132 {
+  display: table-column-group;
+  min-width: 0px;
+  min-height: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_133 {
+  min-width: 0px;
+  min-height: 0px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  text-overflow: clip;
+  border: 0px none rgba(0, 0, 0, 0.85);
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_134 {
+  min-width: 0px;
+  min-height: 0px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  text-overflow: clip;
+  border: 1px solid rgb(217, 217, 217);
+  border-style: solid;
+  border-color: rgb(217, 217, 217);
+  border-radius: 2px;
+  background: rgb(255, 255, 255) none repeat scroll 0% 0% / auto padding-box border-box;
+  background-color: rgb(255, 255, 255);
+  transition: 0.3s;
+}
+
+.style_135 {
+  top: 2.8px;
+  right: 0px;
+  bottom: -2.8px;
+  left: 0px;
+  inset-block-start: 2.8px;
+  inset-block-end: -2.8px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_136 {
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_137 {
+  min-width: 0px;
+  min-height: 0px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_138 {
+  display: table-cell;
+  min-width: 0px;
+  min-height: 0px;
+  padding: 12px 8px;
+  padding-inline-start: 8px;
+  padding-inline-end: 8px;
+  padding-block-start: 12px;
+  padding-block-end: 12px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  text-overflow: clip;
+  background: rgb(244, 247, 252) none repeat scroll 0% 0% / auto padding-box border-box;
+  background-color: rgb(244, 247, 252);
+  transition: background 0.3s;
+  border: 0px 1px 1px 0px solid rgba(0, 0, 0, 0.85) rgb(240, 240, 240) rgb(240, 240, 240) rgba(0, 0, 0, 0.85);
+}
+
+.style_139 {
+  min-width: 0px;
+  min-height: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_140 {
+  min-width: 0px;
+  min-height: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_141 {
+  display: table-cell;
+  min-width: 0px;
+  min-height: 0px;
+  padding: 12px 8px;
+  padding-inline-start: 8px;
+  padding-inline-end: 8px;
+  padding-block-start: 12px;
+  padding-block-end: 12px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  text-overflow: ellipsis;
+  background: rgb(244, 247, 252) none repeat scroll 0% 0% / auto padding-box border-box;
+  background-color: rgb(244, 247, 252);
+  transition: background 0.3s;
+  border: 0px 1px 1px 0px solid rgba(0, 0, 0, 0.85) rgb(240, 240, 240) rgb(240, 240, 240) rgba(0, 0, 0, 0.85);
+}
+
+.style_142 {
+  min-width: 0px;
+  min-height: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_143 {
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  text-overflow: ellipsis;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_144 {
+  color: rgb(191, 191, 191);
+  font-size: 11px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  text-overflow: clip;
+  border: 0px solid rgb(191, 191, 191);
+  border-style: solid;
+  border-color: rgb(191, 191, 191);
+}
+
+.style_145 {
+  margin: -3.3px 0px 0px;
+  margin-block-start: -3.3px;
+  color: rgb(191, 191, 191);
+  font-size: 11px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  text-overflow: clip;
+  border: 0px solid rgb(191, 191, 191);
+  border-style: solid;
+  border-color: rgb(191, 191, 191);
+}
+
+.style_146 {
+  min-width: 0px;
+  min-height: 0px;
+  color: rgb(191, 191, 191);
+  font-size: 0px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  text-overflow: clip;
+  border: 0px solid rgb(191, 191, 191);
+  border-style: solid;
+  border-color: rgb(191, 191, 191);
+}
+
+.style_147 {
+  margin: 0px 0px 0px 4px;
+  margin-inline-start: 4px;
+  color: rgb(191, 191, 191);
+  font-size: 0px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  text-overflow: clip;
+  border: 0px solid rgb(191, 191, 191);
+  border-style: solid;
+  border-color: rgb(191, 191, 191);
+  transition: color 0.3s;
+}
+
+.style_148 {
+  min-width: 0px;
+  min-height: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_149 {
+  display: table-cell;
+  min-width: 0px;
+  min-height: 0px;
+  padding: 12px 8px;
+  padding-inline-start: 8px;
+  padding-inline-end: 8px;
+  padding-block-start: 12px;
+  padding-block-end: 12px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  text-overflow: ellipsis;
+  background: rgb(244, 247, 252) none repeat scroll 0% 0% / auto padding-box border-box;
+  background-color: rgb(244, 247, 252);
+  transition: 0.3s;
+  border: 0px 1px 1px 0px solid rgba(0, 0, 0, 0.85) rgb(240, 240, 240) rgb(240, 240, 240) rgba(0, 0, 0, 0.85);
+}
+
+.style_150 {
+  min-width: 0px;
+  min-height: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  text-overflow: ellipsis;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_151 {
+  display: table-cell;
+  min-width: 0px;
+  min-height: 0px;
+  padding: 12px 8px;
+  padding-inline-start: 8px;
+  padding-inline-end: 8px;
+  padding-block-start: 12px;
+  padding-block-end: 12px;
+  right: 7px;
+  inset-inline-end: 7px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  text-overflow: ellipsis;
+  background: rgb(244, 247, 252) none repeat scroll 0% 0% / auto padding-box border-box;
+  background-color: rgb(244, 247, 252);
+  transition: background 0.3s;
+  border: 0px 1px 1px 0px solid rgba(0, 0, 0, 0.85) rgb(240, 240, 240) rgb(240, 240, 240) rgba(0, 0, 0, 0.85);
+}
+
+.style_152 {
+  display: table-cell;
+  min-width: 0px;
+  min-height: 0px;
+  padding: 12px 8px;
+  padding-inline-start: 8px;
+  padding-inline-end: 8px;
+  padding-block-start: 12px;
+  padding-block-end: 12px;
+  right: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  text-overflow: clip;
+  background: rgb(244, 247, 252) none repeat scroll 0% 0% / auto padding-box border-box;
+  background-color: rgb(244, 247, 252);
+  box-shadow: rgb(250, 250, 250) 0px 1px 0px 1px;
+  transition: background 0.3s;
+  border: 0px 1px 1px 0px solid rgba(0, 0, 0, 0.85) rgb(240, 240, 240) rgb(240, 240, 240) rgba(0, 0, 0, 0.85);
+}
+
+.style_153 {
+  display: table-row;
+  min-width: 0px;
+  min-height: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_154 {
+  display: table-header-group;
+  min-width: 0px;
+  min-height: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_155 {
+  display: table;
+  min-width: 0px;
+  min-height: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border-radius: 2px 2px 0px 0px;
+  border-top-left-radius: 2px;
+  border-top-right-radius: 2px;
+  border: 1px 0px 0px solid rgb(240, 240, 240) rgba(0, 0, 0, 0.85) rgba(0, 0, 0, 0.85);
+}
+
+.style_156 {
+  min-width: 0px;
+  min-height: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_157 {
+  min-width: 0px;
+  min-height: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 0px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_158 {
+  display: table-cell;
+  min-width: 0px;
+  min-height: 0px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 0px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  text-overflow: clip;
+  border: 0px none rgba(0, 0, 0, 0.85);
+  border-color: rgba(0, 0, 0, 0.85);
+  transition: background 0.3s;
+}
+
+.style_159 {
+  display: table-row;
+  min-width: 0px;
+  min-height: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 0px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_160 {
+  min-width: 0px;
+  min-height: 0px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  text-overflow: clip;
+  border: 1px solid rgb(217, 217, 217);
+  border-style: solid;
+  border-color: rgb(217, 217, 217);
+  border-radius: 2px;
+  background: rgb(255, 255, 255) none repeat scroll 0% 0% / auto padding-box border-box;
+  background-color: rgb(255, 255, 255);
+  transition: 0.3s;
+}
+
+.style_161 {
+  top: 2.8px;
+  right: 0px;
+  bottom: -2.8px;
+  left: 0px;
+  inset-block-start: 2.8px;
+  inset-block-end: -2.8px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_162 {
+  min-width: 0px;
+  min-height: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_163 {
+  display: table-cell;
+  min-width: 0px;
+  min-height: 0px;
+  padding: 12px 8px;
+  padding-inline-start: 8px;
+  padding-inline-end: 8px;
+  padding-block-start: 12px;
+  padding-block-end: 12px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  text-overflow: clip;
+  transition: background 0.3s;
+  border: 0px 1px 1px 0px solid rgba(0, 0, 0, 0.85) rgb(240, 240, 240) rgb(240, 240, 240) rgba(0, 0, 0, 0.85);
+}
+
+.style_164 {
+  display: table-cell;
+  min-width: 0px;
+  min-height: 0px;
+  padding: 12px 8px;
+  padding-inline-start: 8px;
+  padding-inline-end: 8px;
+  padding-block-start: 12px;
+  padding-block-end: 12px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  text-overflow: ellipsis;
+  transition: background 0.3s;
+  border: 0px 1px 1px 0px solid rgba(0, 0, 0, 0.85) rgb(240, 240, 240) rgb(240, 240, 240) rgba(0, 0, 0, 0.85);
+}
+
+.style_165 {
+  min-width: 0px;
+  min-height: 0px;
+  color: rgb(24, 144, 255);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  text-overflow: clip;
+  border: 0px solid rgb(24, 144, 255);
+  border-style: solid;
+  border-color: rgb(24, 144, 255);
+}
+
+.style_166 {
+  color: rgb(27, 118, 255);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  text-overflow: clip;
+  border: 0px solid rgb(27, 118, 255);
+  border-style: solid;
+  border-color: rgb(27, 118, 255);
+}
+
+.style_167 {
+  padding: 0px 7px;
+  padding-inline-start: 7px;
+  padding-inline-end: 7px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgb(27, 118, 255);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  text-overflow: clip;
+  border: 1px solid rgba(0, 0, 0, 0);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0);
+  border-radius: 5px;
+  transition: 0.3s cubic-bezier(0.645, 0.045, 0.355, 1);
+}
+
+.style_168 {
+  display: table;
+  margin: 0px 2px;
+  margin-inline-start: 2px;
+  margin-inline-end: 2px;
+  top: -0.84px;
+  right: 0px;
+  bottom: 0.84px;
+  left: 0px;
+  inset-block-start: -0.84px;
+  inset-block-end: 0.84px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  text-overflow: clip;
+  border: 0px 0px 0px 1px none solid solid rgba(0, 0, 0, 0.85) rgba(0, 0, 0, 0.85) rgba(0, 0, 0, 0.85) rgba(0, 0, 0, 0.06);
+}
+
+.style_169 {
+  color: rgb(237, 111, 111);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  text-overflow: clip;
+  border: 0px solid rgb(237, 111, 111);
+  border-style: solid;
+  border-color: rgb(237, 111, 111);
+}
+
+.style_170 {
+  padding: 0px 7px;
+  padding-inline-start: 7px;
+  padding-inline-end: 7px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgb(237, 111, 111);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  text-overflow: clip;
+  border: 1px solid rgba(0, 0, 0, 0);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0);
+  border-radius: 5px;
+  transition: 0.3s cubic-bezier(0.645, 0.045, 0.355, 1);
+}
+
+.style_171 {
+  min-width: 0px;
+  min-height: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_172 {
+  min-width: 0px;
+  min-height: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  text-overflow: ellipsis;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_173 {
+  display: table-cell;
+  min-width: 0px;
+  min-height: 0px;
+  padding: 12px 8px;
+  padding-inline-start: 8px;
+  padding-inline-end: 8px;
+  padding-block-start: 12px;
+  padding-block-end: 12px;
+  right: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  text-overflow: ellipsis;
+  background: rgb(255, 255, 255) none repeat scroll 0% 0% / auto padding-box border-box;
+  background-color: rgb(255, 255, 255);
+  transition: background 0.3s;
+  border: 0px 1px 1px 0px solid rgba(0, 0, 0, 0.85) rgb(240, 240, 240) rgb(240, 240, 240) rgba(0, 0, 0, 0.85);
+}
+
+.style_174 {
+  display: table-cell;
+  min-width: 0px;
+  min-height: 0px;
+  padding: 12px 8px;
+  padding-inline-start: 8px;
+  padding-inline-end: 8px;
+  padding-block-start: 12px;
+  padding-block-end: 12px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  text-overflow: clip;
+  background: rgb(244, 247, 252) none repeat scroll 0% 0% / auto padding-box border-box;
+  background-color: rgb(244, 247, 252);
+  transition: background 0.3s;
+  border: 0px 1px 1px 0px solid rgba(0, 0, 0, 0.85) rgb(240, 240, 240) rgb(240, 240, 240) rgba(0, 0, 0, 0.85);
+}
+
+.style_175 {
+  display: table-cell;
+  min-width: 0px;
+  min-height: 0px;
+  padding: 12px 8px;
+  padding-inline-start: 8px;
+  padding-inline-end: 8px;
+  padding-block-start: 12px;
+  padding-block-end: 12px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  text-overflow: ellipsis;
+  background: rgb(244, 247, 252) none repeat scroll 0% 0% / auto padding-box border-box;
+  background-color: rgb(244, 247, 252);
+  transition: background 0.3s;
+  border: 0px 1px 1px 0px solid rgba(0, 0, 0, 0.85) rgb(240, 240, 240) rgb(240, 240, 240) rgba(0, 0, 0, 0.85);
+}
+
+.style_176 {
+  display: table-cell;
+  min-width: 0px;
+  min-height: 0px;
+  padding: 12px 8px;
+  padding-inline-start: 8px;
+  padding-inline-end: 8px;
+  padding-block-start: 12px;
+  padding-block-end: 12px;
+  right: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  text-overflow: ellipsis;
+  background: rgb(244, 247, 252) none repeat scroll 0% 0% / auto padding-box border-box;
+  background-color: rgb(244, 247, 252);
+  transition: background 0.3s;
+  border: 0px 1px 1px 0px solid rgba(0, 0, 0, 0.85) rgb(240, 240, 240) rgb(240, 240, 240) rgba(0, 0, 0, 0.85);
+}
+
+.style_177 {
+  min-width: 0px;
+  min-height: 0px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  text-overflow: clip;
+  border: 1px solid rgb(27, 118, 255);
+  border-style: solid;
+  border-color: rgb(27, 118, 255);
+  border-radius: 2px;
+  background: rgb(27, 118, 255) none repeat scroll 0% 0% / auto padding-box border-box;
+  background-color: rgb(27, 118, 255);
+  transition: 0.3s;
+}
+
+.style_178 {
+  display: table-cell;
+  min-width: 0px;
+  min-height: 0px;
+  padding: 12px 8px;
+  padding-inline-start: 8px;
+  padding-inline-end: 8px;
+  padding-block-start: 12px;
+  padding-block-end: 12px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  text-overflow: clip;
+  background: rgb(232, 245, 255) none repeat scroll 0% 0% / auto padding-box border-box;
+  background-color: rgb(232, 245, 255);
+  transition: background 0.3s;
+  border: 0px 1px 1px 0px solid rgba(0, 0, 0, 0.03) rgb(240, 240, 240) rgba(0, 0, 0, 0.03) rgba(0, 0, 0, 0.03);
+}
+
+.style_179 {
+  display: table-cell;
+  min-width: 0px;
+  min-height: 0px;
+  padding: 12px 8px;
+  padding-inline-start: 8px;
+  padding-inline-end: 8px;
+  padding-block-start: 12px;
+  padding-block-end: 12px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  text-overflow: ellipsis;
+  background: rgb(232, 245, 255) none repeat scroll 0% 0% / auto padding-box border-box;
+  background-color: rgb(232, 245, 255);
+  transition: background 0.3s;
+  border: 0px 1px 1px 0px solid rgba(0, 0, 0, 0.03) rgb(240, 240, 240) rgba(0, 0, 0, 0.03) rgba(0, 0, 0, 0.03);
+}
+
+.style_180 {
+  display: table-cell;
+  min-width: 0px;
+  min-height: 0px;
+  padding: 12px 8px;
+  padding-inline-start: 8px;
+  padding-inline-end: 8px;
+  padding-block-start: 12px;
+  padding-block-end: 12px;
+  right: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  text-overflow: ellipsis;
+  background: rgb(232, 245, 255) none repeat scroll 0% 0% / auto padding-box border-box;
+  background-color: rgb(232, 245, 255);
+  transition: background 0.3s;
+  border: 0px 1px 1px 0px solid rgba(0, 0, 0, 0.03) rgb(240, 240, 240) rgba(0, 0, 0, 0.03) rgba(0, 0, 0, 0.03);
+}
+
+.style_181 {
+  display: table-row-group;
+  min-width: 0px;
+  min-height: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_182 {
+  display: table;
+  min-width: 100%;
+  min-height: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+  border-radius: 2px 2px 0px 0px;
+  border-top-left-radius: 2px;
+  border-top-right-radius: 2px;
+}
+
+.style_183 {
+  min-width: 0px;
+  min-height: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+  overflow: hidden;
+}
+
+.style_184 {
+  min-width: 0px;
+  min-height: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px 0px 1px 1px solid rgba(0, 0, 0, 0.85) rgba(0, 0, 0, 0.85) rgb(240, 240, 240) rgb(240, 240, 240);
+}
+
+.style_185 {
+  min-width: 0px;
+  min-height: 0px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+  border-radius: 2px;
+  background: rgb(255, 255, 255) none repeat scroll 0% 0% / auto padding-box border-box;
+  background-color: rgb(255, 255, 255);
+  overflow: hidden;
+}
+
+.style_186 {
+  margin: 0px 8px 0px 0px;
+  margin-inline-end: 8px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_187 {
+  min-width: 0px;
+  min-height: 0px;
+  margin: 1px 0px 0px;
+  padding: 0px 6px;
+  margin-block-start: 1px;
+  padding-inline-start: 6px;
+  padding-inline-end: 6px;
+  color: rgb(255, 255, 255);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgb(255, 255, 255);
+  border-style: solid;
+  border-color: rgb(255, 255, 255);
+}
+
+.style_188 {
+  min-width: 24px;
+  margin: 0px 4px;
+  margin-inline-start: 4px;
+  margin-inline-end: 4px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px none rgba(0, 0, 0, 0.85);
+  border-color: rgba(0, 0, 0, 0.85);
+  border-radius: 2px;
+  background: rgb(27, 118, 255) linear-gradient(rgb(48, 243, 234) 0%, rgb(27, 118, 255) 100%) repeat scroll 0% 0% / auto padding-box border-box;
+  background-color: rgb(27, 118, 255);
+  background-image: linear-gradient(rgb(48, 243, 234) 0%, rgb(27, 118, 255) 100%);
+}
+
+.style_189 {
+  min-width: 0px;
+  min-height: 0px;
+  top: 0px;
+  right: 28px;
+  bottom: 0px;
+  left: 7px;
+  inset-inline-start: 7px;
+  inset-inline-end: 28px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_190 {
+  padding: 0px 21px 0px 0px;
+  padding-inline-end: 21px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: ellipsis;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+  transition: 0.3s;
+}
+
+.style_191 {
+  min-width: 0px;
+  min-height: 0px;
+  padding: 0px 7px;
+  padding-inline-start: 7px;
+  padding-inline-end: 7px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 1px solid rgb(217, 217, 217);
+  border-style: solid;
+  border-color: rgb(217, 217, 217);
+  border-radius: 2px;
+  background: rgb(255, 255, 255) none repeat scroll 0% 0% / auto padding-box border-box;
+  background-color: rgb(255, 255, 255);
+  transition: 0.3s cubic-bezier(0.645, 0.045, 0.355, 1);
+}
+
+.style_192 {
+  min-width: 0px;
+  min-height: 0px;
+  color: rgb(206, 206, 205);
+  font-size: 12px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgb(206, 206, 205);
+  border-style: solid;
+  border-color: rgb(206, 206, 205);
+  transition: transform 0.3s;
+}
+
+.style_193 {
+  min-width: 0px;
+  min-height: 0px;
+  margin: -6px 0px 0px;
+  margin-block-start: -6px;
+  top: 12px;
+  right: 11px;
+  bottom: 6px;
+  left: 66.3906px;
+  inset-inline-start: 66.3906px;
+  inset-inline-end: 11px;
+  inset-block-start: 12px;
+  inset-block-end: 6px;
+  color: rgb(206, 206, 205);
+  font-size: 12px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-overflow: clip;
+  border: 0px solid rgb(206, 206, 205);
+  border-style: solid;
+  border-color: rgb(206, 206, 205);
+}
+
+.style_194 {
+  margin: 0px 0px 0px 2px;
+  margin-inline-start: 2px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_195 {
+  gap: 8px normal;
+  min-width: 0px;
+  min-height: 0px;
+  margin: 10px 0px 0px;
+  margin-block-start: 10px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_196 {
+  min-width: 0px;
+  min-height: 0px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+  transition: opacity 0.3s;
+}
+
+.style_197 {
+  min-width: 0px;
+  min-height: 0px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_198 {
+  clear: both;
+  min-width: 0px;
+  min-height: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+  border-radius: 2px;
+  background: rgb(255, 255, 255) none repeat scroll 0% 0% / auto padding-box border-box;
+  background-color: rgb(255, 255, 255);
+}
+
+.style_199 {
+  min-width: 0px;
+  min-height: 0px;
+  padding: 15px 16px 6px;
+  padding-inline-start: 16px;
+  padding-inline-end: 16px;
+  padding-block-start: 15px;
+  padding-block-end: 6px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+  background: rgb(255, 255, 255) none repeat scroll 0% 0% / auto padding-box border-box;
+  background-color: rgb(255, 255, 255);
+}
+
+.style_200 {
+  margin: 0px 0px 16px;
+  margin-block-end: 16px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_201 {
+  min-width: 0px;
+  min-height: 1214px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_202 {
+  margin: 8px 0px 0px;
+  padding: 0px 15px;
+  margin-block-start: 8px;
+  padding-inline-start: 15px;
+  padding-inline-end: 15px;
+  top: 0px;
+  right: 0px;
+  bottom: 0px;
+  left: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_203 {
+  min-height: 100%;
+  margin: 0px 0px 0px 1px;
+  margin-inline-start: 1px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_204 {
+  min-height: 100%;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_205 {
+  min-width: 0px;
+  min-height: 100%;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+  background: rgba(0, 0, 0, 0) linear-gradient(rgb(239, 244, 253) 0%, rgb(248, 249, 250) 100%) repeat scroll 0% 0% / auto padding-box border-box;
+  background-image: linear-gradient(rgb(239, 244, 253) 0%, rgb(248, 249, 250) 100%);
+}
+
+.style_206 {
+  min-width: 0px;
+  min-height: 0px;
+  top: 8px;
+  right: 0px;
+  bottom: 1301px;
+  left: 0px;
+  inset-block-start: 8px;
+  inset-block-end: 1301px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_207 {
+  min-width: 0px;
+  min-height: 0px;
+  top: 0px;
+  right: 0px;
+  bottom: 1309px;
+  left: 0px;
+  inset-block-end: 1309px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+}
+
+.style_208 {
+  min-width: 0px;
+  min-height: 0px;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+  text-align: start;
+  text-overflow: clip;
+  border: 0px solid rgba(0, 0, 0, 0.85);
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.85);
+  background: rgb(255, 255, 255) none repeat scroll 0% 0% / auto padding-box border-box;
+  background-color: rgb(255, 255, 255);
+  overflow: hidden;
+}
+
+html,
+body {
+  overflow-y: hidden;
+}
