@@ -338,7 +338,6 @@ h1, h2, h3, h4 { margin: 0; font-weight: 600; }
   border-radius: var(--r-lg);
   padding: 16px;
   box-shadow: var(--sh-card);
-  display: flex; flex-direction: column; min-height: 0; /* 行内多卡等高：填满栅格单元格 */
 }
 .nc-card.is-flush { padding: 0; overflow: hidden; display: flex; flex-direction: column; min-height: 0; }
 .nc-card-hd { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 0 0 12px; }
@@ -347,7 +346,7 @@ h1, h2, h3, h4 { margin: 0; font-weight: 600; }
 }
 .nc-card-hd h3 { font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
 .nc-card-hd .nc-card-hd-extra { margin-left: auto; display: flex; align-items: center; gap: 8px; }
-.nc-card-bd { padding-top: 12px; flex: 1 1 auto; min-height: 0; overflow: auto; } /* 等高行内填充剩余高度；内容超长时卡内滚动 */
+.nc-card-bd { padding-top: 12px; }
 .nc-card-hd + .nc-card-bd { padding-top: 4px; }  /* 头体合计 16px，符合间距标尺 */
 .nc-card.is-flush .nc-card-bd { padding: 14px 16px; }
 .nc-sec-title {
@@ -3144,6 +3143,13 @@ tr.is-warn-row td, tr.is-danger-row td, tr.trig-hit td,
 /* 「更多 ⋯」菜单项较多时（合同管理 10 项）内部滚动，避免浮层超出视口 */
 .nc-opmenu { max-height: min(62vh, 380px); overflow-y: auto; }
 
+/* ---------------- 表格行高整齐（末置覆盖） ----------------
+   列表主/副行统一单行省略：长名称换行会把个别行撑高，整张表看着毛糙。
+   完整文本由 title 提示与详情抽屉承载。 */
+.nc-ellip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+/* 表格内容一律单行，避免单元格文字自己换行导致行高参差（副行用 .nc-ellip 另行省略） */
+.nc-tbl tbody td { line-height: 1.5; }
+
 /* ==========================================================================
    新建合同向导 · 版式重构（contract-new）
    --------------------------------------------------------------------------
@@ -3244,5 +3250,20 @@ tr.is-warn-row td, tr.is-danger-row td, tr.trig-hit td,
   .nc-clause-list { grid-template-columns: 1fr; }
   .nc-chain2 { flex-wrap: wrap; }
   .nc-chain2 .nc-cnode { flex: 0 0 auto; }
+}
+
+/* ==========================================================================
+   整页滚动的列表页（合同管理 / 项目列表）· 去掉卡内滚动条
+   --------------------------------------------------------------------------
+   这两页不进 FIXED_PAGES，期望「整页滚动」。但 .nc-page 是 flex 列容器，
+   默认 flex-shrink:1 —— 内容比可视区高时，浏览器先压缩卡片（实测 588px 装
+   762px 的表），表体宿主随即被挤矮，于是卡内又冒出纵向滚动条，页面反而不滚。
+   所以这里必须连卡片一起按内容撑开，纵向滚动才能交回 .nc-page。
+   （只放开表体不够：卡自身一被压缩，内容就会溢出被 .nc-card 的 overflow:hidden 裁掉。）
+   ========================================================================== */
+.nc-page:not(.is-fixed) > .nc-card.is-flush:has(> .nc-tbl-host),
+.nc-page:not(.is-fixed) > .nc-card.is-flush:has(> .nc-tbl-host) > .nc-tbl-host,
+.nc-page:not(.is-fixed) > .nc-card.is-flush:has(> .nc-tbl-host) > .nc-tbl-host > .nc-tbl-wrap {
+  flex: 0 0 auto;
 }
 

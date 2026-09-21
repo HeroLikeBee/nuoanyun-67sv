@@ -43,10 +43,16 @@ const ROUTE = defineHashPageRoute(
  * 列表型页面：内容区视口锁定 —— 页头 / 瓦片 / 页签 / 筛选固定不动，
  * 表格卡吃满剩余高度并在卡内局部滚动，分页脚常驻卡底。
  * 驾驶舱、详情、工作台与向导页内容较长，保持整页滚动。
+ *
+ * 例外：合同管理 / 项目列表 改为整页滚动（不进此集合）。
+ * 原因是这两页的表体在视口锁定下只剩 530~550px，10 行数据里有一半要滚才能看到；
+ * 整页滚动后表体不再自带滚动条，一屏能看完当前页。
+ * 配套样式见 style.css 末尾「整页滚动的列表页」覆盖块——那里把这两页的列表卡
+ * 设为按内容撑开，否则卡片仍会被 flex 压缩、卡内又冒出滚动条。
  */
 const FIXED_PAGES = new Set([
-  'customer', 'opp', 'quote', 'bid', 'cert', 'doc', 'contract',
-  'project', 'approval', 'supplier', 'material', 'device', 'invoice',
+  'customer', 'opp', 'quote', 'bid', 'cert', 'doc',
+  'approval', 'supplier', 'material', 'device', 'invoice',
 ]);
 
 type GoFn = (pageId: string) => void;

@@ -712,7 +712,7 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
           )}
           {src === 'std' && (
             <div className="nc-form-grid">
-              <Field label="选择模板" req note="来源：系统管理 → 模板库（标准 = 全局）">
+              <Field label="选择模板" req span={2} note="来源：系统管理 → 模板库（标准 = 全局）">
                 <select className="nc-input"><option>消防维护保养服务合同（标准模板）V2</option><option>消防工程施工合同（标准模板）V1</option></select>
               </Field>
             </div>
@@ -1317,7 +1317,7 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
         </div>
         <div className="nc-cell-sub" style={{ marginBottom: 6 }}>仅「已审批 / 已转化」报价单可导入；勾选后逐张导入为合同明细行（金额、备注可继续在下方编辑）。</div>
         <table className="nc-tbl is-cols" style={{ minWidth: 640 }}>
-          <thead><tr><th style={{ width: '5%' }} className="is-center">选择</th><th style={{ width: '17%' }}>报价单号</th><th style={{ width: '18%' }}>客户</th><th style={{ width: '24%' }}>名称</th><th style={{ width: '20%' }} className="is-num">金额（元）</th><th style={{ width: '16%' }} className="is-center">状态</th></tr></thead>
+          <thead><tr><th style={{ width: '8%' }} className="is-center">选择</th><th style={{ width: '18%' }}>报价单号</th><th style={{ width: '17%' }}>客户</th><th style={{ width: '23%' }}>名称</th><th style={{ width: '20%' }} className="is-num">金额（元）</th><th style={{ width: '14%' }} className="is-center">状态</th></tr></thead>
           <tbody>
             {qList.map((q) => {
               const on = qSel.includes(q.id);

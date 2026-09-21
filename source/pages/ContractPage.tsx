@@ -100,40 +100,48 @@ export default function ContractPage({ go, role, nav }: { go: (p: string) => voi
   const daysLeft = (d: string) => Math.round((new Date(d).getTime() - new Date(TODAY).getTime()) / 86400000);
   const overdueCnt = contracts.filter((c) => c.overdue).length;
   const overpayCnt = contracts.filter((c) => c.overpay).length;
+  /* 金额口径概览（KPI 卡）：执行金额合计 / 已收 / 待收 / 逾期未收 */
+  const sumExec = contracts.reduce((s, c) => s + c.execAmt, 0);
+  const sumRecv = contracts.reduce((s, c) => s + c.recv, 0);
+  const openRecv = Math.max(sumExec - sumRecv, 0);
+  const overdueAmt = contracts.filter((c) => c.overdue).reduce((s, c) => s + Math.max(c.execAmt - c.recv, 0), 0);
+  const recvRate = sumExec ? Math.round((sumRecv / sumExec) * 100) : 0;
 
   const cols = [
     {
-      key: 'id', title: '编号', width: 150, sticky: 'left' as const,
+      key: 'id', title: '编号', width: 136, sticky: 'left' as const,
       render: (c: C) => (
         <div className="nc-cell-main">
           {/* 编号可点击 → 蓝色，点击打开本行详情（与整行点击一致，全站统一） */}
           <IdCell onClick={() => openDetail(c)} title="查看合同详情">{c.id}</IdCell>
-          {c.renewedTo && <div className="nc-cell-sub">续签 → {c.renewedTo}</div>}
+          {c.renewedTo && <div className="nc-cell-sub nc-ellip" title={`续签 → ${c.renewedTo}`}>续签 → {c.renewedTo}</div>}
           {!c.renewedTo && c.sub && <div className="nc-cell-sub">子合同</div>}
         </div>
       ),
     },
     {
-      key: 'name', title: '名称 / 相对方', width: 280,
+      /* 名称走单行省略（完整名称在详情抽屉 / title 提示）：每行固定「主行 + 相对方副行」，
+         行高才整齐；否则长名换行会把个别行撑高、整张表看起来毛糙。 */
+      key: 'name', title: '名称 / 相对方', width: 226,
       render: (c: C) => (
         <div className="nc-cell-main">
-          <div>{c.name}</div>
-          <div className="nc-cell-sub">{(() => { const cid = CUSTOMERS.find((x) => x.name === c.party || c.party.includes(x.name))?.id; return cid ? <EntityLink target="customer" id={cid} go={go} title="下钻到客户档案">{c.party}</EntityLink> : c.party; })()}</div>
+          <div className="nc-ellip" title={c.name}>{c.name}</div>
+          <div className="nc-cell-sub nc-ellip">{(() => { const cid = CUSTOMERS.find((x) => x.name === c.party || c.party.includes(x.name))?.id; return cid ? <EntityLink target="customer" id={cid} go={go} title="下钻到客户档案">{c.party}</EntityLink> : c.party; })()}</div>
         </div>
       ),
     },
     {
-      key: 'type', title: '类型', width: 96,
+      key: 'type', title: '类型', width: 108,
       render: (c: C) => <Tag tone={TYPE_TONE[c.type] ?? 'gray'}>{c.type}</Tag>,
     },
     {
-      key: 'project', title: '关联项目', width: 140,
+      key: 'project', title: '关联项目', width: 114,
       render: (c: C) => (c.project
-        ? <div className="nc-cell-main"><EntityLink target="project-center" id={c.project} go={go} title="下钻到项目经营中心"><Code>{c.project}</Code></EntityLink><div className="nc-cell-sub">{PROJECTS.find((p) => p.id === c.project)?.name.slice(0, 12) ?? ''}</div></div>
+        ? <div className="nc-cell-main"><EntityLink target="project-center" id={c.project} go={go} title="下钻到项目经营中心"><Code>{c.project}</Code></EntityLink><div className="nc-cell-sub nc-ellip" title={PROJECTS.find((p) => p.id === c.project)?.name ?? ''}>{PROJECTS.find((p) => p.id === c.project)?.name ?? ''}</div></div>
         : <span className="nc-cell-sub">框架（挂子合同）</span>),
     },
     {
-      key: 'amt', title: '金额 → 执行金额', width: 150, align: 'right' as const,
+      key: 'amt', title: '金额 → 执行金额', width: 126, align: 'right' as const,
       render: (c: C) => (
         c.type === '框架协议' && !c.sub
           ? <div className="num">额度 {fmtWan(c.execAmt)}</div>
@@ -146,16 +154,17 @@ export default function ContractPage({ go, role, nav }: { go: (p: string) => voi
       ),
     },
     {
-      key: 'status', title: '状态', width: 110,
+      /* 超付标签下沉到副行：与状态标签并排会把整列顶宽（列宽固定后就会挤到相邻列） */
+      key: 'status', title: '状态', width: 112,
       render: (c: C) => (
         <div className="nc-cell-main">
           <Tag tone={ST_TONE[st(c)] ?? 'gray'}>{st(c)}</Tag>
-          {c.overpay && <Tag tone="red">超付</Tag>}
+          {c.overpay && <div className="nc-cell-sub" style={{ marginTop: 3 }}><Tag tone="red">超付</Tag></div>}
         </div>
       ),
     },
     {
-      key: 'recvPct', title: '收支进度', width: 170,
+      key: 'recvPct', title: '收支进度', width: 132,
       render: (c: C) => (
         <div className="nc-cell-main">
           <div className="nc-cell-sub num">已{['采购合同'].includes(c.type) ? '付' : '收'} <Money v={c.recv} role={role} wan />/<Money v={c.execAmt} role={role} wan /></div>
@@ -171,7 +180,7 @@ export default function ContractPage({ go, role, nav }: { go: (p: string) => voi
        * 结算中→结算），其余（编辑、变更签证、结算、开票、收付款、合同文件、借阅、日志、续签、
        * 终止类）全量收进「更多」，跨行按钮数量与位置不再漂移。
        */
-      key: 'op', title: '操作', width: 210, align: 'right' as const, sticky: 'right' as const,
+      key: 'op', title: '操作', width: 186, align: 'right' as const, sticky: 'right' as const,
       render: (c: C) => {
         const s = st(c);
         const done = TERMINAL.includes(s);
@@ -227,8 +236,38 @@ export default function ContractPage({ go, role, nav }: { go: (p: string) => voi
     <>
       <PageHead
         title="合同管理"
+        sub={`共 ${contracts.length} 份 · 履约中 ${contracts.filter((c) => st(c) === '履约中').length} 份 · 逾期未收 ${overdueCnt} 份`}
         actions={<Btn kind="primary" onClick={() => go('contract-new')}><Ico n="plus" size={14} /> 新建合同</Btn>}
       />
+
+      {/* 金额概览 5 卡（执行口径；卡即筛选入口，与投标 / 项目页同一套瓦片） */}
+      <div className="nc-tiles nc-tiles-5">
+        <div className="nc-tile is-clickable" title="口径：执行金额合计（含子合同额度）" onClick={() => { setTab('全部'); setQuick('全部状态'); setPage(1); }}>
+          <div className="nc-tile-value num"><Money v={sumExec} role={role} wan /></div>
+          <div className="nc-tile-label">合同总额</div>
+          <div className="nc-tile-sub">执行金额口径 · {contracts.length} 份</div>
+        </div>
+        <div className="nc-tile is-clickable" title="口径：累计已收（采购合同为已付）" onClick={() => { setTab('全部'); setQuick('全部状态'); setPage(1); }}>
+          <div className="nc-tile-value num nc-v-green"><Money v={sumRecv} role={role} wan /></div>
+          <div className="nc-tile-label">已收款</div>
+          <div className="nc-tile-sub">回款率 {recvRate}%</div>
+        </div>
+        <div className="nc-tile is-clickable" title="口径：执行金额 − 累计已收" onClick={() => { setTab('全部'); setQuick('全部状态'); setPage(1); }}>
+          <div className="nc-tile-value num"><Money v={openRecv} role={role} wan /></div>
+          <div className="nc-tile-label">待收款</div>
+          <div className="nc-tile-sub">占总 {100 - recvRate}%</div>
+        </div>
+        <div className="nc-tile is-clickable" title="口径：已过收款计划日且未收齐" onClick={() => { setTab('收款逾期'); setQuick('全部状态'); setPage(1); }}>
+          <div className="nc-tile-value num nc-v-red">{overdueCnt}</div>
+          <div className="nc-tile-label">收款逾期</div>
+          <div className="nc-tile-sub">涉及未收 <Money v={overdueAmt} role={role} wan /> · 点击直达</div>
+        </div>
+        <div className="nc-tile is-clickable" title="口径：累计已收 > 执行金额" onClick={() => { setTab('全部'); setQuick('超付预警'); setPage(1); }}>
+          <div className="nc-tile-value num nc-v-orange">{overpayCnt}</div>
+          <div className="nc-tile-label">超付预警</div>
+          <div className="nc-tile-sub">已收超执行金额 · 点击直达</div>
+        </div>
+      </div>
 
       {/* ---- 页面级 Tab（计数徽标；行动项页签有积压时亮红） ---- */}
       <div className="nc-ltabs">
@@ -268,7 +307,7 @@ export default function ContractPage({ go, role, nav }: { go: (p: string) => voi
       {/* ---- 表格白卡（与其他列表页同一容器：卡头/筛选固定 · 表体局部滚动 · 分页脚吸底） ---- */}
       <Card flush>
         <DataTable
-          cols={cols} rows={paged} rowKey={(c) => c.id} minWidth={1420}
+          cols={cols} rows={paged} rowKey={(c) => c.id} minWidth={1120}
           /* 条目背景色统一：逾期 / 超付不再整行铺色，改由行内标签承担 */
           onRowClick={(c) => openDetail(c)}
           empty="没有符合条件的合同"

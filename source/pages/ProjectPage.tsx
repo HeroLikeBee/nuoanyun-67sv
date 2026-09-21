@@ -3,10 +3,11 @@
 // 状态机：初谈 → 已报价 → 待签（商机段，仅此三态可转合同）→ 待启动 → 实施中 → 待验收 → 已完工；旁路终态：甩置 / 丢单
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Alert, Banner, Btn, Card, DataTable, EntityLink, IdCell, ListToolbar, Modal, Money, Op, OpSep, PageHead,
-  TableFoot, Tag, useToast, Code, Progress, Field,
+  Alert, Banner, Btn, Card, Code, DataTable, EntityLink, IdCell, Modal, Money, Op, OpMore, OpNone, PageHead,
+  TableFoot, Tag, useToast, Progress, Field,
 } from '../components/ui';
-import { CUSTOMERS, PROJECTS, OPPS, OPP_STAGE_PROB, PROJECT_SOURCES, fmt, fmtWan, TODAY } from '../components/data';
+import type { OpMoreItem } from '../components/ui';
+import { BIDS, CONTRACTS, CUSTOMERS, OPPS, OPP_STAGE_PROB, PROJECTS, PROJECT_SOURCES, QUOTES, fmt, TODAY } from '../components/data';
 import { getProjects, setFocus, subscribeStore } from '../components/store';
 import { Ico } from '../components/icons';
 
@@ -33,7 +34,21 @@ type Row = {
   src: 'opp' | 'proj'; type: string;
 };
 
-const TYPES = ['新建', '改造', '维护保养'] as const;
+/* 项目类型：含「检测」（PROJECTS 里有检测类项目，原列表漏了这一档，筛「检测」会命中 0） */
+const TYPES = ['新建', '改造', '维护保养', '检测'] as const;
+/** 跨段的快捷视图 chips（阶段明细走带计数的下拉） */
+const QUICK_VIEWS = [
+  { key: 'all', label: '全部' },
+  { key: 'pipe', label: '在谈管道' },
+  { key: 'delivery', label: '履约中' },
+  { key: 'stale', label: '逾期跟进' },
+] as const;
+
+/* 上游单据一律从 BIDS / QUOTES / CONTRACTS 真实数据反查，不再写死示例编号。
+   原先所有项目共用同一个合同号（'HT20260912-0009'）、报价单号是拼出来的 'BJ2026000x'，
+   列表看起来像假数据，也让「证书配备 / 合同号」列失真。 */
+const contractOfProject = (pid: string) => CONTRACTS.find((c) => c.project === pid)?.id ?? null;
+const quoteOfCustomer = (cid?: string) => QUOTES.filter((q) => cid && q.customerId === cid).sort((a, b) => b.date.localeCompare(a.date))[0];
 
 /* PROJECTS（履约段）→ 统一行：已立项=待启动 / 执行中=实施中·待验收 / 已结项=已完工
    G1 跨页 Q18：改为按传入的项目列表构建，新增项目后可重建行，而非常量快照。 */
@@ -41,7 +56,10 @@ const buildProjRows = (list: (typeof PROJECTS)[number][]): Row[] => list.map((p)
   const stage = p.status === '已立项' ? '待启动'
     : p.status === '已结项' ? '已完工'
       : p.milestoneName === '待验收' ? '待验收' : '实施中';
-  const quoteNo = p.source === '投标中标' ? 'TB000038' : p.source === '报价转化' ? 'BJ20260908-0007' : null;
+  /* 上游单据按来源取真实单据：投标中标 → 中标投标单；报价转化 → 报价单；其余无上游 */
+  const upNo = p.source === '投标中标'
+    ? BIDS.find((b) => p.customerId && b.customerId === p.customerId)?.id
+    : p.source === '报价转化' ? quoteOfCustomer(p.customerId)?.id : undefined;
   const need = p.type === '新建' ? 4 : p.type === '改造' ? 3 : 2;
   const got = p.risk === 'overcost' ? need - 1 : need;
   /* 行业：项目主数据无该字段，按 customerId 反查客户档案派生（对齐参考《项目管理》行业筛选） */
@@ -49,22 +67,26 @@ const buildProjRows = (list: (typeof PROJECTS)[number][]): Row[] => list.map((p)
   return {
     id: p.id, name: p.name, customer: p.customer, customerId: p.customerId, industry: cus?.industry ?? '其他', region: `云南 · ${cus?.region ?? '昆明'}`,
     owner: p.owner, stage, amt: p.contractAmt, signDate: p.start,
-    quote: quoteNo ? { no: quoteNo, st: '已确认' } : null,
-    contract: p.contractAmt ? 'HT20260912-0009' : null,
+    quote: upNo ? { no: upNo, st: p.source } : null,
+    contract: contractOfProject(p.id),
     certs: { have: got, lack: Math.max(need - got, 0) },
     last: TODAY, lastDays: 0, src: 'proj', type: p.type,
   };
 });
 
 /* OPPS（在谈段 + 终态）→ 统一行 */
-const oppRows: Row[] = (OPPS as unknown as (typeof OPPS)[number][]).map((o) => ({
-  id: o.id, name: o.name, customer: o.customer, customerId: o.customerId, industry: o.industry, region: '云南 · 昆明',
-  owner: o.owner, stage: o.stage, amt: o.amt, signDate: o.signDate,
-  quote: o.quotes ? { no: `BJ2026${String(o.quotes).padStart(4, '0')}`, st: ['推进中'].includes(o.stage) ? '未报价' : ['重点', '甲方立项确认'].includes(o.stage) ? '待确认' : '已确认' } : null,
-  contract: ['已中标'].includes(o.stage) ? 'HT-已签' : null,
-  certs: { have: 0, lack: ['已中标'].includes(o.stage) ? 2 : 0 },
-  last: o.last, lastDays: o.lastDays, src: 'opp', type: o.type,
-}));
+const oppRows: Row[] = (OPPS as unknown as (typeof OPPS)[number][]).map((o) => {
+  const q0 = QUOTES.find((q) => q.opp === o.id);
+  const ct = o.stage === '已中标' ? CONTRACTS.find((c) => o.customerId && c.party === o.customer)?.id ?? null : null;
+  return {
+    id: o.id, name: o.name, customer: o.customer, customerId: o.customerId, industry: o.industry, region: '云南 · 昆明',
+    owner: o.owner, stage: o.stage, amt: o.amt, signDate: o.signDate,
+    quote: q0 ? { no: q0.id, st: q0.status } : null,
+    contract: ct,
+    certs: { have: 0, lack: ct ? 2 : 0 },
+    last: o.last, lastDays: o.lastDays, src: 'opp', type: o.type,
+  };
+});
 
 const canToContract = (s: string) => PIPE.includes(s);
 const pipeAmt = (rows: Row[]) => rows.filter((r) => PIPE.includes(r.stage)).reduce((s, r) => s + r.amt, 0);
@@ -89,7 +111,8 @@ export default function ProjectPage({ go, role, nav }: { go: (p: string) => void
   const [toCt, setToCt] = useState<Row | null>(null);
   const [lossOpen, setLossOpen] = useState<Row | null>(null);
   const [followOpen, setFollowOpen] = useState<Row | null>(null);
-  const [onlyStale, setOnlyStale] = useState(false);
+  /* 「逾期跟进」不再用独立的 onlyStale 隐藏态：统一走 stage='stale'，避免出现
+     「下拉显示全部、结果却仍被隐藏筛选过滤」的不可见状态。 */
   /* Q4：里程碑推进 · 验收类节点强制三件套
      原实现只要 stage === '待验收' 就无条件 return，节点永远推不动（流程断头）。
      改为逐项校验：齐备则放行，缺件则列出具体缺失项，用户补齐后即可推进。 */
@@ -123,7 +146,6 @@ export default function ProjectPage({ go, role, nav }: { go: (p: string) => void
       if (stage === 'stale') return !TERMINAL.includes(r.stage) && r.lastDays > 14;
       return r.stage === stage;
     });
-    if (onlyStale) list = list.filter((r) => !TERMINAL.includes(r.stage) && r.lastDays > 14);
     list = list.filter((r) => {
       if (type && r.type !== type) return false;
       if (industry && r.industry !== industry) return false;
@@ -135,55 +157,74 @@ export default function ProjectPage({ go, role, nav }: { go: (p: string) => void
       const x = a.signDate || '9999-99-99'; const y = b.signDate || '9999-99-99';
       return sortAsc ? x.localeCompare(y) : y.localeCompare(x);
     });
-  }, [stage, type, industry, owner, kw, sortAsc, onlyStale]);
+    // ALL 必须进依赖：新建项目写入 store 后 ALL 会重建，列表筛选结果要跟着刷新
+  }, [ALL, stage, type, industry, owner, kw, sortAsc]);
 
   const paged = rows.slice((page - 1) * pageSize, page * pageSize);
   const setStateAll = () => { setStage('all'); setPage(1); };
 
+  /** 打开项目（经营中心）。商机段也应跳项目详情，而不是回商机管理页 */
+  const openProject = (r: Row) => { setFocus('project-center', r.id); go('project-center'); };
+  /** 里程碑推进仅对「履约段 + 项目来源」的行可用（商机行还没有交付里程碑） */
+  const canMile = (r: Row) => DELIVERY.includes(r.stage) && r.src === 'proj';
+
   const cols = [
-    { key: 'id', title: '项目编号', width: 130, sticky: 'left' as const,
+    { key: 'id', title: '项目编号', width: 136, sticky: 'left' as const,
       /* G7：编号列统一走 IdCell —— 可点击时蓝色（点击穿透到项目经营中心），不可点击时保持中性灰 */
       render: (r: Row) => (
-        <IdCell onClick={() => { setFocus('project-center', r.id); go('project-center'); }} title="打开项目经营中心">{r.id}</IdCell>
+        <IdCell onClick={() => openProject(r)} title="打开项目经营中心">{r.id}</IdCell>
       ) },
     {
-      key: 'name', title: '项目名称 · 客户', width: 260,
+      /* 名称 / 客户 · 行业 压成两行 + 单行省略：与合同页「名称 / 相对方」列版式一致，
+         行高不再因为长名换行而参差；完整名称见 title 提示与项目经营中心。 */
+      key: 'name', title: '项目名称 · 客户', width: 236,
       render: (r: Row) => (
         <div className="nc-cell-main">
-          <div><Ico n="star" size={16} /> {r.name}{TERMINAL.includes(r.stage) && <Tag tone={r.stage === '关闭' ? 'red' : 'gray'}>{r.stage}</Tag>}</div>
-          <div className="nc-cell-sub"><EntityLink target="customer" id={r.customerId} go={go} title="下钻到客户档案">{r.customer}</EntityLink> · {r.industry}</div>
+          <div className="nc-ellip" title={r.name}>{r.name}</div>
+          <div className="nc-cell-sub nc-ellip">
+            <EntityLink target="customer" id={r.customerId} go={go} title="下钻到客户档案">{r.customer}</EntityLink>
+            {` · ${r.industry}`}
+          </div>
         </div>
       ),
     },
-    { key: 'owner', title: '负责人', width: 90, render: (r: Row) => <span><span className="nc-avatar">{r.owner[0]}</span> {r.owner}</span> },
+    { key: 'owner', title: '负责人', width: 88, render: (r: Row) => <span><span className="nc-avatar">{r.owner[0]}</span> {r.owner}</span> },
     {
-      key: 'stage', title: '状态', width: 110,
-      render: (r: Row) => (
-        <div className="nc-cell-main">
-          <Tag tone={ST_TONE[r.stage] ?? 'gray'} pill>{r.stage}</Tag>
-          {PIPE.includes(r.stage) && <div className="nc-cell-sub num">成交概率 {(OPP_STAGE_PROB as Record<string, number>)[r.stage]}%</div>}
-          {r.contract && <div className="nc-cell-sub num">{r.contract}</div>}
-        </div>
-      ),
+      /* 状态标签 + 单据副行（已签约→合同号 / 在谈→报价单号 + 报价状态 / 无单据→成交概率）
+         原「报价单」独立列并入这里，省掉一整列。 */
+      key: 'stage', title: '状态 / 单据', width: 130,
+      render: (r: Row) => {
+        const signed = r.stage === '已中标' || DELIVERY.includes(r.stage);
+        return (
+          <div className="nc-cell-main">
+            <Tag tone={ST_TONE[r.stage] ?? 'gray'} pill>{r.stage}</Tag>
+            {signed
+              ? (r.contract
+                ? <div className="nc-cell-sub nc-ellip" title={`已签合同 ${r.contract}`}><Code>{r.contract}</Code></div>
+                : <div className="nc-cell-sub">合同待建</div>)
+              : r.quote
+                ? <div className="nc-cell-sub nc-ellip" title={`${r.quote.no} · ${r.quote.st}`}><EntityLink target="quote-detail" id={r.quote.no} go={go} title="下钻到报价详情"><Code>{r.quote.no}</Code></EntityLink> {r.quote.st}</div>
+                : PIPE.includes(r.stage)
+                  ? <div className="nc-cell-sub num">成交概率 {(OPP_STAGE_PROB as Record<string, number>)[r.stage]}%</div>
+                  : <div className="nc-cell-sub">无上游单据</div>}
+          </div>
+        );
+      },
     },
     {
-      key: 'amt', title: '预计 / 合同金额', width: 130, align: 'right' as const,
-      render: (r: Row) => (r.amt ? <b className="num"><Money v={r.amt} role={role} /></b> : <span className="nc-v-orange">未填</span>),
+      /* 金额 + 加权金额副行（原「加权金额」独立列并入），省掉一整列 */
+      key: 'amt', title: '预计 / 合同金额', width: 134, align: 'right' as const,
+      render: (r: Row) => (!r.amt
+        ? <span className="nc-v-orange">未填</span>
+        : (
+          <div className="nc-cell-main">
+            <b className="num"><Money v={r.amt} role={role} /></b>
+            {PIPE.includes(r.stage) && <div className="nc-cell-sub num">加权 <Money v={weighted(r)} role={role} wan /></div>}
+          </div>
+        )),
     },
     {
-      key: 'wt', title: '加权金额', width: 120, align: 'right' as const,
-      render: (r: Row) => (PIPE.includes(r.stage)
-        ? <div className="nc-cell-main"><Money v={weighted(r)} role={role} wan /><div className="nc-cell-sub num">×{(OPP_STAGE_PROB as Record<string, number>)[r.stage]}%</div></div>
-        : <span className="nc-cell-sub">—</span>),
-    },
-    {
-      key: 'quote', title: '报价单', width: 130,
-      render: (r: Row) => (r.quote
-        ? <div className="nc-cell-main"><EntityLink target="quote-detail" id={r.quote.no} go={go} title="下钻到报价详情">{r.quote.no}</EntityLink><div className="nc-cell-sub">{r.quote.st}</div></div>
-        : <span className="nc-cell-sub">未报价</span>),
-    },
-    {
-      key: 'cert', title: '证书配备', width: 120,
+      key: 'cert', title: '证书配备', width: 104,
       render: (r: Row) => (r.contract
         ? (r.certs.lack > 0
           ? <div className="nc-cell-main"><span className="nc-gap-b is-lack">缺口 {r.certs.lack}</span><div className="nc-cell-sub"><Op onClick={() => go('cert')}>去配备 →</Op></div></div>
@@ -191,43 +232,54 @@ export default function ProjectPage({ go, role, nav }: { go: (p: string) => void
         : <span className="nc-cell-sub">未签约</span>),
     },
     {
+      /* 签约日 + 最近跟进（原「最近跟进」独立列并入）：两个时间信号同列便于一起扫视 */
       key: 'sign', title: `预计签约日 ${sortAsc ? '↑' : '↓'}`, width: 120,
       render: (r: Row) => {
-        if (!r.signDate) return <span className="nc-cell-sub">—</span>;
-        const d = daysTo(r.signDate) as number;
-        const cls = d < 0 ? 'nc-v-red' : d <= 30 ? 'nc-v-orange' : '';
-        const tip = d < 0 ? `已过 ${-d} 天` : `剩 ${d} 天`;
+        const d = r.signDate ? (daysTo(r.signDate) as number) : null;
+        const cls = d === null ? '' : d < 0 ? 'nc-v-red' : d <= 30 ? 'nc-v-orange' : '';
+        const tip = d === null ? '待定' : d < 0 ? `已过 ${-d} 天` : `剩 ${d} 天`;
         return (
           <div className="nc-cell-main">
-            <span className={'num ' + cls}>{r.signDate}</span>
+            <span className={'num ' + cls}>{r.signDate || '—'}</span>
             <div className={'nc-cell-sub num ' + cls}>{tip}</div>
+            <div className={`nc-cell-sub num${r.lastDays > 14 ? ' nc-v-red' : ''}`}>跟进 {r.lastDays > 0 ? `${r.lastDays} 天前` : '今日'}</div>
           </div>
         );
       },
     },
     {
-      key: 'last', title: '最近跟进', width: 120,
-      render: (r: Row) => (
-        <div className="nc-cell-main">
-          <span className="num">{r.last}</span>
-          <div className={`nc-cell-sub num${r.lastDays > 14 ? ' nc-v-red' : ''}`}>{r.lastDays > 0 ? `${r.lastDays} 天前` : '今日'}</div>
-        </div>
-      ),
-    },
-    {
-      key: 'op', title: '操作', width: 210, align: 'right' as const,
-      render: (r: Row) => (
-        <div className="nc-ops" onClick={(e) => e.stopPropagation()}>
-          <Op onClick={() => {
-            /* G7：商机段不应跳到商机管理页（go('opp')），而应跳项目详情（与参考 HTML `project-detail.html?id=...` 一致） */
-            setFocus('project-center', r.id); go('project-center');
-          }}>详情</Op><OpSep />
-          <Op onClick={() => setFollowOpen(r)}>登记跟进</Op>
-          {canToContract(r.stage) && <><OpSep /><Op gold onClick={() => setToCt(r)}>转合同</Op></>}
-          {canToContract(r.stage) && <><OpSep /><Op danger onClick={() => setLossOpen(r)}>丢单</Op></>}
-          {DELIVERY.includes(r.stage) && r.src === 'proj' && <><OpSep /><Op onClick={() => openMile(r)}>里程碑</Op></>}
-        </div>
-      ),
+      /* 操作列：槽位恒定 —— ① 主操作（在谈→转合同 / 履约→里程碑 / 终态→占位）② 详情 ③ 更多 ⋯。
+         原先按数据可用性拼 1~5 个操作、数量与位置逐行漂移，且不吸右，窄屏要横向滚动才看得到。 */
+      key: 'op', title: '操作', width: 190, align: 'right' as const, sticky: 'right' as const,
+      render: (r: Row) => {
+        const done = TERMINAL.includes(r.stage);
+        const toCt = canToContract(r.stage);
+        const mile = canMile(r);
+
+        /* ① 主操作 */
+        let main: React.ReactNode;
+        if (toCt) main = <Op gold onClick={() => setToCt(r)} title="转为合同，带出报价 / 投标明细">转合同</Op>;
+        else if (mile) main = <Op onClick={() => openMile(r)} title="按里程碑推进交付节点">里程碑</Op>;
+        else main = <OpNone title={done ? `${r.stage} 为终态，无可执行操作` : '常用操作见「更多 ⋯」'} />;
+
+        /* ③ 更多：其余操作全量收口 */
+        const more: OpMoreItem[] = [
+          { label: '打开项目经营中心', onClick: () => openProject(r) },
+          { label: '登记跟进', disabled: done, title: done ? '终态项目不再跟进' : '记录本次沟通结论与下一步动作', onClick: () => setFollowOpen(r) },
+          { label: '里程碑推进', disabled: !mile, title: mile ? '按里程碑推进交付节点' : '仅履约段（项目来源）可推进里程碑', onClick: () => openMile(r) },
+          { label: '转合同', disabled: !toCt, title: toCt ? '带出报价 / 投标明细生成合同草稿' : '仅「在谈」段可转合同', onClick: () => setToCt(r) },
+          { label: '下钻客户档案', disabled: !r.customerId, title: r.customerId ? '打开客户档案' : '该行没有关联客户档案', onClick: () => { if (r.customerId) { setFocus('customer', r.customerId); go('customer'); } } },
+          { label: '丢单 / 甩置', danger: true, disabled: !toCt, title: toCt ? '标记丢单并停止跟进（记录保留）' : '仅「在谈」段可标记丢单', onClick: () => setLossOpen(r) },
+        ];
+
+        return (
+          <div className="nc-ops" onClick={(e) => e.stopPropagation()}>
+            <span className="nc-ops-slot">{main}</span>
+            <Op onClick={() => openProject(r)}>详情</Op>
+            <OpMore items={more} />
+          </div>
+        );
+      },
     },
   ];
 
@@ -235,6 +287,7 @@ export default function ProjectPage({ go, role, nav }: { go: (p: string) => void
     <>
       <PageHead
         title="项目列表"
+        sub={`共 ${ALL.length} 个 · 在谈 ${ALL.filter((r) => PIPE.includes(r.stage)).length} · 履约 ${ALL.filter((r) => DELIVERY.includes(r.stage)).length} · 终态 ${ALL.filter((r) => TERMINAL.includes(r.stage)).length}`}
         actions={<>
           <Btn onClick={() => go('opp')}>＋ 新增商机</Btn>
           <Btn onClick={() => go('project-new')}>从合同新增</Btn>
@@ -243,98 +296,89 @@ export default function ProjectPage({ go, role, nav }: { go: (p: string) => void
       />
 
       {stale.length > 0 && (
-        <Banner tone="warn" actions={<Btn size="sm" onClick={() => { setOnlyStale(true); setPage(1); }}>只看逾期跟进</Btn>}>
+        <Banner tone="warn" actions={<Btn size="sm" onClick={() => { setStage('stale'); setPage(1); }}>只看逾期跟进</Btn>}>
           <Ico n="warning" size={14} style={{ color: 'var(--c-warning-mid)' }} /> <b>跟进提醒：</b>{stale.length} 个项目超过 14 天未跟进
           {noAmt.length > 0 && <> ｜ {noAmt.length} 个在谈项目<b>金额未填</b>，加权金额无法计算</>}
           ｜ 预计签约日 ≤30 天标橙、已过标红。
         </Banner>
       )}
 
+      {/* 概览 4 卡（值在上 / 标签在下，与投标页同一套瓦片版式） */}
       <div className="nc-tiles nc-tiles-4">
-        <button className="nc-tile is-clickable" onClick={() => { setStateAll(); }} title="口径：在谈段 + 履约段合计">
-          <div className="nc-tile-label">项目总数</div>
+        <button className="nc-tile is-clickable" onClick={() => setStateAll()} title="口径：在谈段 + 履约段合计（含终态）">
           <div className="nc-tile-value num">{ALL.length}</div>
-          <div className="nc-tile-sub">在谈 + 履约（含终态）</div>
+          <div className="nc-tile-label">项目总数</div>
+          <div className="nc-tile-sub">在谈 {ALL.filter((r) => PIPE.includes(r.stage)).length} · 履约 {ALL.filter((r) => DELIVERY.includes(r.stage)).length}</div>
         </button>
-        <button className="nc-tile is-clickable" onClick={() => { setStage('pipe'); setPage(1); }} title="口径：初谈 + 已报价 + 待签 金额合计">
-          <div className="nc-tile-label">在谈管道金额</div>
+        <button className="nc-tile is-clickable" onClick={() => { setStage('pipe'); setPage(1); }} title="口径：在谈段（推进中 / 重点 / 甲方立项确认 / 商务谈判）预计金额合计">
           <div className="nc-tile-value num"><Money v={pipeAmt(ALL)} role={role} wan /></div>
-          <div className="nc-tile-sub">初谈 + 已报价 + 待签</div>
-        </button>
-        <button className="nc-tile is-clickable" onClick={() => { setStage('待签'); setPage(1); }} title="口径：报价已确认，可转合同">
-          <div className="nc-tile-label">待签（可转合同）</div>
-          <div className="nc-tile-value num nc-v-orange">{ALL.filter((r) => r.stage === '待签').length}</div>
-          <div className="nc-tile-sub">{fmtWan(pipeAmt(ALL.filter((r) => r.stage === '待签')))} · 点击直达</div>
+          <div className="nc-tile-label">在谈管道金额</div>
+          <div className="nc-tile-sub">另含加权 <Money v={ALL.filter((r) => PIPE.includes(r.stage)).reduce((s, r) => s + weighted(r), 0)} role={role} wan /></div>
         </button>
         <button className="nc-tile is-clickable" onClick={() => { setStage('delivery'); setPage(1); }} title="口径：待启动 / 实施中 / 待验收">
+          <div className="nc-tile-value num nc-v-blue">{ALL.filter((r) => DELIVERY.includes(r.stage)).length}</div>
           <div className="nc-tile-label">交付中项目</div>
-          <div className="nc-tile-value num nc-v-green">{ALL.filter((r) => DELIVERY.includes(r.stage)).length}</div>
           <div className="nc-tile-sub">待启动 / 实施中 / 待验收</div>
+        </button>
+        <button className="nc-tile is-clickable" onClick={() => { setStage('stale'); setPage(1); }} title="口径：非终态且超过 14 天未跟进">
+          <div className={`nc-tile-value num${stale.length ? ' nc-v-red' : ''}`}>{stale.length}</div>
+          <div className="nc-tile-label">逾期跟进</div>
+          <div className="nc-tile-sub">超 14 天未跟进 · 点击直达</div>
         </button>
       </div>
 
       <Card flush>
-        <ListToolbar
-          rows={[
-            {
-              label: '在谈', value: stage, onChange: (k) => { setStage(k); setPage(1); },
-              items: [
-                { key: 'all', label: '全部', cnt: stageCnt('all') },
-                { key: 'pipe', label: '在谈管道', cnt: stageCnt('pipe') },
-                { key: '推进中', label: '推进中', cnt: stageCnt('推进中') },
-                { key: '重点', label: '重点', cnt: stageCnt('重点') },
-                { key: '甲方立项确认', label: '甲方立项确认', cnt: stageCnt('甲方立项确认') },
-                { key: '商务谈判', label: '商务谈判', cnt: stageCnt('商务谈判') },
-                { key: '已中标', label: '已中标', cnt: stageCnt('已中标') },
-              ],
-            },
-            {
-              label: '履约', value: stage, onChange: (k) => { setStage(k); setPage(1); },
-              items: [
-                { key: 'delivery', label: '履约中', cnt: stageCnt('delivery') },
-                { key: '待启动', label: '待启动', cnt: stageCnt('待启动') },
-                { key: '实施中', label: '实施中', cnt: stageCnt('实施中') },
-                { key: '待验收', label: '待验收', cnt: stageCnt('待验收') },
-                { key: '已完工', label: '已完工', cnt: stageCnt('已完工') },
-                { key: 'stale', label: '逾期跟进', cnt: stageCnt('stale') },
-              ],
-            },
-            {
-              label: '终态', value: stage, onChange: (k) => { setStage(k); setPage(1); },
-              items: [
-                { key: '未中标', label: '未中标', cnt: stageCnt('未中标') },
-                { key: '关闭', label: '关闭', cnt: stageCnt('关闭') },
-              ],
-            },
-            {
-              label: '类型', value: type, onChange: (k) => { setType(k === type ? '' : k); setPage(1); },
-              items: [{ key: '', label: '全部类型', cnt: ALL.length }, ...TYPES.map((t) => ({ key: t, label: t, cnt: ALL.filter((r) => r.type === t).length }))],
-            },
-            {
-              /* 对齐参考《项目管理》142 行「行业」chip-row */
-              label: '行业', value: industry, onChange: (k) => { setIndustry(k === industry ? '' : k); setPage(1); },
-              items: [
-                { key: '', label: '全部行业', cnt: ALL.length },
-                ...[...new Set(ALL.map((r) => r.industry))].filter((x) => x && x !== '—').map((x) => ({ key: x, label: x, cnt: ALL.filter((r) => r.industry === x).length })),
-              ],
-            },
-          ]}
-          right={<>
-            <select className="nc-input" style={{ width: 140 }} value={owner} onChange={(e) => { setOwner(e.target.value); setPage(1); }}>
-              <option value="">全部负责人</option>
-              {owners.map((o) => <option key={o}>{o}</option>)}
-            </select>
-            <input className="nc-input nc-lt-search" value={kw} placeholder="搜索项目名称 / 客户 / 编号"
-              onChange={(e) => { setKw(e.target.value); setPage(1); }} />
+        {/* 工具条：搜索 + 4 个下拉 + 快捷视图 chips（与投标 / 合同页同一套 .nc-ctbar）。
+            原来 5 行 chip 面板（在谈 / 履约 / 终态 / 类型 / 行业）占 228px，把表格推到首屏之外；
+            阶段改为带计数的下拉、类型 / 行业同样收进下拉，只留 4 个跨段快捷视图在 chip 行。 */}
+        <div className="nc-ctbar" style={{ padding: '10px 12px', borderBottom: '1px solid var(--c-hairline)' }}>
+          <input
+            className="nc-input nc-ct-search" value={kw} placeholder="搜索项目名称 / 客户 / 编号"
+            onChange={(e) => { setKw(e.target.value); setPage(1); }}
+          />
+          <select className="nc-input" style={{ width: 170 }} value={stage} onChange={(e) => { setStage(e.target.value); setPage(1); }}>
+            <option value="all">全部阶段（{stageCnt('all')}）</option>
+            <option value="pipe">在谈管道（{stageCnt('pipe')}）</option>
+            {PIPE.map((s) => <option key={s} value={s}>{s}（{stageCnt(s)}）</option>)}
+            <option value="已中标">已中标（{stageCnt('已中标')}）</option>
+            <option value="delivery">履约中（{stageCnt('delivery')}）</option>
+            {DELIVERY.map((s) => <option key={s} value={s}>{s}（{stageCnt(s)}）</option>)}
+            <option value="已完工">已完工（{stageCnt('已完工')}）</option>
+            <option value="未中标">未中标（{stageCnt('未中标')}）</option>
+            <option value="关闭">关闭（{stageCnt('关闭')}）</option>
+          </select>
+          <select className="nc-input" style={{ width: 132 }} value={owner} onChange={(e) => { setOwner(e.target.value); setPage(1); }}>
+            <option value="">全部负责人</option>
+            {owners.map((o) => <option key={o}>{o}</option>)}
+          </select>
+          <select className="nc-input" style={{ width: 132 }} value={type} onChange={(e) => { setType(e.target.value); setPage(1); }}>
+            <option value="">全部类型</option>
+            {TYPES.map((t) => <option key={t} value={t}>{t}（{ALL.filter((r) => r.type === t).length}）</option>)}
+          </select>
+          <select className="nc-input" style={{ width: 140 }} value={industry} onChange={(e) => { setIndustry(e.target.value); setPage(1); }}>
+            <option value="">全部行业</option>
+            {[...new Set(ALL.map((r) => r.industry))].filter((x) => x && x !== '—').map((x) => (
+              <option key={x} value={x}>{x}（{ALL.filter((r) => r.industry === x).length}）</option>
+            ))}
+          </select>
+          <div className="nc-ctchips">
+            {QUICK_VIEWS.map((q) => (
+              <button
+                key={q.key} className={`nc-fchip${stage === q.key ? ' is-on' : ''}`}
+                onClick={() => { setStage(q.key); setPage(1); }}
+              >
+                {q.label}<span className="n">{stageCnt(q.key)}</span>
+              </button>
+            ))}
             <Btn size="sm" onClick={() => setSortAsc(!sortAsc)}>签约日 {sortAsc ? '↑' : '↓'}</Btn>
-            <Btn size="sm" onClick={() => { setKw(''); setType(''); setIndustry(''); setOwner(''); setStage('all'); setOnlyStale(false); setPage(1); toast('已重置筛选条件'); }}>重置</Btn>
-          </>}
-        />
+            <Btn size="sm" onClick={() => { setKw(''); setType(''); setIndustry(''); setOwner(''); setStage('all'); setPage(1); toast('已重置筛选条件'); }}>重置</Btn>
+          </div>
+        </div>
         <DataTable
-          cols={cols} rows={paged} rowKey={(r) => r.id} minWidth={1680}
+          cols={cols} rows={paged} rowKey={(r) => r.id} minWidth={1120}
           /* 条目背景色统一：仅保留「终态」的灰底弱化，待验收不再整行铺黄底 */
           rowClass={(r) => (TERMINAL.includes(r.stage) ? 'is-dead-row' : '')}
-          onRowClick={(r) => { setFocus('project-center', r.id); go('project-center'); }}
+          onRowClick={(r) => openProject(r)}
           empty="没有符合条件的项目"
         />
         <TableFoot
