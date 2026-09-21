@@ -3,14 +3,31 @@
 // 硬规则：建造师三要素 · 安许过期=全部投标废标 · B 证不单独借出 · 周期止早于起拦截
 import React, { useMemo, useState } from 'react';
 import {
-  Banner, Btn, Card, DataTable, Drawer, Field, KvGrid, ListToolbar, Modal, Op, OpSep,
+  Banner, Btn, Card, DataTable, Drawer, Field, KvGrid, Modal, Money, Op, OpNone, OpMore, OpSep,
   PageHead, TableFoot, Tag, Timeline, Tip, useToast, Code, Check, Alert, Progress, ConfirmModal, EntityLink,
+  pressProps,
 } from '../components/ui';
 import { CERTS, TODAY, fmt, fmtWan, PROJECTS, BIDS } from '../components/data';
 import { setFocus } from '../components/store';
 import { Ico, StatusIco } from '../components/icons';
 
 const MODE_LABEL: Record<string, string> = { single: '一证一项目', multi: '多项目引用', log: '按次登记' };
+
+/* ============ 证书大类（筛选 chips 用） ============ */
+/** subType → 大类：注册类（人员注册执业）/ 技能类（特种作业操作）/ 安全类（安全生产）/ 资质类（企业资质） */
+const CAT_OF: Record<string, string> = {
+  注册消防工程师: 'reg', 建造师: 'reg', B证: 'reg',
+  电工: 'skill', 焊工: 'skill', 建构筑物消防员: 'skill',
+  安许: 'safety',
+  施工资质: 'qual', 维护保养资质: 'qual', 设计资质: 'qual',
+};
+const CERT_CATS = [
+  { key: '', label: '全部' },
+  { key: 'reg', label: '注册类' },
+  { key: 'skill', label: '技能类' },
+  { key: 'safety', label: '安全类' },
+  { key: 'qual', label: '资质类' },
+] as const;
 const MODE_TONE: Record<string, 'red' | 'blue' | 'gray'> = { single: 'red', multi: 'blue', log: 'gray' };
 const MODE_DESC: Record<string, string> = {
   single: '同一时间仅 1 个项目，法定独占（建造师、注册消防工程师）',
@@ -73,9 +90,12 @@ export default function CertPage({ go, role, nav }: { go: (p: string) => void; r
   const toast = useToast();
   const [view, setView] = useState<'cert' | 'person' | 'project'>('cert');
   const [kw, setKw] = useState('');
-  const [ownerF, setOwnerF] = useState('');
+  /** 状态筛选（下拉单选）：'' 全部 / 正常 / expiring 即将到期 / 已过期 / long 长期有效 / lent 借出中 */
   const [statusF, setStatusF] = useState('');
-  const [expF, setExpF] = useState('');
+  /** 证书大类筛选（chips）：'' 全部 / reg 注册类 / skill 技能类 / safety 安全类 / qual 资质类 */
+  const [catF, setCatF] = useState('');
+  /** 排序：exp-asc 最早到期在前（默认）/ exp-desc 最晚到期在前 / sub-desc 补贴成本从高到低 */
+  const [sortKey, setSortKey] = useState('exp-asc');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [detail, setDetail] = useState<C | null>(null);
@@ -133,18 +153,23 @@ export default function CertPage({ go, role, nav }: { go: (p: string) => void; r
     setDetail((d) => (d && d.id === id ? ({ ...d, ...patch } as C) : d));
     toast(msg);
   };
-  const rows = useMemo(() => certs.filter((c) => {
-    if (kw && !(c.name + c.id + c.holder + c.subType).includes(kw)) return false;
-    if (ownerF && c.type !== ownerF) return false;
-    if (statusF && c.status !== statusF && !(statusF === '可用' && c.status === '正常')) return false;
-    if (expF === 'long' && !isLongTerm(c)) return false;
-    if (expF !== '' && expF !== 'long' && isLongTerm(c)) return false;
-    if (expF === '30' && !(c.warnDays > 0 && c.warnDays <= 30)) return false;
-    if (expF === '60' && !(c.warnDays > 30 && c.warnDays <= 60)) return false;
-    if (expF === '90' && !(c.warnDays > 60 && c.warnDays <= 90)) return false;
-    if (expF === 'expired' && !(c.validTo < TODAY)) return false;
-    return true;
-  }), [kw, ownerF, statusF, expF]);
+  const rows = useMemo(() => {
+    const list = certs.filter((c) => {
+      if (kw && !(c.name + c.id + c.holder + c.subType).includes(kw)) return false;
+      if (catF && CAT_OF[c.subType] !== catF) return false;
+      // 状态口径互斥：正常（不含长期有效）/ 即将到期（30/60 天内）/ 已过期 / 长期有效 / 借出中
+      if (statusF === '正常' && !(c.status === '正常' && !isLongTerm(c))) return false;
+      if (statusF === 'expiring' && !c.status.includes('到期')) return false;
+      if (statusF === '已过期' && !(c.validTo < TODAY)) return false;
+      if (statusF === 'long' && !isLongTerm(c)) return false;
+      if (statusF === 'lent' && !(c.used.length > 0)) return false;
+      return true;
+    });
+    if (sortKey === 'exp-asc') list.sort((a, b) => a.validTo.localeCompare(b.validTo));
+    else if (sortKey === 'exp-desc') list.sort((a, b) => b.validTo.localeCompare(a.validTo));
+    else if (sortKey === 'sub-desc') list.sort((a, b) => (yearCost(b) + onceThisYear(b)) - (yearCost(a) + onceThisYear(a)));
+    return list;
+  }, [certs, kw, catF, statusF, sortKey]);
 
   const paged = rows.slice((page - 1) * pageSize, page * pageSize);
   const builders = certs.filter((c) => c.isBuilder);
@@ -174,6 +199,12 @@ export default function CertPage({ go, role, nav }: { go: (p: string) => void; r
 
   /** 年度补贴成本 = Σ年化 + 本年度到期的一次性补贴 */
   const subsidyYear = certs.reduce((a, c) => a + yearCost(c) + onceThisYear(c), 0);
+
+  /* 统计瓦片基数（与列表筛选同源，保证「点击瓦片」复现的结果与瓦片数字一致） */
+  const d30Count = certs.filter((c) => !isLongTerm(c) && c.warnDays > 0 && c.warnDays <= 30).length;
+  const d90Count = certs.filter((c) => !isLongTerm(c) && c.warnDays > 0 && c.warnDays <= 90).length;
+  const expiredCount = certs.filter((c) => c.validTo < TODAY).length;
+  const longTermCount = certs.filter(isLongTerm).length;
 
   // 注意：Modal 的 foot / children 作为 prop 会在 Modal 内部 open 判断之前求值，
   // 因此 canLend / lendWhy 必须容忍 null（弹窗关闭时为 null）。
@@ -207,18 +238,35 @@ export default function CertPage({ go, role, nav }: { go: (p: string) => void; r
     { key: 'used', title: '并行占用', width: 96, align: 'right' as const, render: (c: C) => <span className={`num${c.mode === 'single' && c.used.length >= c.cap ? ' is-red' : ''}`}>{c.used.length}/{c.cap === 99 ? '∞' : c.cap}</span> },
     {
       key: 'op', title: '操作', width: 260, align: 'right' as const,
+      /* 评审改造：操作列统一为「3 个固定槽位 + 更多收口」。
+         槽位①详情（恒可用）②借给项目 ③登记使用 —— 位置跨行恒定；
+         该行无对应权限/不适用时留「—」占位并悬停说明原因，避免不同行的按钮位置漂移；
+         其余操作（用完收回 / 外借 / 收回外借）收进「更多 ⋯」。 */
       render: (c: C) => (
         <div className="nc-ops" onClick={(e) => e.stopPropagation()}>
           <Op onClick={() => setDetail(c)}>详情</Op><OpSep />
-          <Op gold disabled={!canLend(c)} title={lendWhy(c) || '借走后仅该项目可用'} onClick={() => { setLendOpen(c); setLendProj(firstProj); setLendNote(''); setLendErr(''); setLendPurpose(PURPOSES[0]); }}>借给项目</Op><OpSep />
-          <Op disabled={!c.used.length} title={!c.used.length ? '当前无借出记录' : '释放名额并留痕'} onClick={() => {
-            patchCert(c.id, { used: [] }, `已「用完收回」· 释放 ${c.used.length} 个名额并留痕`);
-          }}>用完收回</Op><OpSep />
-          {c.mode === 'log' && <><Op onClick={() => { setUseOpen(c); setUsePerson(''); }}>登记使用</Op><OpSep /></>}
-          <Op onClick={() => { setOutOpen(c); setOutUnit(''); setOutErr(''); setOutTo(''); }}>外借</Op><OpSep />
-          <Op disabled={!c.used.length} title={!c.used.length ? '当前无外借记录' : '释放名额并留痕'} onClick={() => {
-            patchCert(c.id, { used: [] }, '已「收回外借」· 本司项目恢复可用');
-          }}>收回外借</Op>
+          {canLend(c)
+            ? <Op gold title={lendWhy(c) || '借走后仅该项目可用'} onClick={() => { setLendOpen(c); setLendProj(firstProj); setLendNote(''); setLendErr(''); setLendPurpose(PURPOSES[0]); }}>借给项目</Op>
+            : <OpNone title={lendWhy(c) || '该证书不支持借给项目'} />}<OpSep />
+          {c.mode === 'log'
+            ? <Op onClick={() => { setUseOpen(c); setUsePerson(''); }}>登记使用</Op>
+            : <OpNone title="非按次登记类证书，无需登记使用" />}<OpSep />
+          <OpMore items={[
+            {
+              label: '用完收回', disabled: !c.used.length,
+              title: !c.used.length ? '当前无借出记录' : '释放名额并留痕',
+              onClick: () => patchCert(c.id, { used: [] }, `已「用完收回」· 释放 ${c.used.length} 个名额并留痕`),
+            },
+            {
+              label: '外借', title: '外借期间本司项目不可用',
+              onClick: () => { setOutOpen(c); setOutUnit(''); setOutErr(''); setOutTo(''); },
+            },
+            {
+              label: '收回外借', disabled: !c.used.length,
+              title: !c.used.length ? '当前无外借记录' : '释放名额并留痕',
+              onClick: () => patchCert(c.id, { used: [] }, '已「收回外借」· 本司项目恢复可用'),
+            },
+          ]} />
         </div>
       ),
     },
@@ -261,15 +309,66 @@ export default function CertPage({ go, role, nav }: { go: (p: string) => void; r
         </div>
       )}
 
-      {/* 统计卡 4 张 */}
+      {/*
+        统计卡 4 张
+        评审问题：原先仅靠「红字」传达严重程度 —— 色觉障碍用户与黑白打印场景会丢失全部层级信息，
+        且瓦片不可点击，「看到本周有 3 本到期」之后仍需自行去筛选器里找条件，路径断裂。
+        改法：① 每个瓦片补「字形 + 文字后缀」双重冗余编码（颜色不再是唯一通道）；
+              ② 可下钻的瓦片点击即完成筛选 + 回首页 + 切回证书视角，与列表联动保持同一状态源；
+              ③ 标签口径与点击后的筛选结果严格一致（原「90 天内到期」实际含 31–90 与 ≤30 两档，
+                 点击后无法复现同一批数据，属虚假引导，故改为口径闭合的「30 天内到期」）。
+      */}
       <div className="nc-tiles nc-tiles-4">
-        <div className="nc-tile"><div className="nc-tile-label">证书总数</div><div className="nc-tile-value num">{certs.length}</div><div className="nc-tile-sub">在册（有效 + 到期）</div></div>
-        <div className="nc-tile"><div className="nc-tile-label">90 天内到期</div><div className="nc-tile-value num is-red">{certs.filter((c) => !isLongTerm(c) && c.warnDays > 0 && c.warnDays <= 90).length}</div><div className="nc-tile-sub">含 30 天内与已过期</div></div>
-        <div className="nc-tile"><div className="nc-tile-label">已过期 / 长期有效</div><div className="nc-tile-value num is-red">{certs.filter((c) => c.validTo < TODAY).length} <small style={{ fontSize: 14, color: 'var(--ink-3)' }}>/ {certs.filter(isLongTerm).length}</small></div><div className="nc-tile-sub">长期有效不设到期日</div></div>
-        <div className="nc-tile"><div className="nc-tile-label">年度补贴成本</div><div className="nc-tile-value num is-gold">{fmtWan(subsidyYear)}</div><div className="nc-tile-sub">月度 ×12 + 年度；一次性按到期年计入</div></div>
+        {[
+          {
+            key: 'all', label: '证书总数', filter: '' as string | null,
+            n: certs.length, glyph: '≡', sev: '', sfx: '本', wan: false,
+            sub: '在册（有效 + 到期）',
+          },
+          {
+            key: 'd30', label: '30 天内到期', filter: 'expiring' as string | null,
+            n: d30Count, glyph: '!!!', sev: d30Count > 0 ? ' is-red' : '', sfx: '本', wan: false,
+            sub: `紧急续证 · 另 31–90 天 ${d90Count - d30Count} 本`,
+          },
+          {
+            key: 'expired', label: '已过期', filter: '已过期' as string | null,
+            n: expiredCount, glyph: '✕', sev: expiredCount > 0 ? ' is-red' : '', sfx: '本', wan: false,
+            sub: `另有长期有效 ${longTermCount} 本（不设到期日）`,
+          },
+          {
+            key: 'subsidy', label: '年度补贴成本', filter: null,
+            n: subsidyYear, glyph: '¥', sev: ' is-gold', sfx: '/年', wan: true,
+            sub: '月度 ×12 + 年度；一次性按到期年计入',
+          },
+        ].map((t) => {
+          const clickable = t.filter !== null;
+          const active = clickable && statusF === t.filter;
+          const goFilter = clickable
+            ? () => { setStatusF(t.filter as string); setPage(1); setView('cert'); }
+            : undefined;
+          return (
+            <div
+              key={t.key}
+              className={`nc-tile${clickable ? ' is-clickable' : ''}${active ? ' is-active' : ''}`}
+              onClick={goFilter}
+              title={clickable ? `筛选出「${t.label}」的证书` : undefined}
+              {...pressProps(goFilter)}
+            >
+              <div className="nc-tile-label">
+                {t.label}
+                <span className={`nc-tile-glyph${t.glyph === '!!!' || t.glyph === '✕' ? ' is-alert' : ''}`} aria-hidden="true">{t.glyph}</span>
+              </div>
+              <div className={`nc-tile-value num${t.sev}`}>
+                {t.wan ? <Money v={t.n} role={role} wan /> : <span className="num">{t.n}</span>}
+                <span className="nc-tile-sfx">{t.sfx}</span>
+              </div>
+              <div className="nc-tile-sub">{t.sub}</div>
+            </div>
+          );
+        })}
       </div>
 
-      {/* 视角切换段控 */}
+      {/* 视角切换 + 筛选行（截图口径）：左「按证书/按人员/按项目」，右「状态 ▾ / 排序 ▾ / 搜索」，仅证书视角出现筛选控件 */}
       <div className="nc-toolbar" style={{ marginBottom: 12 }}>
         <div className="nc-seg">
           <button className={`nc-seg-btn${view === 'cert' ? ' is-on' : ''}`} onClick={() => setView('cert')}>按证书</button>
@@ -277,48 +376,49 @@ export default function CertPage({ go, role, nav }: { go: (p: string) => void; r
           <button className={`nc-seg-btn${view === 'project' ? ' is-on' : ''}`} onClick={() => setView('project')}>按项目</button>
         </div>
         <span className="nc-listhint">证书占用<Tip w={340} text="占用三分法：一证一项目（独占）/ 多项目引用（公司资质）/ 按次登记（不占用，记一笔）。" /></span>
+        {view === 'cert' && (
+          <div className="nc-certfilter">
+            <select
+              className="nc-input nc-cert-sel" aria-label="按状态筛选" value={statusF}
+              onChange={(e) => { setStatusF(e.target.value); setPage(1); }}
+            >
+              <option value="">全部状态</option>
+              <option value="正常">正常</option>
+              <option value="expiring">即将到期</option>
+              <option value="已过期">已过期</option>
+              <option value="long">长期有效</option>
+              <option value="lent">借出中</option>
+            </select>
+            <select
+              className="nc-input nc-cert-sel" aria-label="排序方式" value={sortKey}
+              onChange={(e) => { setSortKey(e.target.value); setPage(1); }}
+            >
+              <option value="exp-asc">最早到期在前</option>
+              <option value="exp-desc">最晚到期在前</option>
+              <option value="sub-desc">补贴成本从高到低</option>
+            </select>
+            <input
+              className="nc-input nc-lt-search" value={kw} placeholder="搜索姓名 / 证书 / 编号"
+              onChange={(e) => { setKw(e.target.value); setPage(1); }}
+            />
+          </div>
+        )}
       </div>
 
       {view === 'cert' ? (
         <Card flush>
-          <ListToolbar
-            rows={[
-              {
-                label: '状态', value: statusF, onChange: (k) => { setStatusF(k); setPage(1); },
-                items: [
-                  { key: '', label: '全部状态', cnt: certs.length },
-                  { key: '可用', label: '可用', cnt: certs.filter((c) => c.status === '正常').length },
-                  ...(['30 天内到期', '60 天内到期', '已过期'] as const).map((s) => ({ key: s, label: s, cnt: certs.filter((c) => c.status === s).length })),
-                ],
-              },
-              {
-                label: '归属', value: ownerF, onChange: (k) => { setOwnerF(k); setPage(1); },
-                items: [
-                  { key: '', label: '企业 / 人员', cnt: certs.length },
-                  { key: '企业资质', label: '企业资质', cnt: certs.filter((c) => c.type === '企业资质').length },
-                  { key: '人员证书', label: '人员证书', cnt: certs.filter((c) => c.type === '人员证书').length },
-                ],
-              },
-              {
-                label: '到期', value: expF, onChange: (k) => { setExpF(k); setPage(1); },
-                items: [
-                  { key: '', label: '全部档位', cnt: certs.length },
-                  { key: '30', label: '30 天内', cnt: certs.filter((c) => c.warnDays > 0 && c.warnDays <= 30).length },
-                  { key: '60', label: '60 天内', cnt: certs.filter((c) => c.warnDays > 30 && c.warnDays <= 60).length },
-                  { key: '90', label: '90 天内', cnt: certs.filter((c) => c.warnDays > 60 && c.warnDays <= 90).length },
-                  { key: 'expired', label: '已过期', cnt: certs.filter((c) => c.validTo < TODAY).length },
-                  { key: 'long', label: '长期有效', cnt: certs.filter(isLongTerm).length },
-                ],
-              },
-            ]}
-            right={<>
-              <input className="nc-input nc-lt-search" value={kw} placeholder="搜索证书名称 / 编号 / 持有人"
-                onChange={(e) => { setKw(e.target.value); setPage(1); }} />
-              <Btn onClick={() => { setKw(''); setOwnerF(''); setStatusF(''); setExpF(''); setPage(1); }}>重置</Btn>
-            </>}
-          />
-          <div className="nc-listhint">
-            <span>过期证书禁用投标 / 派单 / 借用<Tip text="证书到期后自动置为「已过期」，投标引用、项目派单、外借均被拦截；续证安排需提前发起。" /></span>
+          {/* 证书大类 chips（带计数，与「全部状态」下拉纵向互补：大类横向切、状态纵向筛） */}
+          <div className="nc-ltrow" style={{ padding: '12px 16px 4px' }}>
+            {CERT_CATS.map((cat) => (
+              <button
+                key={cat.key} type="button"
+                className={`nc-fchip${catF === cat.key ? ' is-on' : ''}`}
+                onClick={() => { setCatF(cat.key); setPage(1); }}
+              >
+                {cat.label}<span className="n">{cat.key === '' ? certs.length : certs.filter((c) => CAT_OF[c.subType] === cat.key).length}</span>
+              </button>
+            ))}
+            <span className="nc-listhint nc-listhint-sp">过期证书禁用投标 / 派单 / 借用<Tip text="证书到期后自动置为「已过期」，投标引用、项目派单、外借均被拦截；续证安排需提前发起。" /></span>
           </div>
           <DataTable
             cols={certCols} rows={paged} rowKey={(c) => c.id} minWidth={1420}
@@ -326,7 +426,7 @@ export default function CertPage({ go, role, nav }: { go: (p: string) => void; r
             emptyCta={<Btn size="sm" kind="primary" onClick={() => { setNewOpen(true); resetNewCert(); }}>＋ 新增证书</Btn>}
             rowClass={(c) => (c.validTo < TODAY ? 'is-danger-row' : c.level === 'company-red' ? 'is-warn-row' : '')}
             onRowClick={(c) => setDetail(c)}
-            foot={<TableFoot total={certs.length} filtered={rows.length} page={page} pageSize={pageSize} onPage={setPage} onPageSize={(n) => { setPageSize(n); setPage(1); }} extra={<span className="nc-cell-sub"> ｜ 行点击打开详情</span>} />}
+            foot={<TableFoot total={certs.length} filtered={rows.length} page={page} pageSize={pageSize} onPage={setPage} onPageSize={(n) => { setPageSize(n); setPage(1); }} unit="本" extra={<span className="nc-cell-sub"> ｜ 行点击打开详情</span>} />}
           />
         </Card>
       ) : view === 'person' ? (
@@ -346,7 +446,13 @@ export default function CertPage({ go, role, nav }: { go: (p: string) => void; r
                     <td className="is-num">{cs.filter((c) => c.used.length > 0).length} / {cs.length}</td>
                     <td className="is-num">{cs.reduce((a, c) => a + yearCost(c) + onceThisYear(c), 0) ? fmt(cs.reduce((a, c) => a + yearCost(c) + onceThisYear(c), 0)) : '—'}</td>
                     <td className={cs.some(isLongTerm) ? '' : validTone(earliest)}>{cs.some(isLongTerm) ? '含长期有效' : earliest}</td>
-                    <td><div className="nc-ops"><Op onClick={() => toast('已打开人员证书汇总')}>汇总</Op><OpSep /><Op gold onClick={() => toast('请切换到「证书台账」视图，逐张证书借给项目')}>借给项目</Op></div></td>
+                    <td><div className="nc-ops">
+                      <Op onClick={() => toast('已打开人员证书汇总')}>汇总</Op>
+                      <OpSep />
+                      <Op gold onClick={() => toast('请切换到「证书台账」视图，逐张证书借给项目')}>借给项目</Op>
+                      <OpSep />
+                      <OpMore items={[{ label: '导出名单', onClick: () => toast('已导出该持有人证书名单（演示）') }]} />
+                    </div></td>
                   </tr>
                 );
               })}
@@ -370,7 +476,13 @@ export default function CertPage({ go, role, nav }: { go: (p: string) => void; r
                     <td>{cs.map((c) => <div key={c.id} className="nc-cell-sub">{c.name} · {c.holder}</div>)}</td>
                     <td><Progress value={equipRate} tone={gap ? 'red' : 'green'} /><span className="nc-cell-sub num">{cs.length}/{quota}</span></td>
                     <td>{gap ? <Tag tone="red">缺口 {gap}</Tag> : <Tag tone="green">已齐备</Tag>}</td>
-                    <td><div className="nc-ops"><Op onClick={() => { setFocus('project-center', pid); go('project-center'); }}>经营中心</Op><OpSep /><Op gold onClick={() => toast('项目证书需求已按行业映射表重新预判')}>重算需求</Op></div></td>
+                    <td><div className="nc-ops">
+                      <Op onClick={() => { setFocus('project-center', pid); go('project-center'); }}>经营中心</Op>
+                      <OpSep />
+                      <Op gold onClick={() => toast('项目证书需求已按行业映射表重新预判')}>重算需求</Op>
+                      <OpSep />
+                      <OpMore items={[{ label: '导出配备清单', onClick: () => toast('已导出该项目证书配备清单（演示）') }]} />
+                    </div></td>
                   </tr>
                 );
               })}

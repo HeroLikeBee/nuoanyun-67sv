@@ -1,11 +1,15 @@
-// 文档中心 —— 结构化资料库（分类导航 / 搜索 / 列表 / 详情）
+// 文档中心 —— 结构化资料库（分类导航 / 多维筛选 / 搜索 / 列表 / 详情）
 // 核心：九大分类归集 · 关键字+标签+摘要检索 · 版本管理 · 竣工资料完整度 · 打包导出 · 在线发送（水印+有效期）
+// 筛选维度：业务维（行业 · 项目类型 · 项目金额 · 具体项目）× 文档维（阶段 · 状态 · 类型 · 上传人 · 时间 · 必备）
+//   业务维来自「项目 → 客户行业 / 项目类型 / 合同额」，可组合出「化工行业 + 100 万以上 + 检测项目」这类跨项目口径
+//   已选条件统一回显为可删除标签，避免多层筛选后用户不知道当前筛了什么
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Banner, Btn, Card, Code, DataTable, Drawer, Field, KvGrid, ListToolbar, Modal, Op, OpSep,
-  PageHead, TableFoot, Tabs, Tag, Timeline, Tip, useToast, Check, Progress, EntityLink, type TagTone, ConfirmModal, pressProps,} from '../components/ui';
+  Banner, Btn, Card, Code, DataTable, Drawer, Field, KvGrid, Modal, Money, Op, OpSep,
+  PageHead, TableFoot, Tabs, Tag, Timeline, Tip, useToast, Check, Progress, EntityLink, type TagTone, ConfirmModal, pressProps,
+} from '../components/ui';
 import {
-  DOCS, DOC_CATS, DOC_STATUS, DOC_STAGES, DOC_VERSIONS, DOC_LOGS, PROJECTS, TODAY,
+  DOCS, DOC_CATS, DOC_STATUS, DOC_STAGES, DOC_VERSIONS, DOC_LOGS, PROJECTS, CUSTOMERS, TODAY,
 } from '../components/data';
 import { setFocus } from '../components/store';
 import { Ico, StatusIco, type IconName } from '../components/icons';
@@ -47,6 +51,39 @@ const SCOPES = ['全部字段', '文件名', '文档编号', '标签', '摘要']
 
 const SORTS = ['最近更新', '最早更新', '名称 A→Z', '下载最多', '体积最大'];
 
+/* ============================ 业务维度筛选口径 ============================ */
+/** 项目合同额区间（单位：元） */
+const AMT_BUCKETS = [
+  { key: '', label: '全部金额', test: () => true },
+  { key: 'lt50', label: '50 万以下', test: (a: number) => a > 0 && a < 500000 },
+  { key: '50-100', label: '50 ~ 100 万', test: (a: number) => a >= 500000 && a < 1000000 },
+  { key: '100-500', label: '100 ~ 500 万', test: (a: number) => a >= 1000000 && a < 5000000 },
+  { key: 'ge500', label: '500 万以上', test: (a: number) => a >= 5000000 },
+  { key: 'custom', label: '自定义…', test: () => true },
+];
+/** 上传时间区间（天） */
+const DATE_RANGES = [
+  { key: '', label: '全部时间', days: 0 },
+  { key: '7', label: '近 7 天', days: 7 },
+  { key: '30', label: '近 30 天', days: 30 },
+  { key: '90', label: '近 90 天', days: 90 },
+  { key: '365', label: '近一年', days: 365 },
+];
+
+/** 项目 → 客户行业（公司级文档返回 ''） */
+const projOf = (id: string) => PROJECTS.find((p) => p.id === id);
+const industryOf = (projId: string) => {
+  if (!projId) return '';
+  const p = projOf(projId);
+  if (!p) return '';
+  const c = CUSTOMERS.find((x) => x.id === p.customerId) || CUSTOMERS.find((x) => x.name === p.customer);
+  return c?.industry ?? '';
+};
+const amtOf = (projId: string) => projOf(projId)?.contractAmt ?? 0;
+const ptypeOf = (projId: string) => projOf(projId)?.type ?? '';
+/** 距今天数（负数为未来） */
+const daysAgo = (d: string) => Math.round((Date.parse(TODAY) - Date.parse(d)) / 86400000);
+
 /** 体积 → KB（用于排序） */
 const sizeKb = (s: string) => {
   const m = /^([\d.]+)\s*(KB|MB|GB|B)?$/i.exec(s.trim());
@@ -74,10 +111,25 @@ export default function DocPage({ go, role, nav }: { go: (p: string) => void; ro
   const [gOpen, setGOpen] = useState(false);
   const [gKw, setGKw] = useState('');
 
-  /* ---------- 筛选 / 排序 / 分页 ---------- */
+  /* ---------- 业务维度筛选 ---------- */
+  /** 行业（多选，来自项目所属客户行业） */
+  const [inds, setInds] = useState<string[]>([]);
+  /** 项目类型：改造 / 维护保养 / 新建 / 检测 */
+  const [ptypeF, setPtypeF] = useState('');
+  /** 项目金额区间 + 自定义下限（万元） */
+  const [amtF, setAmtF] = useState('');
+  const [amtMin, setAmtMin] = useState('');
+  /** 指定项目 */
+  const [projF, setProjF] = useState('');
+  /** 业务维筛选时是否仍保留公司级（无项目归属）文档 */
+  const [incCompany, setIncCompany] = useState(false);
+
+  /* ---------- 文档维度筛选 / 排序 / 分页 ---------- */
+  const [stageF, setStageF] = useState('');
   const [typeF, setTypeF] = useState('');
   const [byF, setByF] = useState('');
   const [statusF, setStatusF] = useState('');
+  const [dateF, setDateF] = useState('');
   const [needOnly, setNeedOnly] = useState(false);
   const [sort, setSort] = useState('最近更新');
   const [page, setPage] = useState(1);
@@ -115,9 +167,21 @@ export default function DocPage({ go, role, nav }: { go: (p: string) => void; ro
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  /* ---------- 筛选项来源（带命中计数） ---------- */
+  /** 行业列表：按文档数降序（文档 → 项目 → 客户行业） */
+  const INDUSTRIES = useMemo(() => {
+    const m = new Map<string, number>();
+    DOCS.forEach((d) => { const i = industryOf(d.proj); if (i) m.set(i, (m.get(i) ?? 0) + 1); });
+    return [...m.entries()].sort((a, b) => b[1] - a[1]).map(([key, n]) => ({ key, n }));
+  }, []);
+  /** 项目类型列表 */
+  const PTYPES = useMemo(() => [...new Set(PROJECTS.map((p) => p.type))], []);
+
   /* ---------- 过滤 + 排序 ---------- */
   const rows = useMemo(() => {
     const k = kw.trim();
+    const bizOn = !!inds.length || !!ptypeF || !!amtF || !!projF;
+    const minWan = Number(amtMin);
     let r = DOCS.filter((d) => {
       if (dirMode === 'cat') {
         if (activeCat && d.cat !== activeCat) return false;
@@ -129,9 +193,22 @@ export default function DocPage({ go, role, nav }: { go: (p: string) => void; ro
       } else if (dirMode === 'stage') {
         if (activeStage && d.stage !== activeStage) return false;
       }
+      /* ---- 业务维度 ---- */
+      if (bizOn && !d.proj && !incCompany) return false;
+      if (inds.length && !inds.includes(industryOf(d.proj))) return false;
+      if (ptypeF && ptypeOf(d.proj) !== ptypeF) return false;
+      if (projF && d.proj !== projF) return false;
+      if (amtF) {
+        const amt = amtOf(d.proj);
+        if (amtF === 'custom') { if (minWan > 0 && !(amt >= minWan * 10000)) return false; }
+        else { const b = AMT_BUCKETS.find((x) => x.key === amtF); if (b && !b.test(amt)) return false; }
+      }
+      /* ---- 文档维度 ---- */
+      if (stageF && d.stage !== stageF) return false;
       if (typeF && d.type !== typeF) return false;
       if (byF && d.by !== byF) return false;
       if (statusF && d.status !== statusF) return false;
+      if (dateF) { const ago = daysAgo(d.date); if (!(ago >= 0 && ago <= Number(dateF))) return false; }
       if (needOnly && !d.need) return false;
       if (k) {
         const hay = scope === '文件名' ? d.name
@@ -152,10 +229,17 @@ export default function DocPage({ go, role, nav }: { go: (p: string) => void; ro
     };
     r = [...r].sort(cmp[sort] || cmp['最近更新']);
     return r;
-  }, [dirMode, activeCat, activeSub, activeDir, activeStage, typeF, byF, statusF, needOnly, kw, scope, sort]);
+  }, [dirMode, activeCat, activeSub, activeDir, activeStage, inds, ptypeF, amtF, amtMin, projF, incCompany,
+    stageF, typeF, byF, statusF, dateF, needOnly, kw, scope, sort]);
 
   const paged = rows.slice((page - 1) * pageSize, page * pageSize);
   const allOn = rows.length > 0 && rows.every((r) => sel.includes(r.id));
+  /** 业务维筛选下被排除的公司级文档数（提示用，避免用户以为数据丢了） */
+  const hiddenCompany = useMemo(() => {
+    const bizOn = !!inds.length || !!ptypeF || !!amtF || !!projF;
+    if (!bizOn || incCompany) return 0;
+    return DOCS.filter((d) => !d.proj).length;
+  }, [inds, ptypeF, amtF, projF, incCompany]);
 
   const pushHist = (v: string) => {
     const t = v.trim();
@@ -164,32 +248,26 @@ export default function DocPage({ go, role, nav }: { go: (p: string) => void; ro
   };
   const doSearch = (v: string) => { setKw(v); setPage(1); pushHist(v); };
 
-  /* ---------- 分类树（带计数） ---------- */
-  const catTree = useMemo(
-    () => DOC_CATS.map((c) => ({
-      ...c,
-      n: DOCS.filter((d) => d.cat === c.key).length,
-      subs: c.subs.map((s) => ({ key: s, n: DOCS.filter((d) => d.cat === c.key && d.sub === s).length })),
-    })),
-    [],
-  );
-
-  const dirs = dirMode === 'proj'
-    ? PROJECTS.map((p) => ({ key: p.id, label: p.name, sub: p.id, n: DOCS.filter((d) => d.proj === p.id).length }))
-    : dirMode === 'contract'
-      ? [...new Set(DOCS.filter((d) => d.contract).map((d) => d.contract))].map((c) => ({
-        key: c, label: c, sub: DOCS.find((d) => d.contract === c)?.name.split('-')[1] || '',
-        n: DOCS.filter((d) => d.contract === c).length,
-      }))
-      : DOC_STAGES.map((s) => ({ key: s, label: s + '阶段', sub: '', n: DOCS.filter((d) => d.stage === s).length }));
-
-  /* ---------- 项目资料完整度 ---------- */
-  const completeness = (pid: string) => {
-    const all = DOCS.filter((d) => d.proj === pid);
-    const need = all.filter((d) => d.need);
-    const done = need.filter((d) => d.status === '已归档');
-    const pct = need.length ? Math.round((done.length / need.length) * 100) : 0;
-    return { pct, done: done.length, total: need.length };
+  /* ---------- 已选条件（回显 + 单个删除 + 全部清空） ---------- */
+  const amtLabel = amtF === 'custom'
+    ? (Number(amtMin) > 0 ? `金额 ≥ ${amtMin} 万` : '自定义金额')
+    : (AMT_BUCKETS.find((b) => b.key === amtF)?.label ?? '');
+  const activeFilters = [
+    ...inds.map((i) => ({ k: 'ind-' + i, label: '行业：' + i, clear: () => setInds((v) => v.filter((x) => x !== i)) })),
+    ...(ptypeF ? [{ k: 'ptype', label: '项目类型：' + ptypeF, clear: () => setPtypeF('') }] : []),
+    ...(amtF ? [{ k: 'amt', label: amtLabel, clear: () => { setAmtF(''); setAmtMin(''); } }] : []),
+    ...(projF ? [{ k: 'proj', label: '项目：' + (projOf(projF)?.name ?? projF), clear: () => setProjF('') }] : []),
+    ...(stageF ? [{ k: 'stage', label: '阶段：' + stageF, clear: () => setStageF('') }] : []),
+    ...(statusF ? [{ k: 'status', label: '状态：' + statusF, clear: () => setStatusF('') }] : []),
+    ...(typeF ? [{ k: 'type', label: '类型：' + typeF, clear: () => setTypeF('') }] : []),
+    ...(byF ? [{ k: 'by', label: '上传人：' + byF, clear: () => setByF('') }] : []),
+    ...(dateF ? [{ k: 'date', label: '时间：' + (DATE_RANGES.find((r) => r.key === dateF)?.label ?? ''), clear: () => setDateF('') }] : []),
+    ...(needOnly ? [{ k: 'need', label: '只看验收清单必备项', clear: () => setNeedOnly(false) }] : []),
+    ...(kw.trim() ? [{ k: 'kw', label: '关键字：' + kw.trim(), clear: () => setKw('') }] : []),
+  ];
+  const clearAll = () => {
+    setInds([]); setPtypeF(''); setAmtF(''); setAmtMin(''); setProjF(''); setStageF('');
+    setStatusF(''); setTypeF(''); setByF(''); setDateF(''); setNeedOnly(false); setKw(''); setSort('最近更新'); setPage(1);
   };
 
   const doUpload = () => {
@@ -220,10 +298,40 @@ export default function DocPage({ go, role, nav }: { go: (p: string) => void; ro
     });
   };
 
+  const toggleInd = (i: string) => setInds((v) => (v.includes(i) ? v.filter((x) => x !== i) : [...v, i]));
+
+  /* ---------- 分类树（带计数） ---------- */
+  const catTree = useMemo(
+    () => DOC_CATS.map((c) => ({
+      ...c,
+      n: DOCS.filter((d) => d.cat === c.key).length,
+      subs: c.subs.map((s) => ({ key: s, n: DOCS.filter((d) => d.cat === c.key && d.sub === s).length })),
+    })),
+    [],
+  );
+
+  const dirs = dirMode === 'proj'
+    ? PROJECTS.map((p) => ({ key: p.id, label: p.name, sub: p.id, n: DOCS.filter((d) => d.proj === p.id).length }))
+    : dirMode === 'contract'
+      ? [...new Set(DOCS.filter((d) => d.contract).map((d) => d.contract))].map((c) => ({
+        key: c, label: c, sub: DOCS.find((d) => d.contract === c)?.name.split('-')[1] || '',
+        n: DOCS.filter((d) => d.contract === c).length,
+      }))
+      : DOC_STAGES.map((s) => ({ key: s, label: s + '阶段', sub: '', n: DOCS.filter((d) => d.stage === s).length }));
+
+  /* ---------- 项目资料完整度 ---------- */
+  const completeness = (pid: string) => {
+    const all = DOCS.filter((d) => d.proj === pid);
+    const need = all.filter((d) => d.need);
+    const done = need.filter((d) => d.status === '已归档');
+    const pct = need.length ? Math.round((done.length / need.length) * 100) : 0;
+    return { pct, done: done.length, total: need.length };
+  };
+
   /* ---------- 列表列 ---------- */
   const cols = [
     {
-      key: 'name', title: '文件名 / 编号', width: 330,
+      key: 'name', title: '文件名 / 编号', width: 320,
       render: (d: D) => (
         <div className="nc-cell-main">
           <div>
@@ -236,23 +344,45 @@ export default function DocPage({ go, role, nav }: { go: (p: string) => void; ro
         </div>
       ),
     },
-    { key: 'cat', title: '分类', width: 150, render: (d: D) => <div className="nc-cell-main"><div><Tag tone={CAT_TONE[d.cat] || 'gray'}>{d.cat}</Tag></div><div className="nc-cell-sub">{d.sub}</div></div> },
-    { key: 'type', title: '类型', width: 120, render: (d: D) => <Tag tone={SUB_TONE[d.type] || 'gray'}>{d.type}</Tag> },
-    { key: 'belong', title: '归属项目 / 合同', width: 220, render: (d: D) => <div className="nc-cell-main"><div>{d.proj ? <EntityLink target="project-center" id={d.proj} go={go} title="下钻到项目经营中心">{PROJECTS.find((p) => p.id === d.proj)?.name ?? d.proj}</EntityLink> : '公司级'}</div><div className="nc-cell-sub">{d.contract ? <EntityLink target="contract" id={d.contract} go={go} title="下钻到合同详情"><Code>{d.contract}</Code></EntityLink> : d.stage + ' 阶段'}</div></div> },
-    { key: 'ver', title: '版本', width: 70, align: 'center' as const, render: (d: D) => <span className="num">{d.ver}</span> },
-    { key: 'by', title: '上传人', width: 90 },
-    { key: 'date', title: '更新时间', width: 100 },
-    { key: 'dl', title: '下载', width: 64, align: 'right' as const, render: (d: D) => <span className="num">{d.dl}</span> },
-    { key: 'status', title: '状态', width: 84, render: (d: D) => <Tag tone={STATUS_TONE[d.status] || 'gray'}>{d.status}</Tag> },
-    { key: 'need', title: '必备', width: 64, align: 'center' as const, render: (d: D) => (d.need ? <Tag tone="red">必备</Tag> : <span className="nc-cell-sub">—</span>) },
     {
-      key: 'op', title: '操作', width: 176, align: 'right' as const,
+      key: 'belong', title: '归属项目（行业 · 金额）', width: 250,
+      render: (d: D) => {
+        const ind = industryOf(d.proj);
+        const amt = amtOf(d.proj);
+        return (
+          <div className="nc-cell-main">
+            <div>
+              {d.proj
+                ? <EntityLink target="project-center" id={d.proj} go={go} title="下钻到项目经营中心">{projOf(d.proj)?.name ?? d.proj}</EntityLink>
+                : <span className="nc-cell-sub">公司级</span>}
+              {!!ind && <Tag tone="gray">{ind}</Tag>}
+              {amt > 0 && <span className="nc-cell-sub num"><Money v={amt} role={role} wan /></span>}
+            </div>
+            <div className="nc-cell-sub">
+              {d.contract
+                ? <EntityLink target="contract" id={d.contract} go={go} title="下钻到合同详情"><Code>{d.contract}</Code></EntityLink>
+                : d.stage + ' 阶段'}
+              {!!ptypeOf(d.proj) && ` · ${ptypeOf(d.proj)}`}
+            </div>
+          </div>
+        );
+      },
+    },
+    { key: 'cat', title: '分类', width: 140, render: (d: D) => <div className="nc-cell-main"><div><Tag tone={CAT_TONE[d.cat] || 'gray'}>{d.cat}</Tag></div><div className="nc-cell-sub">{d.sub}</div></div> },
+    { key: 'stage', title: '阶段', width: 78, render: (d: D) => <Tag tone="blue">{d.stage}</Tag> },
+    { key: 'ver', title: '版本', width: 66, align: 'center' as const, render: (d: D) => <span className="num">{d.ver}</span> },
+    { key: 'by', title: '上传人', width: 84 },
+    { key: 'date', title: '上传时间', width: 100 },
+    { key: 'dl', title: '下载', width: 60, align: 'right' as const, render: (d: D) => <span className="num">{d.dl}</span> },
+    { key: 'status', title: '状态', width: 80, render: (d: D) => <Tag tone={STATUS_TONE[d.status] || 'gray'}>{d.status}</Tag> },
+    { key: 'need', title: '必备', width: 60, align: 'center' as const, render: (d: D) => (d.need ? <Tag tone="red">必备</Tag> : <span className="nc-cell-sub">—</span>) },
+    {
+      key: 'op', title: '操作', width: 150, align: 'right' as const,
       render: (d: D) => (
         <div className="nc-ops" onClick={(e) => e.stopPropagation()}>
-          <Op onClick={() => { setDetail(d); setDTab('base'); }}>详情</Op><OpSep />
           <Op onClick={() => toast('已打开预览（水印：预览人 + 时间 + 租户）')}>预览</Op><OpSep />
-          <Op onClick={() => setShareOpen(true)}>发送</Op><OpSep />
-          <Op danger onClick={() => toast('已提交借阅申请 · 待审批后开放下载')}>借阅</Op>
+          <Op onClick={() => toast(`已开始下载「${d.name}」· 下载行为留痕`)}>下载</Op><OpSep />
+          <Op onClick={() => { setDetail(d); setDTab('base'); }}>详情</Op>
         </div>
       ),
     },
@@ -288,7 +418,10 @@ export default function DocPage({ go, role, nav }: { go: (p: string) => void; ro
             { k: '当前版本', v: <span className="num">{detail.ver}</span> },
             { k: '一级分类', v: <Tag tone={CAT_TONE[detail.cat] || 'gray'}>{detail.cat}</Tag> },
             { k: '二级类型', v: <Tag tone={SUB_TONE[detail.type] || 'gray'}>{detail.type}</Tag> },
-            { k: '归属项目', v: detail.proj ? <EntityLink target="project-center" id={detail.proj} go={go} title="下钻到项目经营中心">{PROJECTS.find((p) => p.id === detail.proj)?.name ?? detail.proj}</EntityLink> : '公司级（无项目归属）' },
+            { k: '归属项目', v: detail.proj ? <EntityLink target="project-center" id={detail.proj} go={go} title="下钻到项目经营中心">{projOf(detail.proj)?.name ?? detail.proj}</EntityLink> : '公司级（无项目归属）' },
+            { k: '所属行业', v: industryOf(detail.proj) ? <Tag tone="gray">{industryOf(detail.proj)}</Tag> : '—' },
+            { k: '项目类型', v: ptypeOf(detail.proj) || '—' },
+            { k: '项目合同额', v: amtOf(detail.proj) > 0 ? <Money v={amtOf(detail.proj)} role={role} wan /> : '—' },
             { k: '关联合同', v: detail.contract ? <EntityLink target="contract" id={detail.contract} go={go} title="下钻到合同详情">{detail.contract}</EntityLink> : '/' },
             { k: '所属阶段', v: <Tag tone="blue">{detail.stage}</Tag> },
             { k: '是否必备', v: detail.need ? <Tag tone="red">必备（清单校验项）</Tag> : '非必备' },
@@ -336,7 +469,7 @@ export default function DocPage({ go, role, nav }: { go: (p: string) => void; ro
             <tbody>
               <tr>
                 <td>项目</td>
-                <td>{detail.proj ? <EntityLink target="project-center" id={detail.proj} go={go} title="下钻到项目经营中心">{PROJECTS.find((p) => p.id === detail.proj)?.name ?? detail.proj} <span className="nc-cell-sub">{detail.proj}</span></EntityLink> : <span className="nc-cell-sub">公司级文档，无项目归属</span>}</td>
+                <td>{detail.proj ? <EntityLink target="project-center" id={detail.proj} go={go} title="下钻到项目经营中心">{projOf(detail.proj)?.name ?? detail.proj} <span className="nc-cell-sub">{detail.proj}</span></EntityLink> : <span className="nc-cell-sub">公司级文档，无项目归属</span>}</td>
                 <td>{detail.proj && <Op onClick={() => { setDetail(null); setFocus('project-center', detail.proj!); go('project-center'); }}>打开</Op>}</td>
               </tr>
               <tr>
@@ -500,7 +633,7 @@ export default function DocPage({ go, role, nav }: { go: (p: string) => void; ro
             const { pct, done, total } = completeness(activeDir);
             return (
               <Card
-                hd={<span>竣工资料完整度 · {PROJECTS.find((p) => p.id === activeDir)?.name}</span>}
+                hd={<span>竣工资料完整度 · {projOf(activeDir)?.name}</span>}
                 extra={<Btn size="sm" onClick={() => toast('已导出竣工资料包（含封面页 + 目录索引）')}>一键导出资料包</Btn>}
               >
                 <div className="nc-completeness">
@@ -527,51 +660,123 @@ export default function DocPage({ go, role, nav }: { go: (p: string) => void; ro
           })()}
 
           <Card flush>
-            <ListToolbar
-              rows={[
-                {
-                  label: '状态', value: statusF, onChange: (k) => { setStatusF(k); setPage(1); },
-                  items: [
-                    { key: '', label: '全部状态', cnt: DOCS.length },
-                    ...DOC_STATUS.map((s) => ({ key: s, label: s, cnt: DOCS.filter((d) => d.status === s).length })),
-                  ],
-                },
-                {
-                  label: '类型', value: typeF, onChange: (k) => { setTypeF(k); setPage(1); },
-                  items: [
-                    { key: '', label: '全部类型', cnt: DOCS.length },
-                    ...[...new Set(DOCS.map((d) => d.type))].sort().map((t) => ({ key: t, label: t, cnt: DOCS.filter((d) => d.type === t).length })),
-                  ],
-                },
-                {
-                  label: '上传人', value: byF, onChange: (k) => { setByF(k); setPage(1); },
-                  items: [
-                    { key: '', label: '全部上传人', cnt: DOCS.length },
-                    ...[...new Set(DOCS.map((d) => d.by))].sort().map((b) => ({ key: b, label: b, cnt: DOCS.filter((d) => d.by === b).length })),
-                  ],
-                },
-              ]}
-              right={<>
-                <select className="nc-input nc-lt-select" value={sort} onChange={(e) => { setSort(e.target.value); setPage(1); }} title="排序">
+            {/* ============ 多维筛选面板 ============ */}
+            <div className="nc-doc-filters">
+              {/* 业务维度：行业（多选） */}
+              <div className="nc-doc-frow">
+                <span className="nc-doc-flbl">行业</span>
+                <div className="nc-doc-fchips">
+                  <button className={`nc-chipbtn${inds.length === 0 ? ' is-on' : ''}`} onClick={() => setInds([])}>全部</button>
+                  {INDUSTRIES.map((i) => (
+                    <button
+                      key={i.key} className={`nc-chipbtn${inds.includes(i.key) ? ' is-on' : ''}`}
+                      onClick={() => { toggleInd(i.key); setPage(1); }}
+                      title={`只看${i.key}行业项目的文档`}
+                    >
+                      {i.key}<span className="nc-chip-cnt">{i.n}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 业务维度：项目类型 / 金额 / 指定项目 */}
+              <div className="nc-doc-frow">
+                <span className="nc-doc-flbl">项目</span>
+                <div className="nc-doc-fchips">
+                  <button className={`nc-chipbtn${!ptypeF ? ' is-on' : ''}`} onClick={() => { setPtypeF(''); setPage(1); }}>全部类型</button>
+                  {PTYPES.map((t) => (
+                    <button key={t} className={`nc-chipbtn${ptypeF === t ? ' is-on' : ''}`} onClick={() => { setPtypeF(ptypeF === t ? '' : t); setPage(1); }}>{t}</button>
+                  ))}
+                </div>
+                <span className="nc-doc-fsep" />
+                <select className="nc-input nc-doc-fsel" value={amtF} onChange={(e) => { setAmtF(e.target.value); if (e.target.value !== 'custom') setAmtMin(''); setPage(1); }} title="按项目合同额筛选">
+                  {AMT_BUCKETS.map((b) => <option key={b.key} value={b.key}>{b.label}</option>)}
+                </select>
+                {amtF === 'custom' && (
+                  <span className="nc-doc-fmin">
+                    <input
+                      className="nc-input" style={{ width: 76 }} type="number" min={0} value={amtMin} placeholder="110"
+                      onChange={(e) => { setAmtMin(e.target.value); setPage(1); }}
+                    />
+                    <span className="nc-cell-sub">万元以上</span>
+                  </span>
+                )}
+                <select className="nc-input nc-doc-fsel is-wide" value={projF} onChange={(e) => { setProjF(e.target.value); setPage(1); }} title="指定项目">
+                  <option value="">全部项目</option>
+                  {PROJECTS.map((p) => <option key={p.id} value={p.id}>{p.id} · {p.name}</option>)}
+                </select>
+                <Check checked={incCompany} onChange={(v) => { setIncCompany(v); setPage(1); }} label="含公司级" />
+              </div>
+
+              {/* 文档维度 */}
+              <div className="nc-doc-frow">
+                <span className="nc-doc-flbl">文档</span>
+                <div className="nc-doc-fchips">
+                  <button className={`nc-chipbtn${!stageF ? ' is-on' : ''}`} onClick={() => { setStageF(''); setPage(1); }}>全部阶段</button>
+                  {DOC_STAGES.map((s) => (
+                    <button key={s} className={`nc-chipbtn${stageF === s ? ' is-on' : ''}`} onClick={() => { setStageF(stageF === s ? '' : s); setPage(1); }}>
+                      {s}<span className="nc-chip-cnt">{DOCS.filter((d) => d.stage === s).length}</span>
+                    </button>
+                  ))}
+                </div>
+                <span className="nc-doc-fsep" />
+                <div className="nc-doc-fchips">
+                  <button className={`nc-chipbtn${!statusF ? ' is-on' : ''}`} onClick={() => { setStatusF(''); setPage(1); }}>全部状态</button>
+                  {DOC_STATUS.map((s) => (
+                    <button key={s} className={`nc-chipbtn${statusF === s ? ' is-on' : ''}`} onClick={() => { setStatusF(statusF === s ? '' : s); setPage(1); }}>{s}</button>
+                  ))}
+                </div>
+                <span className="nc-doc-fsep" />
+                <select className="nc-input nc-doc-fsel is-wide" value={typeF} onChange={(e) => { setTypeF(e.target.value); setPage(1); }} title="文档类型">
+                  <option value="">全部类型</option>
+                  {[...new Set(DOCS.map((d) => d.type))].sort().map((t) => <option key={t}>{t}</option>)}
+                </select>
+                <select className="nc-input nc-doc-fsel" value={byF} onChange={(e) => { setByF(e.target.value); setPage(1); }} title="上传人">
+                  <option value="">全部上传人</option>
+                  {[...new Set(DOCS.map((d) => d.by))].sort().map((b) => <option key={b}>{b}</option>)}
+                </select>
+                <select className="nc-input nc-doc-fsel" value={dateF} onChange={(e) => { setDateF(e.target.value); setPage(1); }} title="上传时间">
+                  {DATE_RANGES.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
+                </select>
+                <Check checked={needOnly} onChange={(v) => { setNeedOnly(v); setPage(1); }} label="只看验收清单必备项" />
+              </div>
+
+              {/* 已选条件回显 */}
+              {!!activeFilters.length && (
+                <div className="nc-doc-frow is-active">
+                  <span className="nc-doc-flbl">已选</span>
+                  <div className="nc-doc-fchips">
+                    {activeFilters.map((f) => (
+                      <span key={f.k} className="nc-fcond">
+                        {f.label}
+                        <button onClick={() => { f.clear(); setPage(1); }} title="移除该条件"><Ico n="close" size={11} /></button>
+                      </span>
+                    ))}
+                    <button className="nc-doc-fclear" onClick={clearAll}>清空全部</button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* 结果条 */}
+            <div className="nc-doc-fresult">
+              <span className="nc-doc-fcount">
+                命中 <b className="num">{rows.length}</b> 份
+                {rows.length !== DOCS.length && <span className="nc-cell-sub"> / 共 {DOCS.length} 份</span>}
+                {' · 已选 '}<b className="num">{sel.length}</b> 份
+              </span>
+              {!!hiddenCompany && <span className="nc-cell-sub">（已排除 {hiddenCompany} 份公司级文档，勾选「含公司级」可纳入）</span>}
+              <span className="nc-doc-fsort">
+                <select className="nc-input" value={sort} onChange={(e) => { setSort(e.target.value); setPage(1); }} title="排序">
                   {SORTS.map((s) => <option key={s}>{s}</option>)}
                 </select>
-                <input
-                  className="nc-input nc-lt-search" value={kw} placeholder="快速过滤…"
-                  onChange={(e) => { setKw(e.target.value); setPage(1); }}
-                />
-                <Btn onClick={() => { setKw(''); setTypeF(''); setByF(''); setStatusF(''); setNeedOnly(false); setSort('最近更新'); setPage(1); }}>重置</Btn>
-              </>}
-            >
-              <div className="nc-ltrow">
-                <span className="nc-ltlbl">快速</span>
-                <Check checked={needOnly} onChange={(v) => { setNeedOnly(v); setPage(1); }} label="只看验收清单必备项" />
-                <Check checked={fav.length > 0 && rows.every((r) => fav.includes(r.id)) && rows.length > 0} onChange={() => { setKw(''); setTypeF(''); setByF(''); setStatusF(''); }} label={`我的收藏（${fav.length}）`} />
-                <span className="nc-cell-sub">命中 {rows.length} 条 · 已选 {sel.length} 条</span>
-              </div>
-            </ListToolbar>
+                {!!activeFilters.length && <Btn size="sm" onClick={clearAll}>重置</Btn>}
+              </span>
+            </div>
+
             <DataTable
-              cols={cols} rows={paged} rowKey={(d) => d.id} minWidth={1480}
-              empty="没有符合筛选条件的文档；文档按「项目 × 阶段 × 分类」归口，支持多版本与借阅留痕"
+              cols={cols} rows={paged} rowKey={(d) => d.id} minWidth={1420}
+              empty="没有符合筛选条件的文档；可放宽行业 / 金额 / 项目类型任一条件，或勾选「含公司级」把公司级文档纳入"
               emptyCta={<Btn size="sm" kind="primary" onClick={() => setUpOpen(true)}>＋ 上传文档</Btn>}
               selectable selected={sel}
               onSelectAll={() => setSel(allOn ? [] : rows.map((r) => r.id))}

@@ -39,6 +39,16 @@ const ROUTE = defineHashPageRoute(
   { defaultPageId: 'dashboard' },
 );
 
+/**
+ * 列表型页面：内容区视口锁定 —— 页头 / 瓦片 / 页签 / 筛选固定不动，
+ * 表格卡吃满剩余高度并在卡内局部滚动，分页脚常驻卡底。
+ * 驾驶舱、详情、工作台与向导页内容较长，保持整页滚动。
+ */
+const FIXED_PAGES = new Set([
+  'customer', 'opp', 'quote', 'bid', 'cert', 'doc', 'contract',
+  'project', 'approval', 'supplier', 'material', 'device', 'invoice',
+]);
+
 type GoFn = (pageId: string) => void;
 
 export default function NuoanCloud6() {
@@ -90,7 +100,7 @@ export default function NuoanCloud6() {
 
   return (
     <ToastProvider>
-      <AppShell page={page} onNavigate={go} role={role} onRoleChange={setRole} pending={pending}>
+      <AppShell page={page} onNavigate={go} role={role} onRoleChange={setRole} pending={pending} fixedLayout={FIXED_PAGES.has(page)}>
         {render()}
       </AppShell>
     </ToastProvider>

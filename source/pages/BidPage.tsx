@@ -1,9 +1,13 @@
 // 投标管理（看板 ⇄ 列表双视图）—— 投标全流程 8 阶段
 // 硬规则：证书过期不可引用 · 占用上限拦截 · 建造师三要素 · 已投标后证书引用锁定 · 安许过期=全部废标
+// 列表版式（简化版）：页头(共N项·进行中N + 视图切换/导出/发起) → 5 统计卡 → 工具条(搜索+3下拉+右侧快捷chips) → 表格
+//   复杂度下沉到详情抽屉：页级不再放安许警示条 / 阶段统计条 / 证书占用列 / 提示行
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Btn, Banner, Card, DataTable, Drawer, Field, KvGrid, ListToolbar, Modal, Money, Op, OpSep,
-  PageHead, TableFoot, Tag, Timeline, Tip, useToast, ChainBar, Check, Code, Alert, Progress, Tabs, ConfirmModal, EntityLink, pressProps,} from '../components/ui';
+  Btn, Banner, Card, DataTable, Drawer, Field, KvGrid, ListToolbar, Modal, Money, Op, OpMore, OpSep,
+  PageHead, TableFoot, Tag, Timeline, Tip, useToast, ChainBar, Check, Code, Progress, Tabs, ConfirmModal, EntityLink, pressProps,
+} from '../components/ui';
+import type { OpMoreItem } from '../components/ui';
 import { BIDS, BID_STAGES, CERTS, fmt, fmtWan, TODAY, approveLevel } from '../components/data';
 import { getFocus, setFocus, setPendingContract } from '../components/store';
 import { Ico } from '../components/icons';
@@ -15,6 +19,7 @@ const DEP_TONE: Record<string, 'gray' | 'blue' | 'green' | 'red'> = { 未交: 'g
 type B = (typeof BIDS)[number];
 
 const CERT_MODE_LABEL: Record<string, string> = { single: '一证一项目', multi: '多项目引用', log: '按次登记' };
+const QUICKS = ['全部', '开标≤7天', '今日开标', '保未交/未退', '证书满载', '待登记结果'] as const;
 
 /** 税率口径 6 档：含税 9/13/6 · 不含税 9/13/6 */
 const TAX = [
@@ -137,7 +142,7 @@ export default function BidPage({ go, role, nav }: { go: (p: string) => void; ro
 
   const quickMatch = (b: B) => {
     const dd = daysUntil(b.openDate);
-    if (quick === ' 开标≤7天') return dd >= 0 && dd <= 7 && !['中标', '未中标'].includes(b.stage);
+    if (quick === '开标≤7天') return dd >= 0 && dd <= 7 && !['中标', '未中标'].includes(b.stage);
     if (quick === '今日开标') return dd === 0;
     if (quick === '保未交/未退') return b.depositSt === '未交' || b.depositSt === '未退';
     if (quick === '证书满载') return b.certGot >= b.certNeed;
@@ -176,9 +181,6 @@ export default function BidPage({ go, role, nav }: { go: (p: string) => void; ro
 
   const paged = rows.slice((page - 1) * pageSize, page * pageSize);
 
-  // 阶段统计
-  const stCount = (s: string) => bids.filter((b) => b.stage === s).length;
-
   // 建造师三要素校验（硬拦截）
   const builderCheck = (b: B) => {
     const builder = CERTS.find((c) => c.isBuilder && c.holder === b.projMgr);
@@ -187,9 +189,6 @@ export default function BidPage({ go, role, nav }: { go: (p: string) => void; ro
     const okBusy = !b.pmBusy;
     return { okValid, okB, okBusy, pass: okValid && okB && okBusy, builder };
   };
-
-  // 安许过期 = 全部投标废标
-  const safetyLic = CERTS.find((c) => c.subType === '安许');
 
   const advance = (b: B) => {
     if (b.stage === '开标') { setResultOpen(b); setWinAmt(b.amt); return; }
@@ -201,42 +200,56 @@ export default function BidPage({ go, role, nav }: { go: (p: string) => void; ro
   };
 
   const cols = [
-    { key: 'id', title: '投标编号', width: 100, render: (b: B) => <Code>{b.id}</Code> },
     {
-      key: 'name', title: '项目 · 客户', width: 260,
+      key: 'id', title: '投标编号', width: 110,
+      render: (b: B) => (
+        <div className="nc-cell-main">
+          <Code>{b.id}</Code>
+          {b.opp && <div className="nc-cell-sub">商机 {b.opp}</div>}
+        </div>
+      ),
+    },
+    {
+      key: 'name', title: '项目 / 客户', width: 240,
       render: (b: B) => (<div className="nc-cell-main"><div>{b.name}</div><div className="nc-cell-sub"><EntityLink target="customer" id={b.customerId} go={go} title="下钻到客户档案">{b.customer}</EntityLink></div></div>),
     },
-    { key: 'amt', title: '预估金额', width: 120, align: 'right' as const, render: (b: B) => <b className="num"><Money v={b.amt} role={role} /></b> },
-    { key: 'stage', title: '阶段', width: 100, render: (b: B) => <Tag tone={ST_TONE[b.stage]}>{b.stage}</Tag> },
+    { key: 'amt', title: '预估金额', width: 110, align: 'right' as const, render: (b: B) => <b className="num"><Money v={b.amt} role={role} wan /></b> },
+    { key: 'stage', title: '阶段', width: 96, render: (b: B) => <Tag tone={ST_TONE[b.stage]}>{b.stage}</Tag> },
     {
       key: 'deposit', title: '保证金', width: 130,
       render: (b: B) => <span><Tag tone={DEP_TONE[b.depositSt]}>{b.depositSt}</Tag> <Money v={b.deposit} role={role} wan className="nc-cell-sub" /></span>,
     },
     {
-      key: 'openDate', title: '开标时间', width: 130,
+      key: 'openDate', title: '开标时间', width: 170,
       render: (b: B) => {
         const d = daysUntil(b.openDate);
-        return <span className={d < 0 ? 'nc-cell-sub' : d <= 3 ? 'is-red' : d <= 7 ? 'is-orange' : ''}>{b.openDate}{d >= 0 && !['中标', '未中标'].includes(b.stage) ? ` · 剩 ${d} 天` : ''}</span>;
+        const done = ['中标', '未中标'].includes(b.stage);
+        return (
+          <span className="nc-cell-main">
+            <span>{b.openDate}</span>
+            {d === 0 && !done && <Tag tone="red">今日开标</Tag>}
+            {d > 0 && !done && <Tag tone={d <= 3 ? 'red' : d <= 7 ? 'orange' : 'gray'}>开标 +{d} 天</Tag>}
+          </span>
+        );
       },
     },
+    { key: 'owner', title: '负责人', width: 76 },
     {
-      key: 'cert', title: '证书占用', width: 96,
-      render: (b: B) => <span className={`num${b.certGot < b.certNeed ? ' is-red' : ''}`}>{b.certGot}/{b.certNeed}{b.certGot < b.certNeed ? <Ico n="warning" size={12} style={{ color: 'var(--c-warning-mid)' }} /> : null}</span>,
-    },
-    { key: 'owner', title: '负责人', width: 80 },
-    {
-      key: 'op', title: '操作', width: 190, align: 'right' as const,
-      render: (b: B) => (
-        <div className="nc-ops" onClick={(e) => e.stopPropagation()}>
-          <Op onClick={() => { setDetail(b); setTab('overview'); }}>详情</Op><OpSep />
-          {!['中标', '未中标'].includes(b.stage) && <><Op gold onClick={() => advance(b)}>推进阶段</Op><OpSep /></>}
-          {b.stage === '中标' && <><Op gold onClick={() => {
-            setPendingContract({ bidId: b.id, customer: b.customer, name: b.name, amt: b.amt });
-            go('contract-new');
-          }}>转合同</Op><OpSep /><Op onClick={() => go('project-new')}>补建项目</Op><OpSep /></>}
-          <Op onClick={() => setPoolOpen(true)}>证书池</Op>
-        </div>
-      ),
+      key: 'op', title: '操作', width: 210, align: 'right' as const,
+      render: (b: B) => {
+        const flow: OpMoreItem[] = [];
+        if (!['中标', '未中标'].includes(b.stage)) flow.push({ label: b.stage === '开标' ? '登记开标结果' : `推进阶段（${b.stage} → 下一步）`, onClick: () => advance(b) });
+        if (b.depositSt === '未交' || b.depositSt === '未退') flow.push({ label: b.depositSt === '未交' ? '登记保证金已交' : '解除 / 登记已退', onClick: () => { setDepAmt(b.deposit); setDepOpen(b); } });
+        flow.push({ label: '证书池选择', onClick: () => setPoolOpen(true) });
+        return (
+          <div className="nc-ops" onClick={(e) => e.stopPropagation()}>
+            {b.stage === '开标' && <Btn size="sm" kind="primary" onClick={() => { setResultOpen(b); setWinAmt(b.amt); }}>登记结果</Btn>}
+            {!['中标', '未中标'].includes(b.stage) && <OpMore label="流转 ▾" items={flow} />}
+            <Op onClick={() => toast('已打开编辑表单（字段与发起投标向导一致）')}>编辑</Op>
+            <Op onClick={() => { setDetail(b); setTab('overview'); }}>详情</Op>
+          </div>
+        );
+      },
     },
   ];
 
@@ -244,25 +257,18 @@ export default function BidPage({ go, role, nav }: { go: (p: string) => void; ro
     <>
       <PageHead
         title="投标管理"
-        badges={<Tag tone="blue">在办 {bids.filter((b) => !['中标', '未中标'].includes(b.stage)).length} 项 · 待登记结果 {stCount('开标')} 项</Tag>}
+        sub={`共 ${bids.length} 项 · 进行中 ${bids.filter((b) => !['中标', '未中标'].includes(b.stage)).length} 项`}
         actions={<>
           <div className="nc-seg">
             <button className={`nc-seg-btn${view === 'kanban' ? ' is-on' : ''}`} onClick={() => setView('kanban')}>▦ 看板</button>
             <button className={`nc-seg-btn${view === 'list' ? ' is-on' : ''}`} onClick={() => setView('list')}>≡ 列表</button>
           </div>
-          <Btn onClick={() => setLedgerOpen(true)}><Ico n="wallet" size={16} /> 保证金台账</Btn>
           <Btn onClick={() => toast('已导出 CSVT-投标台账（UTF-8 BOM）')}>导出 CSV</Btn>
           <Btn kind="primary" onClick={() => { setWizStep(0); setWizOpen(true); }}>＋ 发起投标</Btn>
         </>}
       />
 
-      {safetyLic && safetyLic.validTo < '2026-12-31' && (
-        <Banner tone="warn" actions={<Btn size="sm" onClick={() => go('cert')}>去证书管理</Btn>}>
-          <Ico n="warning" size={14} style={{ color: 'var(--c-warning-mid)' }} /> <b>安全生产许可证</b> 有效期至 {safetyLic.validTo}（剩余 {daysUntil(safetyLic.validTo)} 天）——依「安许过期 = 全部投标废标」，须在临期前完成续证安排。
-        </Banner>
-      )}
-
-      {/* 投标概览 5 卡（含中标率） */}
+      {/* 投标概览 5 卡（简化：值 + 标签，点击即筛选；明细与风险下沉到详情抽屉） */}
       {(() => {
         const total = bids.length;
         const doing = bids.filter((b) => !['中标', '未中标'].includes(b.stage)).length;
@@ -271,81 +277,60 @@ export default function BidPage({ go, role, nav }: { go: (p: string) => void; ro
         const w = bids.filter((b) => b.stage === '中标').length;
         const l = bids.filter((b) => b.stage === '未中标').length;
         const rate = (w + l) ? Math.round(w / (w + l) * 100) : null;
-        const depDue = bids.filter((b) => b.depositSt === '未退').reduce((a, b) => a + b.deposit, 0);
         return (
           <div className="nc-tiles nc-tiles-5">
-            <div className="nc-tile is-clickable" onClick={() => { setStage(''); setQuick('全部'); setPage(1); }} {...pressProps(() => { setStage(''); setQuick('全部'); setPage(1); })}>
-              <div className="nc-tile-label">全部投标</div>
+            <div className="nc-tile is-clickable" onClick={() => { setQuick('全部'); setStage(''); setPage(1); }} {...pressProps(() => { setQuick('全部'); setStage(''); setPage(1); })}>
               <div className="nc-tile-value">{total}</div>
-              <div className="nc-tile-sub">点击查看全部</div>
+              <div className="nc-tile-label">全部投标</div>
             </div>
-            <div className="nc-tile is-clickable" onClick={() => { setQuick('保未交/未退'); setPage(1); }} {...pressProps(() => { setQuick('保未交/未退'); setPage(1); })}>
-              <div className="nc-tile-label">进行中</div>
+            <div className="nc-tile is-clickable" onClick={() => { setQuick('全部'); setStage(''); setDep(''); setKw(''); setOwner(''); setPage(1); }} {...pressProps(() => { setQuick('全部'); setStage(''); setDep(''); setKw(''); setOwner(''); setPage(1); })}>
               <div className="nc-tile-value nc-v-blue">{doing}</div>
-              <div className="nc-tile-sub">未进入终态的投标</div>
+              <div className="nc-tile-label">进行中</div>
             </div>
             <div className="nc-tile is-clickable" onClick={() => { setQuick('待登记结果'); setPage(1); }} {...pressProps(() => { setQuick('待登记结果'); setPage(1); })}>
-              <div className="nc-tile-label">待登记结果</div>
               <div className="nc-tile-value nc-v-orange">{pending}</div>
-              <div className="nc-tile-sub">已开标 · 结果强制登记</div>
+              <div className="nc-tile-label">待登记结果</div>
             </div>
-            <div className="nc-tile is-clickable" onClick={() => { setQuick(' 开标≤7天'); setPage(1); }} {...pressProps(() => { setQuick(' 开标≤7天'); setPage(1); })}>
-              <div className="nc-tile-label">临近开标 ≤7 天</div>
+            <div className="nc-tile is-clickable" onClick={() => { setQuick('开标≤7天'); setPage(1); }} {...pressProps(() => { setQuick('开标≤7天'); setPage(1); })}>
               <div className="nc-tile-value nc-v-orange">{soon}</div>
-              <div className="nc-tile-sub">保证金未退 <Money v={depDue} role={role} wan /></div>
+              <div className="nc-tile-label">临近开标 ≤7 天</div>
             </div>
             <div className="nc-tile">
-              <div className="nc-tile-label">中标率</div>
               <div className="nc-tile-value nc-v-green">{rate === null ? '—' : `${rate}%`} <small style={{ fontSize: 13, color: 'var(--ink-3)', marginLeft: 3 }}>中标 {w} / 未中标 {l}</small></div>
-              <div className="nc-tile-sub">{w + l ? `已决标 ${w + l} 项` : '暂无已决标项目'}</div>
+              <div className="nc-tile-label">中标率</div>
             </div>
           </div>
         );
       })()}
 
-      {/* 阶段统计条 */}
-      <div className="nc-stage-strip">
-        {BID_STAGES.map((s) => (
-          <button key={s} className={`nc-stage-cell${stage === s ? ' is-on' : ''}`} onClick={() => { setStage(stage === s ? '' : s); setPage(1); }}>
-            <span className="nc-stage-name">{s}</span>
-            <span className="nc-stage-num num">{stCount(s)}</span>
-          </button>
-        ))}
-      </div>
-
       {view === 'list' ? (
         <Card flush>
-          <ListToolbar
-            rows={[
-              {
-                label: '阶段', value: stage, onChange: (k) => { setStage(k); setPage(1); },
-                items: [
-                  { key: '', label: '全部阶段', cnt: bids.length },
-                  ...BID_STAGES.map((s) => ({ key: s, label: s, cnt: bids.filter((b) => b.stage === s).length })),
-                ],
-              },
-              {
-                label: '快捷', value: quick, onChange: (k) => { setQuick(k); setPage(1); },
-                items: ['全部', ' 开标≤7天', '今日开标', '保未交/未退', '证书满载', '待登记结果'].map((c) => ({ key: c, label: c })),
-              },
-            ]}
-            right={<>
-              <select className="nc-input" style={{ width: 130 }} value={owner} onChange={(e) => { setOwner(e.target.value); setPage(1); }}>
-                <option value="">全部负责人</option>{['李强', '蓝峰', '王志海', '赵薇', '周斌'].map((o) => <option key={o}>{o}</option>)}
-              </select>
-              <select className="nc-input" style={{ width: 130 }} value={dep} onChange={(e) => { setDep(e.target.value); setPage(1); }}>
-                <option value="">全部保证金</option>{['未交', '已交', '未退', '已退', '未涉及'].map((d) => <option key={d}>{d}</option>)}
-              </select>
-              <input className="nc-input nc-lt-search" value={kw} placeholder="搜索编号 / 项目 / 客户"
-                onChange={(e) => { setKw(e.target.value); setPage(1); }} />
-              <Btn onClick={() => { setKw(''); setStage(''); setOwner(''); setDep(''); setQuick('全部'); setPage(1); }}>重置</Btn>
-            </>}
-          />
-          <div className="nc-listhint">
-            <span>开标当日锁定不可回 · 终态强制登记结果<Tip text="开标当日（开标日期 = 今天）后不可再修改开标信息；进入终态（中标 / 未中标）后强制登记结果并归档。" /></span>
+          {/* 工具条：搜索 + 3 下拉 + 右侧快捷 chips */}
+          <div className="nc-ctbar" style={{ padding: '10px 12px', borderBottom: '1px solid var(--c-hairline)' }}>
+            <input
+              className="nc-input nc-ct-search" value={kw} placeholder="搜索编号 / 项目 / 客户"
+              onChange={(e) => { setKw(e.target.value); setPage(1); }}
+            />
+            <select className="nc-input" style={{ width: 120 }} value={stage} onChange={(e) => { setStage(e.target.value); setPage(1); }}>
+              <option value="">全部阶段</option>
+              {BID_STAGES.map((s) => <option key={s}>{s}</option>)}
+            </select>
+            <select className="nc-input" style={{ width: 120 }} value={owner} onChange={(e) => { setOwner(e.target.value); setPage(1); }}>
+              <option value="">全部负责人</option>{['李强', '蓝峰', '王志海', '赵薇', '周斌'].map((o) => <option key={o}>{o}</option>)}
+            </select>
+            <select className="nc-input" style={{ width: 130 }} value={dep} onChange={(e) => { setDep(e.target.value); setPage(1); }}>
+              <option value="">保证金全部状态</option>{['未交', '已交', '未退', '已退', '未涉及'].map((d) => <option key={d}>{d}</option>)}
+            </select>
+            <div className="nc-ctchips">
+              {QUICKS.map((q) => (
+                <button key={q} className={`nc-fchip${quick === q ? ' is-on' : ''}`} onClick={() => { setQuick(q); setPage(1); }}>
+                  {q === '开标≤7天' && <Ico n="bell" size={12} />} {q}
+                </button>
+              ))}
+            </div>
           </div>
           <DataTable
-            cols={cols} rows={paged} rowKey={(b) => b.id} minWidth={1350}
+            cols={cols} rows={paged} rowKey={(b) => b.id} minWidth={1120}
             empty="没有符合筛选条件的投标项目；投标可由中标商机一键发起，也可在投标看板独立新建"
             rowClass={(b) => {
               const d = daysUntil(b.openDate);
@@ -354,7 +339,7 @@ export default function BidPage({ go, role, nav }: { go: (p: string) => void; ro
               return '';
             }}
             onRowClick={(b) => { setDetail(b); setTab('overview'); }}
-            foot={<TableFoot total={bids.length} filtered={rows.length} page={page} pageSize={pageSize} onPage={setPage} onPageSize={(n) => { setPageSize(n); setPage(1); }} extra={<span className="nc-cell-sub"> ｜ 行点击打开详情</span>} />}
+            foot={<TableFoot total={bids.length} filtered={rows.length} page={page} pageSize={pageSize} onPage={setPage} onPageSize={(n) => { setPageSize(n); setPage(1); }} extra={<span className="nc-cell-sub"> ｜ 行点击打开详情 · <Op onClick={() => setLedgerOpen(true)}>保证金台账</Op></span>} />}
           />
         </Card>
       ) : (

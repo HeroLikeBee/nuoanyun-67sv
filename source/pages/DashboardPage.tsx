@@ -10,12 +10,13 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   Alert, Btn, Card, Code, EntityLink, Kpi, Op, PageHead, Progress, Tag, Tabs, useToast, pressProps,} from '../components/ui';
 import {
-  APPROVALS, BIDS, CERTS, CONTRACTS, CUSTOMERS, INVOICES, MATERIALS, OPPS, PROJECTS,
+  APPROVALS, BIDS, CERTS, CONTRACTS, CUSTOMERS, INVOICES, ITEMS, MATERIALS, OPPS, PROJECTS,
   RECEIVABLES, RISKS, ROLES, SUPPLIERS,
   OPP_STAGES, OPP_STAGE_PROB, OPP_TERMINAL,
   calcTax, fmt, fmtWan, normContractStatus, TODAY, canSeeMoney,
 } from '../components/data';
 import { Ico } from '../components/icons';
+import { setFocus } from '../components/store';
 import type { IconName } from '../components/icons';
 
 /** 距今天的天数（正 = 未来，负 = 已过期） */
@@ -476,11 +477,10 @@ export default function DashboardPage({ go, role, nav }: { go: (p: string) => vo
     blockProjectBiz(rows, true);
 
   /** 经营提醒 —— 单条 CTA 直达修复页 */
-  const blockAlert = (items: { tone: 'red' | 'orange' | 'gray'; title: string; sub: string; act: string; page: string }[], title = ' 经营提醒区', badge = '兜底') => (
+  const blockAlert = (items: { tone: 'red' | 'orange' | 'gray'; title: string; sub: string; act: string; page: string; focusId?: string }[], title = ' 经营提醒区', badge = '兜底') => (
     <Card hd={title} extra={<Tag tone="gray">{badge}</Tag>}>
       {items.map((it) => (
-        <div key={it.title} className="nc-alertrow" onClick={() => go(it.page)} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') go(it.page); }}>
-          <Tag tone={it.tone}>{it.tone === 'red' ? '风险' : it.tone === 'orange' ? '待修复' : '提醒'}</Tag>
+        <div key={it.title} className="nc-alertrow" onClick={() => { if (it.focusId) setFocus(it.page, it.focusId); go(it.page); }} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { if (it.focusId) setFocus(it.page, it.focusId); go(it.page); } }}>          <Tag tone={it.tone}>{it.tone === 'red' ? '风险' : it.tone === 'orange' ? '待修复' : '提醒'}</Tag>
           <span style={{ flex: 1, minWidth: 0 }}>
             <div className="nc-alertrow-t">{it.title}</div>
             <div className="nc-cell-sub">{it.sub}</div>
@@ -832,7 +832,7 @@ export default function DashboardPage({ go, role, nav }: { go: (p: string) => vo
             {blockAlert([
               { tone: 'orange', title: `${noContract.length} 个项目无销售合同在途 > 30 天`, sub: noContract.map((p) => `${p.id} · ${p.name}`).join(' / ') || '无', act: '补签合同', page: 'contract-new' },
               { tone: 'orange', title: '上月 2 个项目未登记成本', sub: '登记纪律兜底 · 附录 D', act: '去登记成本', page: 'project-center' },
-              { tone: 'orange', title: `${lowStock.length} 种材料低于安全库存线`, sub: lowStock.map((m) => m.name).slice(0, 3).join(' · ') || '—', act: '一键询价', page: 'material' },
+              { tone: 'orange', title: `${lowStock.length} 种材料低于安全库存线`, sub: lowStock.map((m) => `${m.name}（${m.stock}/${m.safe}）`).slice(0, 3).join(' · ') || '—', act: lowStock.length ? '查看最缺材料' : '一键询价', page: 'material', focusId: lowStock[0]?.code },
             ])}
             {blockApproval(approvalTabs, approvalTabs.length)}
           </div>

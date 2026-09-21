@@ -1,5 +1,6 @@
 // 诺安云 6.0 · 共享 UI 组件（严格遵循 src/themes/nuoan-cloud/DESIGN.md token）
-import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Ico } from './icons';
 import { canSeeMoney, fmt, fmtWan } from './data';
 import { setFocus } from './store';
@@ -138,6 +139,95 @@ export function Op({ danger, gold, disabled, onClick, children, title }: {
 }
 export function OpSep() { return <span className="nc-op-sep">·</span>; }
 
+/** 操作列占位符：该行不具备此操作权限时占住槽位，保证同一列跨行的按钮位置恒定对齐 */
+export function OpNone({ title }: { title?: string }) {
+  return <span className="nc-op-none" title={title} aria-label="无操作权限">—</span>;
+}
+
+/* ============================ 操作列收口「更多」 ============================ */
+export type OpMoreItem = {
+  label: React.ReactNode;
+  disabled?: boolean; danger?: boolean; title?: string; onClick?: () => void;
+};
+
+/**
+ * 操作列收口容器「更多 ⋯」。
+ *
+ * 背景：操作列原先按数据可用性逐个拼装（2~6 个不等），同一列在不同行的按钮数量、
+ * 位置都在漂移，用户竖着扫视时找不到「我要的那个按钮」。改为「常用操作最多外露 3 个
+ * + 其余收进更多 + 无权限留占位」，每行槽位数恒定。
+ *
+ * 面板用 Portal + position:fixed 而非 absolute：表格外层容器带 overflow-x:auto，
+ * absolute 会被滚动容器裁切，fixed 挂在 body 上才能浮出容器之外。
+ */
+export function OpMore({ items, label = '更多 ⋯' }: { items: OpMoreItem[]; label?: string }) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState({ top: 0, left: 0 });
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  /** 贴合触发按钮右下角；下方空间不够则上翻，右侧超出视口则左移 */
+  const place = useCallback(() => {
+    const el = btnRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const w = 176;
+    const h = panelRef.current?.offsetHeight ?? 120;
+    const below = r.bottom + 4;
+    const top = below + h > window.innerHeight && r.top - h - 4 > 0 ? r.top - h - 4 : below;
+    const left = Math.max(8, Math.min(r.right - w, window.innerWidth - w - 8));
+    setPos({ top, left });
+  }, []);
+
+  useLayoutEffect(() => { if (open) place(); }, [open, place]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (btnRef.current?.contains(t) || panelRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', place, true);
+    };
+  }, [open, place]);
+
+  return (
+    <>
+      <button
+        ref={btnRef} className="nc-op nc-op-more" disabled={!items.length}
+        aria-haspopup="menu" aria-expanded={open}
+        title={!items.length ? '当前无可用操作' : undefined}
+        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+      >{label}</button>
+      {open && createPortal(
+        <div
+          ref={panelRef} className="nc-opmenu" role="menu" style={{ top: pos.top, left: pos.left }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {items.map((it, i) => (
+            <button
+              key={i} role="menuitem" disabled={it.disabled} title={it.title}
+              className={`nc-oplist-item${it.disabled ? ' is-dis' : ''}${it.danger ? ' is-danger' : ''}`}
+              onClick={() => { if (it.disabled) return; it.onClick?.(); setOpen(false); }}
+            >{it.label}</button>
+          ))}
+        </div>,
+        document.body,
+      )}
+    </>
+  );
+}
+
 /* ============================ 卡片 / 分区 ============================ */
 export function Card({ flush, hd, extra, children, style }: {
   flush?: boolean; hd?: React.ReactNode; extra?: React.ReactNode; children?: React.ReactNode; style?: React.CSSProperties;
@@ -145,7 +235,7 @@ export function Card({ flush, hd, extra, children, style }: {
   return (
     <section className={`nc-card${flush ? ' is-flush' : ''}`} style={style}>
       {hd && <div className="nc-card-hd"><h3>{hd}</h3>{extra && <div className="nc-card-hd-extra">{extra}</div>}</div>}
-      {children && <div className={flush ? '' : 'nc-card-bd'}>{children}</div>}
+      {children && (flush ? children : <div className="nc-card-bd">{children}</div>)}
     </section>
   );
 }
@@ -318,11 +408,13 @@ export function DataTable<T extends Record<string, unknown>>({
 }) {
   if (!rows.length) {
     return (
-      <div className="nc-empty">
-        <div className="nc-empty-ico"><Ico n="folder" size={34} /></div>
-        <div>/ 没有符合条件的记录</div>
-        {empty && <div>{empty}</div>}
-        {emptyCta && <div>{emptyCta}</div>}
+      <div className="nc-tbl-host">
+        <div className="nc-empty">
+          <div className="nc-empty-ico"><Ico n="folder" size={34} /></div>
+          <div>/ 没有符合条件的记录</div>
+          {empty && <div>{empty}</div>}
+          {emptyCta && <div>{emptyCta}</div>}
+        </div>
       </div>
     );
   }
@@ -331,38 +423,41 @@ export function DataTable<T extends Record<string, unknown>>({
     ? [{ key: '__chk', title: '', width: 40 }, ...cols]
     : cols;
   return (
-    <div className="nc-tbl-wrap">
-      <table className="nc-tbl" style={{ minWidth }}>
-        <thead>
-          <tr>{headCols.map((c) => (
-            <th key={c.key} style={{ width: c.width, textAlign: c.align }} className={[c.align === 'right' ? 'is-num' : c.align === 'center' ? 'is-center' : '', c.sticky ? `is-sticky-${c.sticky === 'left' ? 'l' : 'r'}` : ''].filter(Boolean).join(' ')}>
-              {c.key === '__chk' && selectable ? (
-                <input type="checkbox" className="nc-check" checked={!!allOn} onChange={() => onSelectAll?.(allOn ? [] : rows.map(rowKey))} />
-              ) : c.title}
-            </th>
-          ))}</tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => {
-            const id = rowKey(r);
-            return (
-              <tr key={id} className={rowClass ? rowClass(r) : ''} onClick={onRowClick ? () => onRowClick(r) : undefined} style={onRowClick ? { cursor: 'pointer' } : undefined}>
-                {selectable && (
-                  <td onClick={(e) => e.stopPropagation()}>
-                    <input type="checkbox" className="nc-check" checked={!!selected?.includes(id)} onChange={() => onSelectRow?.(id)} />
-                  </td>
-                )}
-                {cols.map((c) => (
-                  <td key={c.key} className={[c.align === 'right' ? 'is-num' : c.align === 'center' ? 'is-center' : '', c.sticky ? `is-sticky-${c.sticky === 'left' ? 'l' : 'r'}` : ''].filter(Boolean).join(' ')}>
-                    {c.render ? c.render(r) : String(r[c.key] ?? '—')}
-                  </td>
-                ))}
-              </tr>
-            );
-          })}
-        </tbody>
-        {foot}
-      </table>
+    /* 表体与页脚是兄弟节点：视口锁定下卡头 / 筛选 / 分页固定，只有表格区局部滚动 */
+    <div className="nc-tbl-host">
+      <div className="nc-tbl-wrap">
+        <table className="nc-tbl" style={{ minWidth }}>
+          <thead>
+            <tr>{headCols.map((c) => (
+              <th key={c.key} style={{ width: c.width, textAlign: c.align }} className={[c.align === 'right' ? 'is-num' : c.align === 'center' ? 'is-center' : '', c.sticky ? `is-sticky-${c.sticky === 'left' ? 'l' : 'r'}` : ''].filter(Boolean).join(' ')}>
+                {c.key === '__chk' && selectable ? (
+                  <input type="checkbox" className="nc-check" checked={!!allOn} onChange={() => onSelectAll?.(allOn ? [] : rows.map(rowKey))} />
+                ) : c.title}
+              </th>
+            ))}</tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => {
+              const id = rowKey(r);
+              return (
+                <tr key={id} className={rowClass ? rowClass(r) : ''} onClick={onRowClick ? () => onRowClick(r) : undefined} style={onRowClick ? { cursor: 'pointer' } : undefined}>
+                  {selectable && (
+                    <td onClick={(e) => e.stopPropagation()}>
+                      <input type="checkbox" className="nc-check" checked={!!selected?.includes(id)} onChange={() => onSelectRow?.(id)} />
+                    </td>
+                  )}
+                  {cols.map((c) => (
+                    <td key={c.key} className={[c.align === 'right' ? 'is-num' : c.align === 'center' ? 'is-center' : '', c.sticky ? `is-sticky-${c.sticky === 'left' ? 'l' : 'r'}` : ''].filter(Boolean).join(' ')}>
+                      {c.render ? c.render(r) : String(r[c.key] ?? '—')}
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {foot}
     </div>
   );
 }

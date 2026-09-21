@@ -292,7 +292,6 @@ export default function OppPage({ go, role, nav }: { go: (p: string) => void; ro
 
       {view === 'list' ? (
         <Card flush>
-          <div style={{ padding: '0 16px 16px' }}>
             <DataTable<O>
               minWidth={1520}
               cols={[
@@ -321,7 +320,6 @@ export default function OppPage({ go, role, nav }: { go: (p: string) => void; ro
               rowClass={(o) => (OPP_TERMINAL.includes(o.stage) ? 'nc-row-dead' : '')}
               foot={<TableFoot total={OPPS.length} filtered={rows.length} page={page} pageSize={pageSize} onPage={setPage} onPageSize={(n) => { setPageSize(n); setPage(1); }} />}
             />
-          </div>
         </Card>
       ) : (
         <Card>

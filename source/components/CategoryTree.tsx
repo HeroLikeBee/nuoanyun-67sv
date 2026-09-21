@@ -1,12 +1,14 @@
 // 诺安云 6.0 · 多级分类树维护组件（主数据共用）
 // 依据参考「主数据管理.html」TREE 模型 + 规范.md §5.4：
-//   · 两棵根树（产品目录 / 材料目录），支持任意层级嵌套
+//   · 两棵根树（物料目录「材料 / 设备」· 服务与套件目录），支持任意层级嵌套，覆盖全部四种物料类型
 //   · ＋新增子分类 / 重命名 / 删除（有子级或被引用禁删，留痕）
-//   · 同级重名校验、树上计数（含后代）、点击=过滤、搜索分类
-import React, { useMemo, useState } from 'react';
+//   · 维护动作直接写回 data.ts 的 CAT_TREE（同源可变存储 + 版本订阅），
+//     面包屑「当前分类」、分类目录列、详情路径与表单下拉即时同步，不再出现「树上改名、别处仍旧名」。
+//   · 同级重名校验、树上计数（含后代，由调用方从 ITEMS 实时统计）、点击=过滤、搜索分类
+import React, { useMemo, useState, useSyncExternalStore } from 'react';
 import { Btn, Field, Modal, useToast, pressProps} from './ui';
 import { Ico } from './icons';
-import { CAT_TREE, newCatId, type CatNode } from './data';
+import { CAT_TREE, catAddChild, catRemove, catRename, catVersion, subscribeCats, type CatNode } from './data';
 
 export type CatRootKey = 'prod' | 'mat';
 
@@ -39,8 +41,9 @@ function allNodes(): CatNode[] {
 
 export default function CategoryTree({ value, onChange, countOf, usedIds, editable = true, rootFilter }: Props) {
   const toast = useToast();
-  /* 本地可写副本：让新增 / 重命名 / 删除即时可见（原型级，不落库） */
-  const [tree, setTree] = useState<Record<CatRootKey, CatNode>>(() => JSON.parse(JSON.stringify(CAT_TREE)));
+  /* 分类树同源可变：维护动作直接写回 data.ts 的 CAT_TREE（catPath / catOptions 同源），
+     useSyncExternalStore 订阅版本号驱动本组件与所有消费方重渲染 */
+  useSyncExternalStore(subscribeCats, catVersion, catVersion);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({ prod: true, mat: true, p11: true, p12: true, m1: true, m2: true });
   const [q, setQ] = useState('');
   const [modal, setModal] = useState<{ mode: 'add' | 'edit'; root: CatRootKey; parent: CatNode | null; edit: CatNode | null } | null>(null);
@@ -49,12 +52,13 @@ export default function CategoryTree({ value, onChange, countOf, usedIds, editab
   const [owner, setOwner] = useState('');
   const [err, setErr] = useState('');
 
-  const roots: CatRootKey[] = rootFilter ? [rootFilter] : ['prod', 'mat'];
+  const roots: CatRootKey[] = rootFilter ? [rootFilter] : ['mat', 'prod'];
   const flat = useMemo(() => {
     const out: { n: CatNode; d: number; root: CatRootKey; parent: CatNode | null }[] = [];
-    roots.forEach((k) => walk(tree[k], 0, (n, d, p) => out.push({ n, d, root: k, parent: p })));
+    roots.forEach((k) => walk(CAT_TREE[k], 0, (n, d, p) => out.push({ n, d, root: k, parent: p })));
     return out;
-  }, [tree, roots.join(',')]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [catVersion(), roots.join(',')]);
 
   /** 子树 ID 集合（含自身） */
   const subIds = (n: CatNode) => {
@@ -79,10 +83,10 @@ export default function CategoryTree({ value, onChange, countOf, usedIds, editab
     const nm = name.trim();
     if (!nm) { setErr('分类名称必填'); return; }
     /* 同级重名校验 */
-    const siblings = modal.mode === 'add' ? (modal.parent ? modal.parent.ch || [] : [tree[modal.root]]) : ((() => {
+    const siblings = modal.mode === 'add' ? (modal.parent ? modal.parent.ch || [] : CAT_TREE[modal.root].ch || []) : ((() => {
       const rs = flat.find((f) => f.n.id === modal.edit!.id);
       const p = rs?.parent;
-      return p ? (p.ch || []) : [tree[modal.root]];
+      return p ? (p.ch || []) : CAT_TREE[modal.root].ch || [];
     })());
     if (siblings.some((x) => x.n === nm && x.id !== modal.edit?.id)) { setErr(`同级已存在分类「${nm}」，请改名`); return; }
     /* 全局重名校验（跨树提示，避免"消防水"在产品与材料下重名混淆） */
@@ -91,23 +95,15 @@ export default function CategoryTree({ value, onChange, countOf, usedIds, editab
       if (dup) toast(`提示：其它层级已存在「${nm}」，原型允许重名但建议区分`, 'err');
     }
 
-    setTree((t) => {
-      const nt = JSON.parse(JSON.stringify(t)) as Record<CatRootKey, CatNode>;
-      if (modal.mode === 'add') {
-        const id = newCatId(modal.root);
-        const node: CatNode = { id, n: nm, owner: owner.trim() || undefined };
-        if (modal.parent) {
-          const target = findIn(nt[modal.root], modal.parent.id);
-          if (target) { target.ch = target.ch || []; target.ch.push(node); }
-        } else { nt[modal.root] = node; }
-      } else {
-        const target = findIn(nt[modal.root], modal.edit!.id);
-        if (target) { target.n = nm; target.owner = owner.trim() || undefined; }
-      }
-      return nt;
-    });
-    toast(modal.mode === 'add' ? `已新增分类「${nm}」，已同步至表单下拉` : `已重命名分类为「${nm}」`);
-    if (modal.mode === 'add' && modal.parent) setExpanded((e) => ({ ...e, [modal.parent!.id]: true }));
+    if (modal.mode === 'add') {
+      const node = catAddChild(modal.root, modal.parent ? modal.parent.id : null, nm, owner.trim() || undefined);
+      if (!node) { setErr('新增失败：上级分类不存在'); return; }
+      toast(`已新增分类「${nm}」，已同步至表单下拉`);
+      if (modal.parent) setExpanded((e) => ({ ...e, [modal.parent!.id]: true }));
+    } else {
+      catRename(modal.edit!.id, nm, owner.trim() || undefined);
+      toast(`已重命名分类为「${nm}」，路径与表单下拉同步更新`);
+    }
     setModal(null);
   };
 
@@ -133,11 +129,12 @@ export default function CategoryTree({ value, onChange, countOf, usedIds, editab
       <div className="nc-cattree-body">
         <button className={`nc-tnode${value === '' ? ' is-on' : ''}`} onClick={() => onChange('')}>
           <span className="nc-tnode-nm">全部分类</span>
-          <em className="num">{flat.filter((f) => f.d > 0).reduce((s, f) => s + countOf(f.n.id), 0)}</em>
+          {/* 只汇总一级节点（其 cntOf 已含后代），避免父子重复相加把总数放大 */}
+          <em className="num">{flat.filter((f) => f.d === 1).reduce((s, f) => s + cntOf(f.n), 0)}</em>
         </button>
 
         {roots.map((k) => {
-          const root = tree[k];
+          const root = CAT_TREE[k];
           const open = expanded[root.id];
           return (
             <div key={k} className="nc-troot">
@@ -171,7 +168,7 @@ export default function CategoryTree({ value, onChange, countOf, usedIds, editab
       {/* 新增 / 重命名 */}
       <Modal
         open={!!modal} onClose={() => setModal(null)} width={520}
-        title={modal?.mode === 'add' ? `新增分类${modal.parent ? ` · 上级「${modal.parent.n}」` : ` · ${tree[modal.root].n}`}` : `重命名分类 · ${modal?.edit?.n ?? ''}`}
+        title={modal?.mode === 'add' ? `新增分类${modal.parent ? ` · 上级「${modal.parent.n}」` : ` · ${CAT_TREE[modal.root].n}`}` : `重命名分类 · ${modal?.edit?.n ?? ''}`}
         foot={<>
           <Btn onClick={() => setModal(null)}>取消</Btn>
           <Btn kind="primary" onClick={submit}>保存</Btn>
@@ -195,12 +192,7 @@ export default function CategoryTree({ value, onChange, countOf, usedIds, editab
           <Btn onClick={() => setDelTarget(null)}>取消</Btn>
           <Btn danger onClick={() => {
             if (!delTarget) return;
-            setTree((t) => {
-              const nt = JSON.parse(JSON.stringify(t)) as Record<CatRootKey, CatNode>;
-              const rm = (list: CatNode[]): CatNode[] => list.filter((x) => x.id !== delTarget.node.id).map((x) => ({ ...x, ch: x.ch ? rm(x.ch) : undefined }));
-              nt[delTarget.root] = { ...nt[delTarget.root], ch: rm(nt[delTarget.root].ch || []) };
-              return nt;
-            });
+            catRemove(delTarget.root, delTarget.node.id);
             if (value === delTarget.node.id) onChange('');
             toast(`已删除分类「${delTarget.node.n}」（留痕）`);
             setDelTarget(null);
@@ -259,14 +251,4 @@ function Branch({
       ))}
     </>
   );
-}
-
-/** 在树中查节点（返回可变引用） */
-function findIn(root: CatNode, id: string): CatNode | null {
-  if (root.id === id) return root;
-  for (const c of root.ch || []) {
-    const hit = findIn(c, id);
-    if (hit) return hit;
-  }
-  return null;
 }

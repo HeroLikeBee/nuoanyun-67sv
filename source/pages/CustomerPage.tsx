@@ -289,8 +289,7 @@ export default function CustomerPage({ go, role, nav }: { go: (p: string) => voi
           <span className="nc-listhint-sp" />
           <span>等级规则<Tip text={GRADE_RULE.replace('等级规则：', '')} /></span>
         </div>
-        <div style={{ padding: '0 16px 16px' }}>
-          <DataTable<C>
+        <DataTable<C>
             selectable selected={sel}
             onSelectAll={setSel} onSelectRow={(id) => setSel((p) => p.includes(id) ? p.filter((x) => x !== id) : [...p, id])}
             minWidth={1720}
@@ -363,7 +362,6 @@ export default function CustomerPage({ go, role, nav }: { go: (p: string) => voi
             onRowClick={(c) => setDetail(c)}
             foot={<TableFoot total={CUSTOMERS.length} filtered={rows.length} page={page} pageSize={pageSize} onPage={setPage} onPageSize={(n) => { setPageSize(n); setPage(1); }} />}
           />
-        </div>
       </Card>
 
       {/* ============ 详情抽屉 ============ */}

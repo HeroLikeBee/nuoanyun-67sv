@@ -11,12 +11,12 @@
 import React, { useEffect, useState } from 'react';
 import {
   Alert, Banner, Btn, Card, Check, Collapse, EntityLink, Field, Modal, Money, Op, PageHead, Tag, Tip, useToast, pressProps,} from '../components/ui';
-import { CUSTOMERS, PROJECTS, SUPPLIERS, canSeeMoney, fmt, TODAY } from '../components/data';
+import { CUSTOMERS, PROJECTS, SUPPLIERS, QUOTES, QUOTE_STATUS, canSeeMoney, fmt, TODAY } from '../components/data';
 import { addContract, getPendingContract, setPendingContract } from '../components/store';
 import { Ico, StatusIco } from '../components/icons';
 
 /* ============================ 常量：来源 / 类型 / 路由 ============================ */
-type Src = 'manual' | 'ocr' | 'std' | 'ent' | 'copy' | 'quote' | null;
+type Src = 'manual' | 'ocr' | 'std' | 'ent' | 'copy' | null;
 
 const SRC_META: Record<string, { n: string; r: number[] }> = {
   manual: { n: '手工录入', r: [0, 3] },
@@ -24,16 +24,14 @@ const SRC_META: Record<string, { n: string; r: number[] }> = {
   std: { n: '标准模板', r: [0, 1, 3] },
   ent: { n: '企业模板', r: [0, 1, 3] },
   copy: { n: '复制历史合同', r: [0, 1, 3] },
-  quote: { n: '报价转化', r: [0, 3] },
 };
 
-const SRC_CARDS: { key: Src; ico: string; t: string; d: string; p: string; dis?: boolean }[] = [
+const SRC_CARDS: { key: Src; ico: string; t: string; d: string; p: string }[] = [
   { key: 'manual', ico: '', t: '手工录入', d: '空表单直入 Step3，从零填写合同信息、明细与收款计划', p: 'Step0 → Step3' },
   { key: 'ocr', ico: '', t: 'OCR 识别', d: '上传 PDF/JPG ≤50MB → 异步识别 ≤10s → Step2 左图右字段校对', p: 'Step0 → 1 → 2 → 3' },
   { key: 'std', ico: '', t: '标准模板', d: '全局模板 → 预览（内置风险条款标注）→ 变量替换 → 生成草稿', p: 'Step0 → 1 → 3' },
   { key: 'ent', ico: '', t: '企业模板', d: '先选客户 → 其专属模板 → 同标准模板（预览 + 变量替换）', p: 'Step0 → 1 → 3' },
   { key: 'copy', ico: '', t: '复制历史合同', d: '选择器（本客户优先 + 同类型）→ 差异预览 → 逐项确认带入', p: 'Step0 → 1 → 3' },
-  { key: 'quote', ico: '', t: '报价转化', d: '由报价单【转合同】触发，本页仅作说明', p: '前往报价台账', dis: true },
 ];
 
 const TYPES = ['销售合同', '维护保养合同', '采购合同', '分包合同', '框架协议'];
@@ -263,6 +261,11 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
     { n: '主合同-昆明万达广场消防改造（签署版）.pdf', cat: '合同扫描件', sz: '8.8MB', fix: true },
   ]);
   const [more, setMore] = useState(false);
+  /* --- 从报价单导入明细 --- */
+  const [quoteImport, setQuoteImport] = useState(false);
+  const [qKw, setQKw] = useState('');
+  const [qStatus, setQStatus] = useState<string>('全部');
+  const [qSel, setQSel] = useState<string[]>([]);
   const [attCat, setAttCat] = useState('合同扫描件');
   const [chk, setChk] = useState<string[]>(SIX_CLAUSES.slice(0, 5));
 
@@ -311,7 +314,7 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
   if (dtlSum > 0 && plnSum !== dtlSum) issues.push(['plan', `收款合计 ≠ 明细合计（差 ${fmt(gap)}），可一键补平`]);
   if (+f.ratm > 24) issues.push(['rat', `缺陷责任期 ${f.ratm} 个月超过 24 个月：请确认资金占用与回收风险`]);
   if (f.multi === '是' && plan.length === 0) issues.push(['plan', '已选择多年期维护保养：收款计划为空，建议按服务年度生成']);
-  if (src && src !== 'manual' && src !== 'quote') issues.push(['name', `名称 / 相对方 / 金额等已由「${SRC_META[src].n}」带出，请确认`]);
+  if (src && src !== 'manual') issues.push(['name', `名称 / 相对方 / 金额等已由「${SRC_META[src].n}」带出，请确认`]);
 
   const moreFilled = [
     !!f.term, !!f.pbr, !!f.pbm, !!f.war, !!f.rat, !!f.ratm, f.multi === '是', !!f.renew,
@@ -571,7 +574,7 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
       <PageHead
         title="新建合同"
         badges={<><Tag tone="blue">六来源向导 · Step0~3</Tag><Tag tone="gray">{src ? SRC_META[src].n : '未选择来源'}</Tag></>}
-        sub="合同创建统一入口：手工录入 / OCR 识别 / 标准模板 / 企业模板 / 复制历史 / 报价转化"
+        sub="合同创建统一入口：手工录入 / OCR 识别 / 标准模板 / 企业模板 / 复制历史（合同明细支持从报价单导入）"
         actions={<Btn onClick={askReset}>重置向导</Btn>}
       />
 
@@ -604,9 +607,8 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
         <Card>
           <div className="nc-src-grid">
             {SRC_CARDS.map((s) => (
-              <button key={s.t} type="button" className={`nc-src-card${s.dis ? ' dis' : ''}${src === s.key ? ' is-on' : ''}`} disabled={s.dis} title={s.dis ? `该来源暂不可用：${s.d}` : s.d}
+              <button key={s.t} type="button" className={`nc-src-card${src === s.key ? ' is-on' : ''}`} title={s.d}
                 onClick={() => {
-                  if (s.dis) { toast('报价转化由报价单【转合同】触发；演示：前往报价台账', 'err'); return; }
                   setSrc(s.key); setRoute(SRC_META[s.key!].r);
                   if (s.key === 'manual') { toast('已选择「手工录入」，直入 Step3'); goStep(3); } else goStep(1);
                 }}>
@@ -901,11 +903,6 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
               <Field label="税额（自动汇总）">
                 <input className="nc-input num" readOnly value={f.amt ? `${fmt(taxVal)}（${cal === 'inc' ? '含税' : '不含税'} ${rate}% 口径）` : '—'} />
               </Field>
-              {src === 'quote' && (
-                <Field label="原报价金额" note="仅「报价转化」来源带入（只读），用于比价与折让审计">
-                  <input className="nc-input num" readOnly value="¥260,000" />
-                </Field>
-              )}
             </div>
           </Card>
 
@@ -1244,6 +1241,52 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
         title={confirm?.title ?? ''}
         foot={<><Btn onClick={() => setConfirm(null)}>取消</Btn><Btn kind={confirm?.danger ? undefined : 'primary'} danger={!!confirm?.danger} onClick={() => { const c = confirm; setConfirm(null); c?.cb(); }}>{confirm?.ok ?? '确定'}</Btn></>}>
         {confirm?.body}
+      </Modal>
+
+      {/* 从报价单导入合同明细 */}
+      <Modal
+        open={quoteImport} onClose={() => setQuoteImport(false)} width={760}
+        title="从报价单导入合同明细"
+        foot={<><Btn onClick={() => setQuoteImport(false)}>取消</Btn><Btn kind="primary" disabled={!qSel.length} onClick={importQuotes}>导入选中（{qSel.length}）</Btn></>}>
+        <div className="nc-form-grid" style={{ marginBottom: 10 }}>
+          <Field label="关键字">
+            <input className="nc-input" placeholder="报价单号 / 名称 / 客户" value={qKw} onChange={(e) => setQKw(e.target.value)} />
+          </Field>
+          <Field label="状态筛选">
+            <div className="nc-pair">
+              {['全部', ...QUOTE_STATUS].map((s) => (
+                <button key={s} type="button" className={`nc-fchip${qStatus === s ? ' is-on' : ''}`} onClick={() => setQStatus(s)}>{s}</button>
+              ))}
+            </div>
+          </Field>
+        </div>
+        <div className="nc-cell-sub" style={{ marginBottom: 6 }}>仅「已审批 / 已转化」报价单可导入；勾选后导入为合同明细行（金额、备注可继续在下方编辑）。</div>
+        <table className="nc-tbl" style={{ minWidth: 640 }}>
+          <thead><tr><th style={{ width: 48 }} className="is-center">选择</th><th>报价单号</th><th>客户</th><th>名称</th><th style={{ width: 130 }} className="is-num">金额（元）</th><th style={{ width: 80 }} className="is-center">状态</th></tr></thead>
+          <tbody>
+            {qList.map((q) => {
+              const ok = q.status === '已审批' || q.status === '已转化';
+              const on = qSel.includes(q.id);
+              return (
+                <tr key={q.id} className={on ? 'is-on' : ''}>
+                  <td className="is-center">
+                    {ok ? (
+                      <input type="checkbox" checked={on} onChange={(e) => setQSel((p) => (e.target.checked ? [...p, q.id] : p.filter((x) => x !== q.id)))} />
+                    ) : (
+                      <span className="nc-cell-sub" title="报价单未审批完成，暂不可导入">—</span>
+                    )}
+                  </td>
+                  <td className="nc-cell-sub">{q.id}</td>
+                  <td>{q.customer}</td>
+                  <td>{q.name}</td>
+                  <td className="is-num"><Money v={q.total} role={role} /></td>
+                  <td className="is-center"><Tag tone={q.status === '已审批' ? 'green' : q.status === '已转化' ? 'blue' : q.status === '作废' ? 'red' : 'gray'}>{q.status}</Tag></td>
+                </tr>
+              );
+            })}
+            {!qList.length && <tr><td colSpan={6} className="nc-cell-sub is-center">无匹配的报价单</td></tr>}
+          </tbody>
+        </table>
       </Modal>
     </>
   );

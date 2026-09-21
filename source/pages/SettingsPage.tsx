@@ -8,14 +8,14 @@
 //   · 证书管理：到期提前提醒天数（7 / 15 / 30 / 60 / 90）
 //   · 客户管理：来源字典 / 跟进方式字典
 //   · 全局：组织与人员（部门 · 角色）、审批分级路由阈值
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useSyncExternalStore } from 'react';
 import {
   Banner, Btn, Check, Field, Modal, Op, PageHead, Tag, useToast, type TagTone,
 } from '../components/ui';
 import CategoryTree from '../components/CategoryTree';
 import {
-  CHANGE_LOGS, CAT_TREE, CUST_SOURCES, DEPTS, FOLLOW_WAYS, MARK_TYPES, MATERIALS, PRODUCTS, QUOTE_CATS,
-  SUP_CATS, UNITS, UNIT_DESC, UNIT_GROUPS, catPath, catSubtreeIds,
+  CHANGE_LOGS, CAT_TREE, CUST_SOURCES, DEPTS, FOLLOW_WAYS, ITEMS, MARK_TYPES, QUOTE_CATS,
+  SUP_CATS, UNITS, UNIT_DESC, UNIT_GROUPS, catPath, catSubtreeIds, catVersion, subscribeCats,
 } from '../components/data';
 import { Ico, type IconName } from '../components/icons';
 
@@ -117,6 +117,8 @@ function Table({ head, children }: { head: [string, number | undefined][]; child
 
 export default function SettingsPage({ go, role, nav }: { go: (p: string) => void; role: string; nav?: number }) {
   const toast = useToast();
+  /* 分类树同源订阅：左栏树维护后，右侧「一级分类」汇总表与路径文案即时刷新 */
+  useSyncExternalStore(subscribeCats, catVersion, catVersion);
   const [grp, setGrp] = useState('cat');
   const [unitOn, setUnitOn] = useState<Record<string, boolean>>(() => Object.fromEntries(UNITS.map((u) => [u, true])));
   const [markOn, setMarkOn] = useState<Record<string, boolean>>(() => Object.fromEntries(MARK_TYPES.map((m) => [m.k, true])));
@@ -141,13 +143,15 @@ export default function SettingsPage({ go, role, nav }: { go: (p: string) => voi
    */
   const isAdmin = role === 'sysadmin';
 
-  /** 分类树的引用计数（跨材料与产品） */
+  /** 分类树计数：组件内部会按子树汇总，这里只返回「精确挂在该分类上」的条目数（避免父子重复相加） */
+  const catCountExact = (id: string) => ITEMS.filter((r) => r.cat === id).length;
+  /** 含下级引用条目（页面表格的展示口径：含全部后代分类） */
   const catCount = (id: string) =>
-    [...MATERIALS, ...PRODUCTS].filter((r) => catSubtreeIds(id).includes(r.cat)).length;
-  const catUsed = useMemo(() => [...MATERIALS, ...PRODUCTS].map((r) => r.cat).filter(Boolean), []);
+    ITEMS.filter((r) => catSubtreeIds(id).includes(r.cat)).length;
+  const catUsed = useMemo(() => ITEMS.map((r) => r.cat).filter(Boolean), []);
   /** 目录条目数：按目录名匹配分类树末级名称的条目（原型口径，仅作数量感知） */
   const catEntries = (names: string[]) =>
-    [...MATERIALS, ...PRODUCTS].filter((r) => {
+    ITEMS.filter((r) => {
       const leaf = catPath(r.cat).split(' / ').pop() || '';
       return names.includes(leaf);
     }).length;
@@ -164,7 +168,7 @@ export default function SettingsPage({ go, role, nav }: { go: (p: string) => voi
         return (
           <div className="nc-doc-layout">
             <aside className="nc-doc-side">
-              <CategoryTree value="" onChange={() => {}} countOf={catCount} usedIds={catUsed} />
+              <CategoryTree value="" onChange={() => {}} countOf={catCountExact} usedIds={catUsed} />
             </aside>
             <div className="nc-doc-main">
               <Banner tone="info">
@@ -199,7 +203,7 @@ export default function SettingsPage({ go, role, nav }: { go: (p: string) => voi
             </Banner>
             <Table head={[['分组', 90], ['单位', 76], ['消防行业计量说明', undefined], ['引用条目', 100], ['启用', 90]]}>
               {UNIT_GROUPS.flatMap((g) => g.items.map((u) => {
-                const used = [...MATERIALS, ...PRODUCTS].filter((r) => r.unit === u).length;
+                const used = ITEMS.filter((r) => r.unit === u).length;
                 return (
                   <tr key={u} className={unitOn[u] ? '' : 'is-muted-row'}>
                     <td><Tag tone="gray">{g.g}</Tag></td>
@@ -232,9 +236,9 @@ export default function SettingsPage({ go, role, nav }: { go: (p: string) => voi
             <Table head={[['标记', 120], ['名称', 200], ['说明', undefined], ['关联条目', 130], ['启用', 90]]}>
               {MARK_TYPES.map((m) => {
                 const used = m.k === 'CCCF'
-                  ? [...MATERIALS, ...PRODUCTS].filter((r) => r.ccc).length
+                  ? ITEMS.filter((r) => r.ccc).length
                   : m.k === '强制'
-                    ? [...MATERIALS, ...PRODUCTS].filter((r) => r.mand).length
+                    ? ITEMS.filter((r) => r.mand).length
                     : 0;
                 return (
                   <tr key={m.k} className={markOn[m.k] ? '' : 'is-muted-row'}>

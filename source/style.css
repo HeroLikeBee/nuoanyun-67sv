@@ -113,12 +113,20 @@ h1, h2, h3, h4 { margin: 0; font-weight: 600; }
 
 .num { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
 
-.nc-app { min-height: 100vh; background: var(--c-surface); }
+/* 视口锁定：整站锁一屏高，滚动下沉到内容区 / 模块内部（顶栏、页签栏、侧栏、页头、筛选、分页不再随内容滚走） */
+.nc-app {
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--c-surface);
+}
 
 /* ============================ 顶栏 ============================ */
 .nc-topbar {
-  position: sticky;
-  top: 0;
+  position: relative;
+  flex: none;
   z-index: 60;
   display: flex;
   align-items: center;
@@ -214,12 +222,11 @@ h1, h2, h3, h4 { margin: 0; font-weight: 600; }
 .nc-dd-sep { height: 1px; background: var(--c-hairline); margin: 6px 4px; }
 
 /* ============================ 侧栏 ============================ */
-.nc-body { display: flex; align-items: flex-start; }
+.nc-body { flex: 1; min-height: 0; display: flex; align-items: stretch; }
 
 .nc-side {
   width: var(--side-w); flex: none;
-  position: sticky; top: var(--topbar-h);
-  height: calc(100vh - var(--topbar-h));
+  height: auto;
   overflow-y: auto;
   background: var(--c-canvas);
   border-right: 1px solid var(--c-hairline);
@@ -278,9 +285,38 @@ h1, h2, h3, h4 { margin: 0; font-weight: 600; }
 }
 
 /* ============================ 主内容区 ============================ */
-.nc-main { flex: 1; min-width: 0; padding: 24px 24px 32px; min-height: calc(100vh - var(--topbar-h)); }
+/* 内容区：视口内固定高度，自身不出滚动条（滚动交给 .nc-page 或模块内部） */
+.nc-main {
+  flex: 1; min-width: 0; min-height: 0;
+  height: 100%;
+  padding: 16px 24px;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
 
-.nc-page { display: flex; flex-direction: column; gap: 16px; }
+/* 页面容器：默认整页滚动（驾驶舱 / 详情 / 工作台 / 向导等内容型页面） */
+.nc-page {
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column; gap: 16px;
+  overflow-y: auto; overflow-x: hidden;
+}
+
+/* --------------------------------------------------------------------------
+   列表型页面：视口锁定 —— 页头 / 瓦片 / 页签 / 筛选固定不动，
+   由表格卡吃满剩余高度、在卡内局部滚动，分页脚常驻卡底。
+   空间不足时（小屏 / 卡片过多）整页仍可滚动兜底，表格卡保 200px 不被压扁。
+   -------------------------------------------------------------------------- */
+.nc-page.is-fixed > * { flex: none; }
+.nc-page.is-fixed > .nc-card.is-flush:has(> .nc-tbl-host) { flex: 1 1 auto; min-height: 200px; }
+/* 工作台型（左树 + 右列表）：两栏一起锁定，右栏列表吃满剩余高度 */
+.nc-page.is-fixed > .nc-doc-layout { flex: 1 1 auto; min-height: 200px; }
+/* Tab 卡内含工作台双栏（材料主数据）：高度沿「卡 → 双栏 → 右栏 → 列表卡」链式传递 */
+.nc-page.is-fixed > .nc-card.is-flush:has(.nc-doc-layout) { flex: 1 1 auto; min-height: 200px; }
+.nc-page.is-fixed > .nc-card.is-flush:has(.nc-doc-layout) > .nc-doc-layout { flex: 1 1 auto; min-height: 0; }
+.nc-page.is-fixed .nc-doc-main { align-self: stretch; min-height: 0; }
+.nc-page.is-fixed .nc-doc-main > * { flex: none; }
+.nc-page.is-fixed .nc-doc-main > .nc-card.is-flush:has(> .nc-tbl-host),
+.nc-page.is-fixed .nc-doc-main > .nc-tbl-host { flex: 1 1 auto; min-height: 160px; }
 
 .nc-crumb { font-size: 12px; color: var(--ink-3); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .nc-crumb b { color: var(--ink); font-weight: 500; }
@@ -303,7 +339,7 @@ h1, h2, h3, h4 { margin: 0; font-weight: 600; }
   padding: 16px;
   box-shadow: var(--sh-card);
 }
-.nc-card.is-flush { padding: 0; overflow: hidden; }
+.nc-card.is-flush { padding: 0; overflow: hidden; display: flex; flex-direction: column; min-height: 0; }
 .nc-card-hd { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 0 0 12px; }
 .nc-card.is-flush .nc-card-hd {
   padding: 14px 16px 12px; border-bottom: 1px solid var(--c-hairline); margin: 0;
@@ -490,9 +526,17 @@ h1, h2, h3, h4 { margin: 0; font-weight: 600; }
 .nc-collapse-bd { padding: 14px 12px; border: 1px solid var(--c-border); border-top: none; border-radius: 0 0 var(--r-4) var(--r-4); }
 
 /* ============================ 表格 ============================ */
-.nc-tbl-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.nc-tbl-wrap { overflow: auto; -webkit-overflow-scrolling: touch; }
+/* 表体宿主：视口锁定下由它吃满卡片剩余高度，表体局部滚动、卡头/筛选/分页固定 */
+.nc-tbl-host { display: flex; flex-direction: column; min-height: 0; }
+.nc-tbl-host > .nc-tbl-wrap { flex: 1 1 auto; min-height: 0; }
+.nc-tbl-host > .nc-empty { flex: 1 1 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+/* 列表卡：卡头 / 筛选条 / 工具条不参与压缩，只有表体与页脚参与高度分配 */
+.nc-card.is-flush > * { flex: none; }
+.nc-card.is-flush > .nc-tbl-host { flex: 1 1 auto; min-height: 0; }
 .nc-tbl { width: 100%; border-collapse: collapse; font-size: 14px; min-width: 720px; }
 .nc-tbl thead th {
+  position: sticky; top: 0; z-index: 2;
   background: var(--c-surface-soft); color: var(--ink); font-weight: 600;
   text-align: left; padding: 12px; font-size: 13px; white-space: nowrap;
   border-bottom: 1px solid var(--c-hairline);
@@ -626,11 +670,36 @@ h1, h2, h3, h4 { margin: 0; font-weight: 600; }
 .nc-op.is-danger { color: var(--c-danger); }
 .nc-op.is-gold { color: var(--c-warning-deep); }
 .nc-op-sep { color: var(--c-hairline-strong); margin: 0 2px; font-size: 12px; }
+.nc-op:disabled, .nc-op[disabled] { color: var(--ink-3); cursor: not-allowed; opacity: 1; }
+/* 无权限占位：占住槽位使同一列跨行的按钮位置恒定对齐 */
+.nc-op-none {
+  color: var(--ink-3); opacity: .55; font-size: 13px; padding: 2px 4px;
+  white-space: nowrap; user-select: none; cursor: default;
+}
+.nc-op-more { font-variant-numeric: tabular-nums; }
+
+/* 更多操作浮层（Portal 挂 body，避免被表格滚动容器 overflow 裁切） */
+.nc-opmenu {
+  position: fixed; z-index: 95; min-width: 176px; padding: 4px;
+  background: var(--c-canvas); border: 1px solid var(--c-hairline);
+  border-radius: var(--r-6); box-shadow: var(--sh-overlay);
+  animation: nc-pop .14s ease;
+}
+.nc-opmenu .nc-oplist-item:disabled, .nc-opmenu .nc-oplist-item.is-dis { color: var(--ink-3); opacity: .5; cursor: not-allowed; }
+.nc-opmenu .nc-oplist-item:disabled:hover, .nc-opmenu .nc-oplist-item.is-dis:hover { background: transparent; color: var(--ink-3); opacity: .5; }
 
 /* 表尾 */
 .nc-tbl-foot {
   display: flex; align-items: center; justify-content: space-between; gap: 16px;
   padding: 12px 16px 0; font-size: 13px; color: var(--ink-3); flex-wrap: wrap;
+}
+/* 卡内页脚：与表体之间加上分隔线，并常驻卡片底部（不参与表体滚动）
+   兼容两种位置：分页走 DataTable 的 foot（落在 .nc-tbl-host 内）/ 作为卡的直接子元素 */
+.nc-tbl-host > .nc-tbl-foot,
+.nc-card.is-flush > .nc-tbl-foot {
+  flex: none;
+  border-top: 1px solid var(--c-hairline);
+  padding: 12px 16px;
 }
 /* 分页器：单行横向排列，窄屏才换行（参考 主数据管理.html:914 的单行内联口径） */
 .nc-pager { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
@@ -746,8 +815,20 @@ h1, h2, h3, h4 { margin: 0; font-weight: 600; }
 .nc-ocr-line { height: 8px; background: var(--c-surface); border-radius: var(--r-sm); margin: 10px 0; }
 .nc-ocr-box { position: absolute; height: 18px; border: 2px solid var(--c-primary); border-radius: var(--r-sm); background: var(--c-primary-weak); cursor: pointer; transition: .15s; }
 .nc-ocr-box.is-low { border-color: var(--c-warning); background: var(--c-warning-bg); }
-.nc-ocr-box.is-hot { box-shadow: 0 0 0 3px var(--c-primary-weak); }
-.nc-ocr-box.is-low.is-hot { box-shadow: 0 0 0 3px var(--c-warning-bg); }
+.nc-ocr-box.is-hot {
+  border-width: 3px;
+  border-color: var(--c-primary);
+  background: var(--c-primary-weak);
+  box-shadow: 0 0 0 3px var(--c-primary-weak), 0 0 0 6px var(--c-primary);
+  z-index: 5;
+}
+.nc-ocr-box.is-low.is-hot {
+  border-width: 3px;
+  border-color: var(--c-warning);
+  background: var(--c-warning-bg);
+  box-shadow: 0 0 0 3px var(--c-warning-bg), 0 0 0 6px var(--c-warning);
+  z-index: 5;
+}
 .nc-ocr-field {
   display: flex; align-items: flex-start; gap: 8px; padding: 8px 12px;
   border: 1px solid var(--c-hairline); border-radius: var(--r-lg); margin-bottom: 8px;
@@ -759,7 +840,7 @@ h1, h2, h3, h4 { margin: 0; font-weight: 600; }
 
 /* ============================ 报价工作台 ============================ */
 .nc-quote-grid { display: grid; grid-template-columns: 1fr 360px; gap: 16px; align-items: start; }
-.nc-quote-side { position: sticky; top: calc(var(--topbar-h) + 16px); }
+.nc-quote-side { position: sticky; top: 0; }
 .nc-sticky-bar .nc-sb-item { font-size: 12px; color: var(--ink-3); }
 .nc-sticky-bar .nc-sb-item b { display: block; font-size: 16px; color: var(--ink); }
 .nc-sticky-bar .nc-sb-item b.is-hl { color: var(--c-primary); }
@@ -876,7 +957,7 @@ h1, h2, h3, h4 { margin: 0; font-weight: 600; }
   display: flex; align-items: center; gap: 4px;
   height: 38px; padding: 0 12px;
   background: var(--c-canvas); border-bottom: 1px solid var(--c-hairline);
-  overflow-x: auto; scrollbar-width: none; position: sticky; top: var(--topbar-h); z-index: 40;
+  overflow-x: auto; scrollbar-width: none; position: relative; flex: none; z-index: 40;
 }
 .nc-tabbar::-webkit-scrollbar { display: none; }
 /* 页签：轻量文字态（无灰底块）；激活 = 主色蓝字 600，白底 + 淡蓝描边（等同无底色） */
@@ -952,6 +1033,16 @@ h1, h2, h3, h4 { margin: 0; font-weight: 600; }
 .nc-tile-label { font-size: 12px; color: var(--ink-3); }
 .nc-tile-value { font-size: 22px; line-height: 30px; font-weight: 700; margin-top: 2px; }
 .nc-tile-sub { font-size: 11px; color: var(--ink-3); margin-top: 1px; min-height: 16px; }
+/* 评审：瓦片严重度的「第二通道」—— 颜色之外再给字形 + 文字后缀，
+   色觉障碍用户、黑白打印、强光现场均可辨。is-alert 表示需要立即处理。 */
+.nc-tile-glyph {
+  margin-left: 6px; padding: 0 5px; border-radius: var(--r-4);
+  font-size: 11px; font-weight: 700; line-height: 16px; display: inline-block;
+  background: var(--c-fill-1); color: var(--ink-3); border: 1px solid var(--c-hairline);
+  vertical-align: 1px;
+}
+.nc-tile-glyph.is-alert { background: var(--c-danger-bg, #fdeceb); color: var(--c-danger); border-color: var(--c-danger-border, #f3b5b0); }
+.nc-tile-sfx { margin-left: 4px; font-size: 12px; font-weight: 500; color: var(--ink-3); }
 
 /* ---------- 审批链 / 阶段条 ---------- */
 .nc-chain { display: flex; align-items: center; flex-wrap: wrap; row-gap: 12px; }
@@ -1473,7 +1564,7 @@ td.is-num, th.is-num { text-align: right; }
   display: flex; flex-direction: column; gap: 4px;
   padding: 12px; background: var(--c-canvas);
   border: 1px solid var(--c-border); border-radius: var(--r-6);
-  position: sticky; top: calc(var(--topbar-h) + 12px); max-height: calc(100vh - var(--topbar-h) - 24px); overflow-y: auto;
+  position: sticky; top: 0; align-self: stretch; max-height: 100%; overflow-y: auto;
 }
 .nc-doc-side .nc-seg { display: flex; }
 .nc-doc-side .nc-seg-btn { flex: 1; padding: 0 4px; font-size: 12px; }
@@ -1511,7 +1602,7 @@ td.is-num, th.is-num { text-align: right; }
 @media (max-width: 1100px) {
   .nc-2col { grid-template-columns: 1fr; }
   .nc-doc-layout { grid-template-columns: 1fr; }
-  .nc-doc-side { position: static; max-height: none; }
+  .nc-doc-side { position: static; align-self: auto; max-height: none; }
 }
 @media (max-width: 640px) {
   .nc-check-grid { grid-template-columns: 1fr; }
@@ -2083,9 +2174,8 @@ font-size: 12px; border: 1px solid transparent; white-space: nowrap;
 .nc-ctbar .nc-ct-search { width: 240px; }
 .nc-ctchips { display: flex; gap: 8px; flex-wrap: wrap; margin-left: auto; }
 
-/* ---- 表格白卡（hairline 投影 + 圆角裁切；与其他卡片统一 hairline 描边） ---- */
-.nc-tbl-inner { background: var(--c-canvas); border: 1px solid var(--c-hairline); border-radius: var(--r-lg); box-shadow: var(--sh-card); overflow: hidden; }
-.nc-tbl-inner .nc-tbl-foot { border-top: 1px solid var(--c-hairline); padding: 12px 16px; }
+/* ---- 表格白卡：全站统一使用 .nc-card.is-flush（卡头/筛选固定 · 表体局部滚动 · 卡内页脚带上分隔线），
+       列表页不再各自定义表格卡容器 ---- */
 @media (max-width: 640px) {
   .nc-ctbar { gap: 6px; }
   .nc-ctbar .nc-ct-search { width: 100%; }
@@ -2175,6 +2265,10 @@ font-size: 12px; border: 1px solid transparent; white-space: nowrap;
 .nc-ltlbl { width: 44px; flex: none; font-size: 12px; color: var(--ink-3); }
 .nc-ltright { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-left: auto; }
 .nc-lt-search { width: 220px; }
+
+/* 证书筛选行：状态下拉 / 排序 / 搜索，靠右与视角段控同行 */
+.nc-certfilter { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.nc-cert-sel { width: 148px; padding: 5px 8px; font-size: 13px; height: 30px; }
 .nc-gap-b { font-size: 11px; border-radius: var(--r-pill); padding: 0 8px; line-height: 18px; white-space: nowrap; display: inline-block; }
 .nc-gap-b.is-full { background: var(--c-success-bg); color: var(--c-success-deep); }
 .nc-gap-b.is-lack { background: var(--c-danger-bg); color: var(--c-danger-deep); }
@@ -2898,6 +2992,67 @@ font-size: 12px; border: 1px solid transparent; white-space: nowrap;
 }
 
 /* 尊重系统「减少动态效果」偏好：关闭常驻动画（pulse / blink / flash） */
+/* ============================ 文档中心 · 多维筛选面板 ============================ */
+/* 分组式筛选：业务维（行业 / 项目类型 / 金额 / 项目）× 文档维（阶段 / 状态 / 类型 / 上传人 / 时间） */
+.nc-doc-filters {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 10px 12px; border-bottom: 1px solid var(--c-hairline);
+  background: var(--c-canvas);
+}
+.nc-doc-frow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.nc-doc-frow + .nc-doc-frow { padding-top: 8px; border-top: 1px dashed var(--c-hairline); }
+.nc-doc-flbl { width: 34px; flex: none; font-size: 12px; color: var(--ink-3); }
+.nc-doc-fchips { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.nc-doc-fsep { width: 1px; height: 18px; flex: none; background: var(--c-border); margin: 0 2px; }
+.nc-doc-fsel { width: 118px; }
+.nc-doc-fsel.is-wide { width: 168px; }
+.nc-doc-fmin { display: inline-flex; align-items: center; gap: 4px; }
+
+/* 筛选胶囊：选中态用浅底 + 主色字，密集排列时比反色更克制 */
+.nc-chipbtn {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 10px; font-size: 12px; line-height: 18px; font-family: inherit;
+  color: var(--ink-2); background: var(--c-fill-1);
+  border: 1px solid var(--c-border); border-radius: var(--r-pill);
+  cursor: pointer; white-space: nowrap; transition: .15s;
+}
+.nc-chipbtn:hover { color: var(--c-primary); border-color: var(--c-primary-3); }
+.nc-chipbtn.is-on {
+  color: var(--c-primary); background: var(--c-primary-weak);
+  border-color: var(--c-primary-3); font-weight: 600;
+}
+.nc-chipbtn:focus-visible { outline: 2px solid var(--c-primary); outline-offset: 2px; }
+
+/* 已选条件：可单独移除的标签 */
+.nc-doc-frow.is-active { padding-top: 8px; }
+.nc-fcond {
+  display: inline-flex; align-items: center; gap: 2px;
+  padding: 2px 4px 2px 9px; font-size: 12px; line-height: 18px;
+  color: var(--c-primary); background: var(--c-primary-weak);
+  border: 1px solid var(--c-primary-3); border-radius: var(--r-pill); white-space: nowrap;
+}
+.nc-fcond button {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 15px; height: 15px; padding: 0; border: none; cursor: pointer;
+  color: inherit; background: transparent; border-radius: 50%; opacity: .7;
+}
+.nc-fcond button:hover { opacity: 1; background: rgba(0, 0, 0, .06); }
+.nc-doc-fclear {
+  padding: 0 2px; font-size: 12px; font-family: inherit;
+  color: var(--ink-3); background: none; border: none; cursor: pointer; text-decoration: underline;
+}
+.nc-doc-fclear:hover { color: var(--c-danger); }
+
+/* 结果条 */
+.nc-doc-fresult {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 7px 12px; border-bottom: 1px solid var(--c-hairline); background: var(--c-surface);
+}
+.nc-doc-fcount { font-size: 12px; color: var(--ink-2); }
+.nc-doc-fsort { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.nc-doc-fsort .nc-input { width: 118px; }
+
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: .001ms !important;

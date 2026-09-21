@@ -14,6 +14,8 @@ type Props = {
   role: string;
   onRoleChange: (roleId: string) => void;
   pending: number;
+  /** 列表型页面：内容区视口锁定，页头 / 筛选固定，表格卡吃满剩余高度并局部滚动 */
+  fixedLayout?: boolean;
   crumbs?: string[];
   children: React.ReactNode;
 };
@@ -31,7 +33,7 @@ const AI_ASKS = [
   { q: '质保金最多能留多少？', a: '按建质〔2017〕138 号，质量保证金不得超过结算总额 3%。' },
 ];
 
-export default function AppShell({ page, onNavigate, role, onRoleChange, pending, crumbs, children }: Props) {
+export default function AppShell({ page, onNavigate, role, onRoleChange, pending, fixedLayout, crumbs, children }: Props) {
   const toast = useToast();
   const [mini, setMini] = useState(false);
   const [mOpen, setMOpen] = useState(false);
@@ -339,7 +341,7 @@ export default function AppShell({ page, onNavigate, role, onRoleChange, pending
         </aside>
 
         <main className="nc-main">
-          <div className="nc-page">
+          <div className={`nc-page${fixedLayout ? ' is-fixed' : ''}`}>
             {children}
           </div>
         </main>
