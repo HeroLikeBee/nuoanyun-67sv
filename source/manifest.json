@@ -5,19 +5,35 @@
   "entry": "index.tsx",
   "files": [
     {
-      "path": "assets/images/8PV4TGAAAAAElFTkSuQmCC.png",
+      "path": ".retired/ContractDetailPage.tsx.bak",
       "kind": "source"
     },
     {
-      "path": "assets/images/D17GaJpLrMCVAAAAAElFTkSuQmCC.png",
+      "path": "components/AppShell.tsx",
       "kind": "source"
     },
     {
-      "path": "content.md",
+      "path": "components/CategoryTree.tsx",
       "kind": "source"
     },
     {
-      "path": "hack.css",
+      "path": "components/ContractDrawer.tsx",
+      "kind": "source"
+    },
+    {
+      "path": "components/data.ts",
+      "kind": "source"
+    },
+    {
+      "path": "components/icons.tsx",
+      "kind": "source"
+    },
+    {
+      "path": "components/store.ts",
+      "kind": "source"
+    },
+    {
+      "path": "components/ui.tsx",
       "kind": "source"
     },
     {
@@ -25,15 +41,87 @@
       "kind": "entry"
     },
     {
-      "path": "screenshot.png",
+      "path": "pages/ApprovalPage.tsx",
+      "kind": "source"
+    },
+    {
+      "path": "pages/BidPage.tsx",
+      "kind": "source"
+    },
+    {
+      "path": "pages/CertPage.tsx",
+      "kind": "source"
+    },
+    {
+      "path": "pages/ContractNewPage.tsx",
+      "kind": "source"
+    },
+    {
+      "path": "pages/ContractPage.tsx",
+      "kind": "source"
+    },
+    {
+      "path": "pages/CustomerPage.tsx",
+      "kind": "source"
+    },
+    {
+      "path": "pages/DashboardPage.tsx",
+      "kind": "source"
+    },
+    {
+      "path": "pages/DevicePage.tsx",
+      "kind": "source"
+    },
+    {
+      "path": "pages/DocPage.tsx",
+      "kind": "source"
+    },
+    {
+      "path": "pages/InvoicePage.tsx",
+      "kind": "source"
+    },
+    {
+      "path": "pages/MaterialPage.tsx",
+      "kind": "source"
+    },
+    {
+      "path": "pages/OppPage.tsx",
+      "kind": "source"
+    },
+    {
+      "path": "pages/ProjectCenterPage.tsx",
+      "kind": "source"
+    },
+    {
+      "path": "pages/ProjectNewPage.tsx",
+      "kind": "source"
+    },
+    {
+      "path": "pages/ProjectPage.tsx",
+      "kind": "source"
+    },
+    {
+      "path": "pages/QuoteDetailPage.tsx",
+      "kind": "source"
+    },
+    {
+      "path": "pages/QuoteEditPage.tsx",
+      "kind": "source"
+    },
+    {
+      "path": "pages/QuotePage.tsx",
+      "kind": "source"
+    },
+    {
+      "path": "pages/SettingsPage.tsx",
+      "kind": "source"
+    },
+    {
+      "path": "pages/SupplierPage.tsx",
       "kind": "source"
     },
     {
       "path": "style.css",
-      "kind": "source"
-    },
-    {
-      "path": "theme.json",
       "kind": "source"
     }
   ]
