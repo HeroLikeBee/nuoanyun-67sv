@@ -3,9 +3,10 @@
 // 双触发规则：整体浮率 <15% 或 总额 ≥50 万 → 进审批；均未命中 → 免审通过
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Btn, Banner, Card, DataTable, Drawer, Field, KvGrid, Modal, Money, Op, OpSep,
+  Btn, Banner, Card, DataTable, Drawer, Field, IdCell, KvGrid, Modal, Money, Op, OpMore, OpNone,
   PageHead, ListToolbar, TableFoot, Tag, Timeline, Tip, useToast, ChainBar, Check, Code, Collapse, ConfirmModal, EntityLink,
 } from '../components/ui';
+import type { OpMoreItem } from '../components/ui';
 import { QUOTES, QUOTE_STATUS, QUOTE_CATS, APPROVALS, approveLevel, calcTax, fmt, fmtWan, quoteTrigger } from '../components/data';
 import { getFocus, getBizStatus, subscribeStore } from '../components/store';
 import { Ico } from '../components/icons';
@@ -101,7 +102,8 @@ export default function QuotePage({ go, role, nav }: { go: (p: string) => void; 
       key: 'id', title: '报价单', width: 190,
       render: (q: Q) => (
         <div className="nc-cell-main">
-          <Code>{q.id}</Code>
+          {/* 单号可点击 → 蓝色，点击打开本行详情（全站统一） */}
+          <IdCell onClick={() => setDetail(q)} title="查看报价单详情">{q.id}</IdCell>
           <Tag tone="blue">{q.ver}</Tag>
           <div className="nc-cell-sub">{q.name}</div>
         </div>
@@ -129,18 +131,29 @@ export default function QuotePage({ go, role, nav }: { go: (p: string) => void; 
       ),
     },
     {
-      key: 'op', title: '操作', width: 250, align: 'right' as const,
-      render: (q: Q) => (
-        <div className="nc-ops" onClick={(e) => e.stopPropagation()}>
-          <Op onClick={() => setDetail(q)}>详情</Op><OpSep />
-          {q.status === '草稿' && <><Op onClick={() => go('quote-edit')} gold>编辑</Op><OpSep /><Op onClick={() => setSubmitOpen(q)}>提交审批</Op><OpSep /><Op danger onClick={() => setVoidOpen(q)}>作废</Op></>}
-          {q.status === '待审批' && <><Op disabled title="审批中锁定，不可改价">编辑</Op><OpSep /><Op danger onClick={() => toast('已撤回审批，回到「草稿」状态')}>撤回</Op></>}
-          {q.status === '已审批' && <><Op onClick={() => go('contract-new')} gold>转合同</Op><OpSep /><Op danger onClick={() => setVoidOpen(q)}>作废</Op></>}
-          {q.status === '已转化' && <Op disabled title="已转化 = 终态，不可再编辑/作废">已转合同</Op>}
-          {q.status === '作废' && <Op disabled title="作废为终态，不可再编辑/审批；可「复制新版本」重新发起">—</Op>}
-          <OpSep /><Op onClick={() => setVerOpen(q)}>版本管理</Op><OpSep /><Op onClick={() => toast('已调起打印预览（报价单 A4）')}>打印</Op>
-        </div>
-      ),
+      /* 操作列收口：每行恒定 3 个槽位 —— ① 按状态的主操作（终态留占位）② 详情 ③ 更多 ⋯。
+         原实现把 详情 / 编辑 / 提交审批 / 作废 / 版本管理 / 打印 全内联，最多 7 个按钮且随状态增减，
+         竖着扫视找不到固定位置；现按「常用外露 ≤3 + 其余收进更多」统一。 */
+      key: 'op', title: '操作', width: 200, align: 'right' as const,
+      render: (q: Q) => {
+        const more: OpMoreItem[] = [];
+        if (q.status === '草稿') more.push({ label: '提交审批', onClick: () => setSubmitOpen(q) });
+        if (q.status === '待审批') more.push({ label: '撤回审批', danger: true, onClick: () => toast('已撤回审批，回到「草稿」状态') });
+        if (q.status === '已审批' || q.status === '草稿') more.push({ label: '作废', danger: true, onClick: () => setVoidOpen(q) });
+        if (q.status !== '作废') more.push({ label: '版本管理', onClick: () => setVerOpen(q) });
+        more.push({ label: '打印', onClick: () => toast('已调起打印预览（报价单 A4）') });
+        return (
+          <div className="nc-ops" onClick={(e) => e.stopPropagation()}>
+            {q.status === '草稿' && <Op gold onClick={() => go('quote-edit')}>编辑</Op>}
+            {q.status === '待审批' && <Op onClick={() => toast('已撤回审批，回到「草稿」状态')}>撤回</Op>}
+            {q.status === '已审批' && <Op gold onClick={() => go('contract-new')}>转合同</Op>}
+            {q.status === '已转化' && <OpNone title="已转化 = 终态，不可再编辑 / 作废" />}
+            {q.status === '作废' && <OpNone title="作废为终态，不可再编辑 / 审批；可「复制新版本」重新发起" />}
+            <Op onClick={() => setDetail(q)}>详情</Op>
+            <OpMore items={more} />
+          </div>
+        );
+      },
     },
   ];
 
@@ -206,9 +219,9 @@ export default function QuotePage({ go, role, nav }: { go: (p: string) => void; 
           minWidth={1420}
           empty="没有符合筛选条件的报价单；报价由商机推进生成，作废为终态可复制新版本"
           emptyCta={<Btn size="sm" onClick={() => go('quote-edit')}>＋ 新建报价单</Btn>}
-          /* 修正：原为 markup >= 30 标红，与「是否真需审批」的判定（<15% / ≥50万）不一致，
-             导致标红的恰恰是免审的行。改为直接复用同一口径，视觉与规则从此同源。 */
-          rowClass={(q) => (st(q) === '作废' ? 'is-muted' : trig(q) ? 'trig-hit' : '')}
+          /* 条目背景色统一：不再对「命中审批触发」的行铺红底——整行红底与行悬停 / 整行选中的视觉冲突，
+             且多行铺红会互相淹没。是否需审批由「审批级（按金额自动）」列（免审 / 分级）单独承担。 */
+          rowClass={(q) => (st(q) === '作废' ? 'is-muted' : '')}
           onRowClick={(q) => setDetail(q)}
           foot={<TableFoot total={QUOTES.length} filtered={rows.length} page={page} pageSize={pageSize} onPage={setPage} onPageSize={(n) => { setPageSize(n); setPage(1); }} />}
         />

@@ -6,8 +6,9 @@
 // 行点击 → 右侧滑出详情抽屉（920px），不再跳转独立详情页
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Btn, Card, Code, DataTable, EntityLink, Money, Op, PageHead, Progress, TableFoot, Tag, useToast,
+  Btn, Card, Code, DataTable, EntityLink, IdCell, Money, Op, OpMore, OpNone, PageHead, Progress, TableFoot, Tag, useToast,
 } from '../components/ui';
+import type { OpMoreItem } from '../components/ui';
 import ContractDrawer from '../components/ContractDrawer';
 import { Ico } from '../components/icons';
 import { CONTRACTS, CUSTOMERS, PROJECTS, fmtWan, normContractStatus, TODAY } from '../components/data';
@@ -27,6 +28,8 @@ const TABS = ['全部', '待我审批', '待签约', '收款逾期', '已结项'
 /** 需要红点提示的行动项页签（有积压才亮红，避免常红疲劳） */
 const HOT_TABS = ['待我审批', '待签约', '收款逾期'] as const;
 const QUICKS = ['全部状态', '履约中', '有逾期', '超付预警'] as const;
+/** 终态合同：字段锁定、不再有变更 / 结算 / 续签一类的后续操作 */
+const TERMINAL = ['已结项', '已续签', '已终止', '已中止', '已解除'];
 
 export default function ContractPage({ go, role, nav }: { go: (p: string) => void; role: string; nav?: number }) {
   const toast = useToast();
@@ -38,6 +41,13 @@ export default function ContractPage({ go, role, nav }: { go: (p: string) => voi
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [detail, setDetail] = useState<C | null>(null);
+  /**
+   * 抽屉落地 Tab。列表「操作」列里的次级操作（登记收款 / 变更签证 / 借阅记录 …）
+   * 都要直接落到抽屉内对应分区，而不是只把抽屉打开让用户自己找。
+   */
+  const [detailTab, setDetailTab] = useState('doc');
+  /** 打开详情抽屉；t 指定落地 Tab（money 收款计划·付款记录 / change 变更与签证 / borrow 借阅 / log 日志 …） */
+  const openDetail = (c: C, t = 'doc') => { setDetailTab(t); setDetail(c); };
   /* G1：原 rows 派生自模块常量 CONTRACTS，登记收款只 toast 不改数据，
      「已收 / 收支进度」列与统计永远不动。改为可写 state。 */
   const [contracts, setContracts] = useState(getContracts);
@@ -96,7 +106,8 @@ export default function ContractPage({ go, role, nav }: { go: (p: string) => voi
       key: 'id', title: '编号', width: 150, sticky: 'left' as const,
       render: (c: C) => (
         <div className="nc-cell-main">
-          <Code>{c.id}</Code>
+          {/* 编号可点击 → 蓝色，点击打开本行详情（与整行点击一致，全站统一） */}
+          <IdCell onClick={() => openDetail(c)} title="查看合同详情">{c.id}</IdCell>
           {c.renewedTo && <div className="nc-cell-sub">续签 → {c.renewedTo}</div>}
           {!c.renewedTo && c.sub && <div className="nc-cell-sub">子合同</div>}
         </div>
@@ -153,13 +164,62 @@ export default function ContractPage({ go, role, nav }: { go: (p: string) => voi
       ),
     },
     {
-      key: 'op', title: '操作', width: 130, align: 'right' as const, sticky: 'right' as const,
-      render: (c: C) => (
-        <div className="nc-ops" onClick={(e) => e.stopPropagation()}>
-          {st(c) === '审批中' && <Btn size="sm" kind="primary" onClick={() => { toast(`已打开 ${c.id} 的审批单，可在审批中心处理`); go('approval'); }}>审批</Btn>}
-          <Op onClick={() => setDetail(c)}>详情</Op>
-        </div>
-      ),
+      /**
+       * 操作列：槽位恒定 —— ① 按状态差异化的主操作 ② 详情 ③ 更多 ⋯。
+       * 之前只剩「审批（仅审批中）+ 详情」，绝大多数行只剩一个「详情」，操作看起来被砍光了。
+       * 现在主操作按合同状态给（草稿→编辑 / 审批中→审批 / 已审批→签署 / 履约中→登记收款·请款 /
+       * 结算中→结算），其余（编辑、变更签证、结算、开票、收付款、合同文件、借阅、日志、续签、
+       * 终止类）全量收进「更多」，跨行按钮数量与位置不再漂移。
+       */
+      key: 'op', title: '操作', width: 210, align: 'right' as const, sticky: 'right' as const,
+      render: (c: C) => {
+        const s = st(c);
+        const done = TERMINAL.includes(s);
+        const purchase = c.type === '采购合同';
+        /* 草稿 / 审批中 尚未生效：变更、结算、开票都还不存在 */
+        const early = s === '草稿' || s === '审批中';
+        const moneyLabel = purchase ? '付款记录' : '收款计划';
+
+        /* ① 主操作（状态决定；无可用操作时用占位符，保证整列对齐） */
+        let main: React.ReactNode;
+        if (s === '审批中') {
+          main = <Btn size="sm" kind="primary" onClick={() => { toast(`已打开 ${c.id} 的审批单，可在审批中心处理`); go('approval'); }}>审批</Btn>;
+        } else if (s === '草稿') {
+          main = <Op onClick={() => openDetail(c)} title="打开详情后编辑基础信息">编辑</Op>;
+        } else if (s === '已审批') {
+          main = <Op onClick={() => { openDetail(c); toast('请在「合同文件 / 附件」上传签署版，并发起电子签章'); }} title="上传签署版 / 发起电子签章">签署</Op>;
+        } else if (s === '已签约' || (s === '履约中' && !purchase)) {
+          main = <Op onClick={() => { openDetail(c, 'money'); toast(`已打开《${c.name}》${moneyLabel}，可逐期登记回款`); }} title="登记收款">登记收款</Op>;
+        } else if (s === '履约中') {
+          main = <Op onClick={() => { openDetail(c, 'money'); toast(`已打开《${c.name}》${moneyLabel}`); }} title="请款 / 付款">请款</Op>;
+        } else if (s === '结算中') {
+          main = <Op onClick={() => { openDetail(c); toast('请在抽屉顶部【结算】发起结算'); }} title="发起结算">结算</Op>;
+        } else {
+          main = <OpNone title={`${s} 为终态，无可执行操作`} />;
+        }
+
+        /* ③ 更多：其余操作全量收口，不随数据可用性增减 */
+        const more: OpMoreItem[] = [
+          { label: '编辑合同', disabled: done, title: done ? '终态合同字段已锁定，请走变更流程' : '修改基础信息', onClick: () => openDetail(c) },
+          { label: '变更 / 签证', disabled: done || early, title: early ? '合同尚未生效，暂无变更签证' : '发起变更 / 设计变更 / 工程签证', onClick: () => { openDetail(c, 'change'); toast('已定位到「变更与签证」，可发起变更 / 设计变更 / 工程签证'); } },
+          { label: '发起结算', disabled: done || early, title: early ? '合同尚未生效，暂无结算' : '按执行金额发起结算', onClick: () => { openDetail(c); toast('请在抽屉顶部【结算】发起结算'); } },
+          { label: '开票', disabled: done || early, title: early ? '合同尚未生效，暂无开票' : '跳转发票管理开票', onClick: () => { toast(`已按《${c.name}》跳转发票管理`); go('invoice'); } },
+          { label: moneyLabel, onClick: () => openDetail(c, 'money') },
+          { label: '合同文件', onClick: () => openDetail(c, 'doc') },
+          { label: '借阅记录', onClick: () => openDetail(c, 'borrow') },
+          { label: '操作日志', onClick: () => openDetail(c, 'log') },
+          { label: '续签', disabled: done, title: done ? '终态合同不可续签' : '生成续签合同草稿', onClick: () => { toast(`已按《${c.name}》发起续签：来源选「复制历史」`); go('contract-new'); } },
+          { label: '终止 / 中止 / 解除 / 作废', danger: true, disabled: done, title: done ? '终态合同无可执行的终止类操作' : '打开详情后在【更多操作 ⋯】中办理', onClick: () => { openDetail(c); toast('请在抽屉右上角【更多操作 ⋯】办理终止 / 中止 / 解除 / 作废'); } },
+        ];
+
+        return (
+          <div className="nc-ops" onClick={(e) => e.stopPropagation()}>
+            <span className="nc-ops-slot">{main}</span>
+            <Op onClick={() => openDetail(c)}>详情</Op>
+            <OpMore items={more} />
+          </div>
+        );
+      },
     },
   ];
 
@@ -209,8 +269,8 @@ export default function ContractPage({ go, role, nav }: { go: (p: string) => voi
       <Card flush>
         <DataTable
           cols={cols} rows={paged} rowKey={(c) => c.id} minWidth={1420}
-          rowClass={(c) => (c.overdue ? 'is-danger-row' : c.overpay ? 'is-warn-row' : '')}
-          onRowClick={(c) => setDetail(c)}
+          /* 条目背景色统一：逾期 / 超付不再整行铺色，改由行内标签承担 */
+          onRowClick={(c) => openDetail(c)}
           empty="没有符合条件的合同"
         />
         <TableFoot
@@ -223,7 +283,7 @@ export default function ContractPage({ go, role, nav }: { go: (p: string) => voi
 
       {/* ============ 合同详情抽屉（行点击滑出） ============ */}
       {/* 抽屉状态与列表同源：把审批回写后的归一化状态一并传入，避免列表显示「已签约」而抽屉仍是旧值 */}
-      <ContractDrawer open={!!detail} c={detail ? { ...detail, status: st(detail) } : detail} onClose={() => setDetail(null)} go={go} role={role} />
+      <ContractDrawer open={!!detail} c={detail ? { ...detail, status: st(detail) } : detail} onClose={() => setDetail(null)} go={go} role={role} initialTab={detailTab} />
     </>
   );
 }

@@ -404,7 +404,8 @@ export default function SettingsPage({ go, role, nav }: { go: (p: string) => voi
             </Banner>
             <Table head={[['预警档位', 130], ['提前天数', 130], ['通知渠道', 240], ['处置建议', undefined]]}>
               {CERT_WARN.map((w) => (
-                <tr key={w.k} className={w.k === '已过期' || w.k === '30 天内' ? 'is-danger-row' : ''}>
+                /* 条目背景色统一：临期 / 已过期不再整行铺红底，改由状态列承担 */
+                <tr key={w.k}>
                   <td><Tag tone={w.tone} pill>{w.k}</Tag></td>
                   <td>
                     <input className="nc-cell-in" style={{ width: 60, textAlign: 'right' }} type="number" value={w.days} disabled /> 天

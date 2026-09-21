@@ -39,6 +39,23 @@ export function Code({ children }: { children: React.ReactNode }) {
 }
 
 /**
+ * 编号列单元格 —— 统一「编号可点击 = 蓝色 + 点击打开本行详情」。
+ * 有 onClick 时渲染为蓝色链接（并阻止冒泡，避免与行点击重复触发）；无 onClick 时保持中性灰，
+ * 不给出可点击的视觉暗示。列表页首列编号统一走这里，避免各页各自实现导致有的蓝有的黑。
+ */
+export function IdCell({ children, onClick, title }: {
+  children: React.ReactNode; onClick?: () => void; title?: string;
+}) {
+  if (!onClick) return <span className="nc-id-cell">{children}</span>;
+  return (
+    <button
+      type="button" className="nc-id-cell is-link" title={title || '查看详情'}
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
+    >{children}</button>
+  );
+}
+
+/**
  * 实体穿透链接：把关联实体名（客户 / 项目 / 合同 / 报价 / 商机 …）渲染为可点击文本。
  * 点击行为：① 记录目标页要聚焦的实体 ID → ② 跳转到目标页并打开其详情。
  * 用途：列表单元格、详情抽屉、Tab 内的关联实体，统一由此实现「层层下钻」。
@@ -703,7 +720,7 @@ export function Steps({ items, cur, onStep }: { items: { label: string; sub?: st
     <div className="nc-steps">
       {items.map((it, i) => (
         <button key={it.label} className={`nc-step${i < cur ? ' is-done' : ''}${i === cur ? ' is-cur' : ''}`} onClick={() => onStep?.(i)}>
-          {/* 已完成 = ✓ 打勾（success 绿底）；当前 = 序号（primary 蓝底）；待办 = 序号（灰描边） */}
+          {/* 已完成 = ✓ 打勾（primary 蓝底）；当前 = 序号（primary 蓝底 + 光晕）；待办 = 序号（灰描边，灰字） */}
           <div className="nc-step-dot">{i < cur ? <Ico n="check" size={13} /> : i + 1}</div>
           <div className="nc-step-label">{it.label}{it.sub ? <em> · {it.sub}</em> : null}</div>
         </button>
@@ -757,20 +774,28 @@ export function Funnel({ rows }: { rows: { name: string; value: number; label: s
   );
 }
 
-/** 横向节点条：审批链 / 阶段条（done / current / rejected 三态） */
-export function ChainBar({ nodes, tone }: { nodes: { label: string; sub?: string; state: 'done' | 'cur' | 'todo' | 'rejected' }[]; tone?: 'blue' | 'gold' }) {
+/**
+ * 横向节点条：审批链 / 阶段条（done / current / rejected 三态）。
+ * 配色统一：已完成 = 蓝色 + ✓；当前 = 蓝色实心 + 光晕；待办 = 灰色空心；驳回 = 红色 ✕。
+ * compact = 紧凑模式：去掉序号与副标题，节点不再撑开最小宽度，用于抽屉内的长阶段条（如投标 8 阶段）。
+ */
+export function ChainBar({ nodes, tone, compact }: {
+  nodes: { label: string; sub?: string; state: 'done' | 'cur' | 'todo' | 'rejected' }[];
+  tone?: 'blue' | 'gold';
+  compact?: boolean;
+}) {
   return (
-    <div className={`nc-chain${tone === 'gold' ? ' is-gold' : ''}`}>
+    <div className={`nc-chain${tone === 'gold' ? ' is-gold' : ''}${compact ? ' is-compact' : ''}`}>
       {nodes.map((n, i) => (
         <React.Fragment key={i}>
           {i > 0 && <span className="nc-chain-line" />}
-          <span className={`nc-chain-node is-${n.state}`}>
-            {/* 已完成 = ✓ 打勾；驳回 = ✕；当前 / 待办 = 序号 */}
+          <span className={`nc-chain-node is-${n.state}`} title={n.sub ? `${n.label} · ${n.sub}` : undefined}>
+            {/* 已完成 = ✓ 打勾；驳回 = ✕；当前 / 待办 = 序号（紧凑模式下不显示序号，只留状态点） */}
             <i className="nc-chain-dot">
-              {n.state === 'done' ? <Ico n="check" size={13} /> : n.state === 'rejected' ? <Ico n="close" size={12} /> : i + 1}
+              {n.state === 'done' ? <Ico n="check" size={13} /> : n.state === 'rejected' ? <Ico n="close" size={12} /> : compact ? null : i + 1}
             </i>
             <b>{n.label}</b>
-            {n.sub && <em>{n.sub}</em>}
+            {!compact && n.sub && <em>{n.sub}</em>}
           </span>
         </React.Fragment>
       ))}

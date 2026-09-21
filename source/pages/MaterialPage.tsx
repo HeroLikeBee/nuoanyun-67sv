@@ -10,7 +10,7 @@
 // 链路闭环：库存预警 → 发起询价（带物料与缺口）→ 比价选定 → 生成采购订单 → 入库回写订单。
 import React, { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import {
-  Alert, Banner, Btn, Card, Check, DataTable, Drawer, EntityLink, Field, KvGrid, ListToolbar, Modal,
+  Alert, Banner, Btn, Card, Check, DataTable, Drawer, EntityLink, Field, IdCell, KvGrid, ListToolbar, Modal,
   Op, OpSep, PageHead, TableFoot, Tag, Tabs, Tile, Tip, useToast, type Col, type TagTone, pressProps,
 } from '../components/ui';
 import CategoryTree from '../components/CategoryTree';
@@ -405,7 +405,8 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
   const cols: Col<Item>[] = [
     {
       key: 'code', title: '编码', width: 104, sticky: 'left',
-      render: (m) => <span className="num nc-id-cell nc-link" onClick={() => setDetail(m)} {...pressProps(() => setDetail(m))}>{m.code}</span>,
+      /* 编号列统一走 IdCell：可点击 → 蓝色，点击打开本行详情 */
+      render: (m) => <IdCell onClick={() => setDetail(m)} title="查看主数据详情">{m.code}</IdCell>,
     },
     {
       key: 'name', title: '名称 / 规格', render: (m) => (
@@ -637,7 +638,7 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
               共 {recipeItems.length} 条需维护成本（服务 {recipeItems.filter((i) => i.ty === '服务').length} · 套件 {recipeItems.filter((i) => i.ty === '套件').length}）· 毛利率低于 20% 标红并提供「调价」（按目标毛利率反算对外价）。
             </div>
             <DataTable minWidth={1240} rows={recipeItems} rowKey={(m) => m.code} cols={recipeCols}
-              rowClass={(m) => (m.ty === '套件' && costOf(m.code).gross < 20 ? 'is-danger-row' : '')}
+              /* 条目背景色统一：套件毛利率低于 20% 不再整行铺红底，改由毛利率列的红色数值承担 */
               empty="暂无服务 / 套件；新增主数据时选择「服务」或「套件」类型即可在此维护成本构成" />
           </div>
         )}
@@ -666,7 +667,7 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
               minWidth={1300}
               rows={[...stocked].sort((a, b) => (a.stock - a.safe) - (b.stock - b.safe))}
               rowKey={(m) => m.id}
-              rowClass={(m) => (m.stock - m.safe < 0 ? 'is-danger-row' : '')}
+              /* 条目背景色统一：低于安全库存不再整行铺红底，改由库存列的红色数值承担 */
               onRowClick={(m) => setDetail(m)}
               empty="当前没有有库存的主数据（材料 / 设备）；服务与套件不建库存账"
               cols={[
@@ -786,7 +787,7 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
               minWidth={1080}
               rows={PRICE_LIB.filter((p) => !plibRev || p.review)}
               rowKey={(p) => p.code}
-              rowClass={(p) => (p.review ? 'is-danger-row' : '')}
+              /* 条目背景色统一：待审核配方不再整行铺红底，改由状态列承担 */
               empty={plibRev ? '当前没有偏离 ≥ ±10% 的需复核价格；可取消「仅看需复核」查看全部' : '价格库暂无记录；采购合同入库后会自动沉淀成交价'}
               cols={[
                 { key: 'code', title: '物料编码', width: 100, render: (p) => <span className="num">{p.code}</span> },
@@ -819,7 +820,7 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
               minWidth={1140}
               rows={certs}
               rowKey={(c) => c.no}
-              rowClass={(c) => (daysLeft(c.validTo) <= 30 ? 'is-danger-row' : '')}
+              /* 条目背景色统一：临期证书不再整行铺红底，改由有效期列的橙色数值承担 */
               empty="没有认证与报告记录；证书在主数据上配置后自动出现在此"
               cols={[
                 { key: 'matCode', title: '物料编码', width: 100, render: (c) => <span className="num">{c.matCode}</span> },

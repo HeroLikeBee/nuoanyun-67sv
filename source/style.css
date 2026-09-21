@@ -338,6 +338,7 @@ h1, h2, h3, h4 { margin: 0; font-weight: 600; }
   border-radius: var(--r-lg);
   padding: 16px;
   box-shadow: var(--sh-card);
+  display: flex; flex-direction: column; min-height: 0; /* 行内多卡等高：填满栅格单元格 */
 }
 .nc-card.is-flush { padding: 0; overflow: hidden; display: flex; flex-direction: column; min-height: 0; }
 .nc-card-hd { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 0 0 12px; }
@@ -346,7 +347,7 @@ h1, h2, h3, h4 { margin: 0; font-weight: 600; }
 }
 .nc-card-hd h3 { font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
 .nc-card-hd .nc-card-hd-extra { margin-left: auto; display: flex; align-items: center; gap: 8px; }
-.nc-card-bd { padding-top: 12px; }
+.nc-card-bd { padding-top: 12px; flex: 1 1 auto; min-height: 0; overflow: auto; } /* 等高行内填充剩余高度；内容超长时卡内滚动 */
 .nc-card-hd + .nc-card-bd { padding-top: 4px; }  /* 头体合计 16px，符合间距标尺 */
 .nc-card.is-flush .nc-card-bd { padding: 14px 16px; }
 .nc-sec-title {
@@ -362,14 +363,25 @@ h1, h2, h3, h4 { margin: 0; font-weight: 600; }
   font-family: var(--font-mono);
 }
 
-/* G7：编号列样式（参考 HTML：color:var(--text-2);font-size:13px · tabular-nums） */
+/* G7：编号列样式（参考 HTML：color:var(--text-2);font-size:13px · tabular-nums）
+   可点击时（.is-link，见 IdCell）统一为蓝色链接：编号能点就一定是蓝的，不能点就保持中性色。 */
 .nc-id-cell {
   font-size: 13px; color: var(--ink-2);
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum";
   font-family: var(--font-mono);
 }
-.nc-tbl tbody tr:hover .nc-id-cell { color: var(--c-primary); }
+.nc-id-cell.is-link {
+  padding: 0; border: 0; background: none; cursor: pointer; text-align: left;
+  color: var(--c-primary);
+  font-size: 13px; font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+  font-family: var(--font-mono);
+}
+.nc-id-cell.is-link:hover { text-decoration: underline; }
+.nc-id-cell.is-link:focus-visible { outline: 2px solid var(--c-primary-3); outline-offset: 1px; border-radius: var(--r-xs); }
+/* 编号「蓝 = 可点击」：不可点击的编号不再靠行悬停变蓝，避免给出错误的可点击暗示 */
 
 /* ============================ 按钮 ============================ */
 .nc-btn {
@@ -766,11 +778,14 @@ h1, h2, h3, h4 { margin: 0; font-weight: 600; }
   color: var(--ink-3); display: flex; align-items: center; justify-content: center;
   font-size: 12px; font-weight: 600; position: relative; z-index: 1; transition: .15s;
 }
-.nc-step.is-done .nc-step-dot { background: var(--c-success); border-color: var(--c-success); color: var(--c-canvas); }
+.nc-step.is-done .nc-step-dot { background: var(--c-primary); border-color: var(--c-primary); color: var(--c-canvas); }
 .nc-step.is-cur .nc-step-dot { background: var(--c-primary); border-color: var(--c-primary); color: var(--c-canvas); box-shadow: 0 0 0 4px var(--c-primary-weak); }
 .nc-step-label { margin-top: 7px; font-size: 12px; color: var(--ink-3); white-space: nowrap; }
 .nc-step.is-done .nc-step-label { color: var(--ink-2); }
 .nc-step.is-cur .nc-step-label { color: var(--c-primary); font-weight: 600; }
+/* 待进行：整节点灰（描边 + 文字），与「已完成（蓝）/ 当前（蓝）」形成明确两级 */
+.nc-step:not(.is-done):not(.is-cur) .nc-step-dot { border-color: var(--c-hairline); color: var(--ink-3); background: var(--c-canvas); }
+.nc-step:not(.is-done):not(.is-cur) .nc-step-label { color: var(--ink-3); }
 
 /* 时间线 */
 .nc-timeline { position: relative; padding-left: 18px; margin-left: 2px; }
@@ -923,13 +938,13 @@ h1, h2, h3, h4 { margin: 0; font-weight: 600; }
 .nc-appr-who { font-size: 12px; color: var(--ink-3); text-align: center; }
 .nc-appr-time { font-size: 11px; color: var(--ink-3); text-align: center; margin-top: 1px; }
 .nc-appr-line { flex: 1; min-width: 20px; height: 2px; background: var(--c-hairline); }
-.nc-appr-line.is-done { background: var(--c-success); }
+.nc-appr-line.is-done { background: var(--c-primary); }
 
 /* ============================ 其他 ============================ */
-.nc-grid-21 { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; align-items: start; }
-.nc-grid-12 { display: grid; grid-template-columns: 1fr 2fr; gap: 16px; align-items: start; }
-.nc-grid-11 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
-.nc-grid-31 { display: grid; grid-template-columns: 3fr 1fr; gap: 16px; align-items: start; }
+.nc-grid-21 { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; align-items: stretch; }
+.nc-grid-12 { display: grid; grid-template-columns: 1fr 2fr; gap: 16px; align-items: stretch; }
+.nc-grid-11 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: stretch; }
+.nc-grid-31 { display: grid; grid-template-columns: 3fr 1fr; gap: 16px; align-items: stretch; }
 .nc-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .nc-toolbar .nc-toolbar-sp { flex: 1; }
 .nc-ver-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; border: 1px solid var(--c-hairline); border-radius: var(--r-lg); padding: 9px 12px; font-size: 13px; margin-bottom: 8px; background: var(--c-canvas); }
@@ -1055,7 +1070,11 @@ h1, h2, h3, h4 { margin: 0; font-weight: 600; }
 }
 .nc-chain-node b { font-size: 13px; font-weight: 500; }
 .nc-chain-node em { font-size: 11px; color: var(--ink-3); font-style: normal; }
-.nc-chain-node.is-done .nc-chain-dot { border-color: var(--c-success); background: var(--c-success); color: var(--c-canvas); }
+/* 已完成 = 蓝色 + ✓；当前 = 蓝色实心 + 光晕；待办 = 灰色空心 + 灰字 */
+.nc-chain-node.is-done .nc-chain-dot { border-color: var(--c-primary); background: var(--c-primary); color: var(--c-canvas); }
+.nc-chain-node.is-done b { color: var(--ink-2); }
+.nc-chain-node.is-todo .nc-chain-dot { border-color: var(--c-hairline-strong); background: var(--c-canvas); color: var(--ink-3); }
+.nc-chain-node.is-todo b { color: var(--ink-3); }
 .nc-chain-node.is-cur .nc-chain-dot { border-color: var(--c-primary); background: var(--c-primary); color: var(--c-canvas); box-shadow: 0 0 0 4px var(--c-primary-weak); }
 .nc-chain-node.is-cur b { color: var(--c-primary); font-weight: 600; }
 .nc-chain-node.is-rejected .nc-chain-dot { border-color: var(--c-danger); background: var(--c-danger); color: var(--c-canvas); }
@@ -1063,6 +1082,12 @@ h1, h2, h3, h4 { margin: 0; font-weight: 600; }
 .nc-chain-line { flex: 1; min-width: 18px; height: 2px; background: var(--c-hairline); margin-bottom: 20px; }
 .nc-chain.is-gold .nc-chain-node.is-cur .nc-chain-dot { border-color: var(--c-warning); background: var(--c-warning); box-shadow: 0 0 0 4px var(--c-warning-bg); }
 .nc-chain.is-gold .nc-chain-node.is-cur b { color: var(--c-warning-deep); }
+/* 紧凑模式：不折行、去掉序号与副标题、收紧节点间距 —— 让长阶段条（如投标 8 阶段）在抽屉内一行铺满 */
+.nc-chain.is-compact { flex-wrap: nowrap; row-gap: 0; }
+.nc-chain.is-compact .nc-chain-node { min-width: 0; gap: 4px; }
+.nc-chain.is-compact .nc-chain-node b { font-size: 12px; white-space: nowrap; }
+.nc-chain.is-compact .nc-chain-dot { width: 18px; height: 18px; font-size: 11px; }
+.nc-chain.is-compact .nc-chain-line { min-width: 6px; margin-bottom: 16px; }
 
 /* ---------- 复选框 / 开关 ---------- */
 .nc-check { width: 15px; height: 15px; accent-color: var(--c-primary); cursor: pointer; vertical-align: middle; }
@@ -1469,10 +1494,10 @@ td.is-num, th.is-num { text-align: right; }
 .nc-minirow-pct { font-size: 13px; font-weight: 700; color: var(--ink-1); }
 
 /* ---- 两栏布局 ---- */
-.nc-2col { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.nc-2col { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: stretch; }
 
 /* ---- 驾驶舱行布局 ---- */
-.nc-dash-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.nc-dash-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 16px; align-items: stretch; }
 .nc-dash-main { min-width: 0; }
 .nc-dash-hint {
   font-size: 11px; color: var(--ink-3); line-height: 18px;
@@ -1785,7 +1810,7 @@ font-size: 12px; border: 1px solid transparent; white-space: nowrap;
   box-shadow: 0 -2px 10px rgba(0,0,0,.04);
 }
 
-/* ---- 来源卡片（6 类入口：手工 / OCR / 模板 / 企业模板 / 复制 / 报价转化） ---- */
+/* ---- 来源卡片（5 类入口：手工 / OCR / 标准模板 / 企业模板 / 复制历史合同） ---- */
 .nc-src-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .nc-src-card {
   position: relative; padding: 14px; border-radius: var(--r-6);
@@ -1988,7 +2013,7 @@ font-size: 12px; border: 1px solid transparent; white-space: nowrap;
   font-size: 11px; border-radius: var(--r-2);
   background: var(--c-danger-bg); color: var(--c-danger-deep); border: 1px solid var(--c-danger-border);
 }
-.nc-tbl tr.is-danger-row td { background: var(--c-danger-bg); }
+.nc-tbl tr.is-danger-row td { background: transparent; }
 .nc-tbl tr.is-muted-row td { opacity: .55; }
 
 /* ---- 预览框（模板预览） ---- */
@@ -2071,7 +2096,7 @@ font-size: 12px; border: 1px solid transparent; white-space: nowrap;
   width: 16px; height: 16px; flex: none; font-size: 11px;
   color: var(--c-canvas); background: var(--c-primary); border-radius: 50%;
 }
-.nc-g-step.is-done .nc-g-no { background: var(--c-success); }
+.nc-g-step.is-done .nc-g-no { background: var(--c-primary); }
 .nc-g-mark {
   margin-left: 4px; font-size: 11px; color: var(--c-primary);
   text-decoration: underline; cursor: pointer;
@@ -2083,8 +2108,8 @@ font-size: 12px; border: 1px solid transparent; white-space: nowrap;
 }
 
 /* ---- 驾驶舱等分两栏 / 三栏 ---- */
-.nc-dash-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
-.nc-dash-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.nc-dash-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: stretch; }
+.nc-dash-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: stretch; }
 
 /* ---- KPI 网格（驾驶舱内，替代 .nc-tiles） ---- */
 .nc-kpi-grid { display: grid; gap: 16px; }
@@ -2277,7 +2302,7 @@ font-size: 12px; border: 1px solid transparent; white-space: nowrap;
 
 /* ==========================================================================
    新建合同向导 —— 布局 / 交互复刻「合同新增.html」
-   Step0 六来源 · Step1 来源处理 · Step2 OCR 校对 · Step3 补充与提交
+   Step0 五来源 · Step1 来源处理 · Step2 OCR 校对 · Step3 补充与提交
    ========================================================================== */
 
 /* 步骤条：跳过态 */
@@ -2306,7 +2331,7 @@ font-size: 12px; border: 1px solid transparent; white-space: nowrap;
 /* OCR 进度：有序步骤 + 进度条 */
 .nc-olist { margin: 0 0 10px 20px; list-style: decimal; color: var(--ink-3); font-size: 13px; }
 .nc-olist li { margin: 2px 0; }
-.nc-olist li.is-on { color: var(--c-success-deep); font-weight: 600; }
+.nc-olist li.is-on { color: var(--c-primary); font-weight: 600; }
 .nc-pbar { height: 8px; background: var(--c-surface); border-radius: var(--r-sm); overflow: hidden; max-width: 420px; }
 .nc-pbar i { display: block; height: 100%; width: 0; background: var(--c-primary); transition: width .35s; }
 .nc-ocr-val {
@@ -2484,7 +2509,7 @@ font-size: 12px; border: 1px solid transparent; white-space: nowrap;
 
 /* 成本台账双栏 */
 .nc-overhead { font-size: 12.5px; color: var(--ink-2); background: var(--c-surface-soft); border: 1px solid var(--c-hairline); border-radius: var(--r-md); padding: 7px 12px; margin-bottom: 12px; }
-.nc-ledgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.nc-ledgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: stretch; }
 .nc-ledhd { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--ink); margin-bottom: 8px; }
 .nc-ledhd > *:last-child { margin-left: auto; }
 .nc-typebars { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
@@ -2504,14 +2529,14 @@ font-size: 12px; border: 1px solid transparent; white-space: nowrap;
   padding: 3px 10px; font-size: 12px; border-radius: var(--r-pill);
   border: 1px solid var(--c-border); background: var(--c-surface); color: var(--ink-3); white-space: nowrap;
 }
-.nc-flownode.is-done { color: var(--c-success-deep); border-color: var(--c-success-border); background: var(--c-success-bg); }
+.nc-flownode.is-done { color: var(--c-primary); border-color: var(--c-primary-3); background: var(--c-primary-weak); }
 .nc-flownode.is-cur { color: var(--c-primary); border-color: var(--c-primary); background: var(--c-primary-weak); font-weight: 600; }
 
 /* 时间线图例 */
 .nc-tllegend { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 10px; font-size: 11.5px; color: var(--ink-3); }
 .nc-tllegend span { display: inline-flex; align-items: center; }
 .nc-lg { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
-.nc-lg.is-done { background: var(--c-success); }
+.nc-lg.is-done { background: var(--c-primary); }
 .nc-lg.is-cur { background: var(--c-primary); }
 .nc-lg.is-sys { background: var(--c-warning); }
 .nc-lg.is-future { background: var(--c-hairline-strong); }
@@ -3060,3 +3085,164 @@ font-size: 12px; border: 1px solid transparent; white-space: nowrap;
     transition-duration: .001ms !important;
   }
 }
+
+/* ============================ 列表条目外观统一（末置覆盖） ============================
+   1) 取消「整行黄底 / 红底」的风险标记：整行铺色会压过行悬停反馈，也与「悬停即选中一行」的交互暗示冲突；
+      风险改由行内标签（未退 / 今日开标 / 逾期 / 临期）与状态列承担，整行只保留一致的悬停高亮。
+   2) 行悬停一律以「整行」为单位高亮，不做单元格级高亮。
+   末置 + !important 以保证优先级不被前面的历史规则覆盖。 */
+tr.is-warn-row td, tr.is-danger-row td, tr.trig-hit td,
+.nc-tbl tr.is-warn-row td, .nc-tbl tr.is-danger-row td, .nc-tbl tr.trig-hit td {
+  background: transparent !important;
+}
+.nc-tbl tbody tr:hover { background: var(--c-surface-hover); }
+.nc-tbl tbody tr:hover td { background: transparent; }
+.nc-tbl tbody tr.is-muted:hover td { background: var(--c-surface-hover); }
+
+/* ---------------- 进度 / 步骤条配色统一（末置覆盖） ----------------
+   规则：已完成 = 蓝色（组件侧同时渲染 ✓）；当前 = 蓝色实心；未完成 / 待进行 = 灰色空心 + 灰字。
+   原实现把「已完成」画成 success 绿，与「当前」的 primary 蓝并列时两套色系互抢；
+   这里统一收口为单一蓝色进度语义，绿只保留给「通过 / 合格」一类的结果态标签。 */
+.nc-step.is-done .nc-step-dot,
+.nc-chain-node.is-done .nc-chain-dot,
+.nc-cnode.is-done .nc-cdot,
+.nc-mile-axis .nc-mile-node.is-done .nc-mile-dot,
+.nc-life-node.is-done .nc-life-dot, .nc-mile-node.is-done i,
+.nc-lg.is-done {
+  background: var(--c-primary) !important;
+  border-color: var(--c-primary) !important;
+  color: var(--c-canvas) !important;
+}
+.nc-appr-node.is-done .nc-appr-dot {
+  background: var(--c-primary) !important;
+  border-color: var(--c-primary) !important;
+  color: var(--c-canvas) !important;
+}
+.nc-appr-line.is-done { background: var(--c-primary) !important; }
+.nc-newbie-step.is-done, .nc-g-step.is-done, .nc-lc.is-done, .nc-flownode.is-done {
+  color: var(--c-primary) !important;
+  border-color: var(--c-primary-3) !important;
+  background: var(--c-primary-weak) !important;
+}
+.nc-g-step.is-done .nc-g-no { background: var(--c-primary) !important; }
+.nc-olist li.is-on { color: var(--c-primary) !important; }
+.nc-step:not(.is-done):not(.is-cur) .nc-step-dot,
+.nc-chain-node.is-todo .nc-chain-dot {
+  border-color: var(--c-hairline-strong) !important;
+  background: var(--c-canvas) !important;
+  color: var(--ink-3) !important;
+}
+
+/* ---------------- 操作列「主操作槽位」对齐（末置覆盖） ----------------
+   主操作文案长度不一（编辑 / 签署 / 登记收款 / 请款 / 结算 / 占位），
+   若按内容宽度自然排布，行与行之间的「详情 · 更多」会左右错位；
+   这里给主操作一个固定最小宽度右对齐，保证整列槽位竖直对齐。 */
+.nc-ops .nc-ops-slot {
+  display: inline-flex; justify-content: flex-end; align-items: center;
+  min-width: 76px;
+}
+/* 「更多 ⋯」菜单项较多时（合同管理 10 项）内部滚动，避免浮层超出视口 */
+.nc-opmenu { max-height: min(62vh, 380px); overflow-y: auto; }
+
+/* ==========================================================================
+   新建合同向导 · 版式重构（contract-new）
+   --------------------------------------------------------------------------
+   原先的问题：
+     ① .nc-input 统一 width:100%，而 .nc-pair 是 flex-wrap 容器 —— 换行判定按
+        「整列宽」计算，于是「日期 ~ 日期」「下拉 + 文本」这类成对控件一律被拆成
+        上下两行，右列留出半空行；
+     ② 两列栅格出现只有 1 个字段的半空行（孤立槽位）；
+     ③ 六条款 / 附件区控件排布松散，控件宽度不齐；
+     ④ 可编辑表格用 auto 布局，列宽随内容漂移，表头与单元格对不齐。
+   收敛规则：
+     ① 成对控件同行等分，永不折行；
+     ② 栅格每行填满：双字段走两列，单字段整行（span=2）；
+     ③ 可编辑表格列宽按声明百分比固定；
+     ④ 分组用统一的蓝色竖标 + 统一行距分块。
+   ========================================================================== */
+
+/* 页面容器：与 .nc-page 同节奏（进入本页后仅本页生效，避免影响其它原型页） */
+.nc-wiz { display: flex; flex-direction: column; gap: 16px; }
+.nc-wiz .nc-form-grid { gap: 14px 16px; }
+
+/* ---- ① 成对控件：等分宽度、同排不折行 ---- */
+.nc-pair > .nc-input,
+.nc-pair > .nc-select,
+.nc-pair > .nc-textarea { flex: 1 1 0; width: auto; min-width: 0; }
+.nc-pair-sep { flex: none; font-size: 13px; color: var(--ink-3); }
+.nc-pair > .nc-btn, .nc-pair > .nc-fchip { flex: none; }
+/* 字段标题右侧的内联动作（如「拆解为收款计划」） */
+.nc-label-extra { margin-left: auto; }
+
+/* ---- ② 单选来源卡：按钮默认居中，改为左对齐版式 ---- */
+.nc-src-card { text-align: left; font: inherit; color: inherit; display: flex; flex-direction: column; }
+.nc-src-card .nc-src-ico { display: flex; color: var(--c-primary); line-height: 1; }
+.nc-src-card .nc-src-path { margin-top: auto; padding-top: 8px; }
+
+/* ---- ③ 可编辑表格：列宽按百分比固定，表头与单元格严格对齐 ---- */
+.nc-tbl.is-cols { table-layout: fixed; }
+.nc-tbl.is-cols thead th { overflow: hidden; text-overflow: ellipsis; }
+.nc-tbl.is-cols .nc-cell-in { max-width: 100%; }
+
+/* ---- ④ 六条款：两列成块，勾选后整块转「通过」态 ---- */
+.nc-clause-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; }
+.nc-clause-list label { align-items: center; min-height: 40px; }
+.nc-clause-list label:has(input:checked) {
+  background: var(--c-success-bg); border-color: var(--c-success-border); color: var(--c-success-deep);
+}
+.nc-clause-list label:has(input:checked) input { accent-color: var(--c-success-deep); }
+
+/* ---- ⑤ 附件：工具条 / 计数条 / 文件清单三层 ---- */
+.nc-att-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.nc-att-bar .nc-att-cat { flex: none; width: 150px; }
+.nc-att-bar .nc-att-demo { flex: 0 1 300px; min-width: 200px; }
+.nc-att-sum { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 14px 0 8px; }
+.nc-att-sum-lbl { font-size: 12px; color: var(--ink-3); }
+.nc-att-sum .nc-att-cnt { margin: 0; }
+.nc-att-sum .nc-att-cnt.is-total {
+  margin-left: auto; border-color: var(--c-primary-3);
+  background: var(--c-primary-weak); color: var(--c-primary);
+}
+.nc-att-sum .nc-att-cnt.is-total b { color: var(--c-primary); }
+.nc-att-list { border: 1px solid var(--c-hairline); border-radius: var(--r-6); overflow: hidden; }
+.nc-att-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px; font-size: 13px; border-top: 1px solid var(--c-hairline);
+}
+.nc-att-item:first-child { border-top: 0; }
+.nc-att-item .nc-att-name {
+  flex: 1 1 auto; min-width: 0; color: var(--ink-1);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.nc-att-item .nc-att-size { flex: none; font-size: 12px; color: var(--ink-3); }
+.nc-att-empty { padding: 16px; text-align: center; font-size: 13px; color: var(--ink-3); }
+
+/* ---- ⑥ 审批链：节点等宽，连线等长，杜绝「前紧后松」 ---- */
+.nc-chain2 { flex-wrap: nowrap; align-items: center; margin: 12px 0 6px; }
+.nc-chain2 .nc-cnode { flex: 1 1 0; min-width: 0; }
+.nc-chain2 .nc-cline { flex: 0 0 24px; margin: 0 2px; }
+.nc-chain2 .nc-clbl { margin-left: 6px; padding-right: 0; white-space: nowrap; }
+.nc-chain2 .nc-cnode.is-done .nc-cdot { color: var(--c-canvas); }
+
+/* ---- ⑦ 更多信息：分组更明确 ---- */
+.nc-wiz .nc-grp-t { margin: 22px 0 10px; color: var(--ink-1); }
+.nc-wiz .nc-grp-t:first-child { margin-top: 2px; }
+
+/* ---- ⑧ OCR 校对：左栏改「文档 + 识别框」逐行对照 ---- */
+.nc-wiz .nc-ocr-scan-bd { padding: 14px 16px; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
+.nc-ocr-sec { font-size: 12px; font-weight: 600; color: var(--ink-3); margin-top: 10px; }
+.nc-ocr-sec:first-child { margin-top: 0; }
+.nc-ocr-row { display: flex; align-items: center; }
+.nc-ocr-row .nc-ocr-line { height: 8px; margin: 0; }
+.nc-wiz .nc-ocr-scan-bd .nc-ocr-box {
+  position: relative; left: auto; top: auto; height: 30px;
+  display: flex; align-items: center; padding: 0 8px; border-width: 1.5px;
+}
+.nc-wiz .nc-ocr-scan-bd .nc-ocr-box .nc-ocr-line { width: 100%; }
+
+@media (max-width: 1024px) {
+  .nc-clause-list { grid-template-columns: 1fr; }
+  .nc-chain2 { flex-wrap: wrap; }
+  .nc-chain2 .nc-cnode { flex: 0 0 auto; }
+}
+

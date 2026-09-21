@@ -330,9 +330,9 @@ const STAGES = ['草稿', '审批中', '已审批', '已签约', '履约中', '�
  * @param role 必填 —— 抽屉内含 40+ 处金额，全部经由 Money / moneyTxt 按 A-02 口径脱敏。
  * 漏传会导致无金额权限角色看到真实数目，故不设默认值。
  */
-export default function ContractDrawer({ open, c, onClose, go, role }: { open: boolean; c: C | null; onClose: () => void; go?: (p: string) => void; role: string }) {
+export default function ContractDrawer({ open, c, onClose, go, role, initialTab = 'doc' }: { open: boolean; c: C | null; onClose: () => void; go?: (p: string) => void; role: string; initialTab?: string }) {
   const toast = useToast();
-  const [tab, setTab] = useState('doc');
+  const [tab, setTab] = useState(initialTab);
   const [view, setView] = useState<'main' | 'sub'>('main');
   const [subIdx, setSubIdx] = useState(0);
 
@@ -420,10 +420,11 @@ export default function ContractDrawer({ open, c, onClose, go, role }: { open: b
 
   useEffect(() => {
     if (!open) return;
-    setTab('doc'); setView('main'); setSubIdx(0); setEdit(false); setSpecial(false);
+    setTab(initialTab); setView('main'); setSubIdx(0); setEdit(false); setSpecial(false);
     setRecvOv(null); setEditOv(null); setFileDel([]); setFileAdd([]); setExtraLogs([]);
     setDraft({}); setErrs({}); setPayRow(null); setDelFile(null); setRebuttal(null);
-  }, [open, c?.id]);
+    // initialTab 进依赖：从列表「更多」里指定落地 Tab 时（同一合同、抽屉已挂载）也要能切换过去
+  }, [open, c?.id, initialTab]);
 
   /* 电子合同正文：随「主 / 子合同视图」与合同类型重建；AI 审查结果同步重置 */
   useEffect(() => {
@@ -966,7 +967,7 @@ export default function ContractDrawer({ open, c, onClose, go, role }: { open: b
                     const partial = r.actual > 0 && r.actual < r.plan;
                     const canPay = r.actual < r.plan;
                     return (
-                      <tr key={r.no} className={r.stype === 'pending' && c.overdue ? 'is-danger-row' : ''}>
+                      <tr key={r.no}>
                         <td className="is-num">{r.no}</td>
                         <td>{r.node}</td>
                         <td className="is-num"><Money v={r.plan} role={role} /></td>

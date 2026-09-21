@@ -3,7 +3,7 @@
 // 状态机：初谈 → 已报价 → 待签（商机段，仅此三态可转合同）→ 待启动 → 实施中 → 待验收 → 已完工；旁路终态：甩置 / 丢单
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Alert, Banner, Btn, Card, DataTable, EntityLink, ListToolbar, Modal, Money, Op, OpSep, PageHead,
+  Alert, Banner, Btn, Card, DataTable, EntityLink, IdCell, ListToolbar, Modal, Money, Op, OpSep, PageHead,
   TableFoot, Tag, useToast, Code, Progress, Field,
 } from '../components/ui';
 import { CUSTOMERS, PROJECTS, OPPS, OPP_STAGE_PROB, PROJECT_SOURCES, fmt, fmtWan, TODAY } from '../components/data';
@@ -142,8 +142,10 @@ export default function ProjectPage({ go, role, nav }: { go: (p: string) => void
 
   const cols = [
     { key: 'id', title: '项目编号', width: 130, sticky: 'left' as const,
-      /* G7：参考 HTML 编号列格式：灰二号字（var(--ink-3)）+ 12px，等宽数字；hover 整行 #fafbfc（style.css:492 已生效） */
-      render: (r: Row) => <span className="nc-id-cell">{r.id}</span> },
+      /* G7：编号列统一走 IdCell —— 可点击时蓝色（点击穿透到项目经营中心），不可点击时保持中性灰 */
+      render: (r: Row) => (
+        <IdCell onClick={() => { setFocus('project-center', r.id); go('project-center'); }} title="打开项目经营中心">{r.id}</IdCell>
+      ) },
     {
       key: 'name', title: '项目名称 · 客户', width: 260,
       render: (r: Row) => (
@@ -330,7 +332,8 @@ export default function ProjectPage({ go, role, nav }: { go: (p: string) => void
         />
         <DataTable
           cols={cols} rows={paged} rowKey={(r) => r.id} minWidth={1680}
-          rowClass={(r) => (TERMINAL.includes(r.stage) ? 'is-dead-row' : r.stage === '待验收' ? 'is-warn-row' : '')}
+          /* 条目背景色统一：仅保留「终态」的灰底弱化，待验收不再整行铺黄底 */
+          rowClass={(r) => (TERMINAL.includes(r.stage) ? 'is-dead-row' : '')}
           onRowClick={(r) => { setFocus('project-center', r.id); go('project-center'); }}
           empty="没有符合条件的项目"
         />

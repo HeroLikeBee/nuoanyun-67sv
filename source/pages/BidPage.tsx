@@ -4,7 +4,7 @@
 //   复杂度下沉到详情抽屉：页级不再放安许警示条 / 阶段统计条 / 证书占用列 / 提示行
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Btn, Banner, Card, DataTable, Drawer, Field, KvGrid, ListToolbar, Modal, Money, Op, OpMore, OpSep,
+  Btn, Banner, Card, DataTable, Drawer, Field, IdCell, KvGrid, ListToolbar, Modal, Money, Op, OpMore, OpNone, OpSep,
   PageHead, TableFoot, Tag, Timeline, Tip, useToast, ChainBar, Check, Code, Progress, Tabs, ConfirmModal, EntityLink, pressProps,
 } from '../components/ui';
 import type { OpMoreItem } from '../components/ui';
@@ -204,7 +204,8 @@ export default function BidPage({ go, role, nav }: { go: (p: string) => void; ro
       key: 'id', title: '投标编号', width: 110,
       render: (b: B) => (
         <div className="nc-cell-main">
-          <Code>{b.id}</Code>
+          {/* 编号可点击 → 蓝色，点击打开本行详情（与整行点击一致，全站统一） */}
+          <IdCell onClick={() => { setDetail(b); setTab('overview'); }} title="查看投标详情">{b.id}</IdCell>
           {b.opp && <div className="nc-cell-sub">商机 {b.opp}</div>}
         </div>
       ),
@@ -235,18 +236,26 @@ export default function BidPage({ go, role, nav }: { go: (p: string) => void; ro
     },
     { key: 'owner', title: '负责人', width: 76 },
     {
-      key: 'op', title: '操作', width: 210, align: 'right' as const,
+      /* 操作列收口：每行恒定 3 个槽位 —— ① 当前阶段的主操作（终态留占位）② 详情 ③ 更多 ⋯。
+         原实现按数据可用性逐个拼装（2~4 个不等、顺序也随阶段漂移），竖着扫视时按钮位置对不齐；
+         现将「编辑 / 流转 / 保证金登记 / 证书池」统一收进「更多 ⋯」，槽位数与位置行行一致。 */
+      key: 'op', title: '操作', width: 200, align: 'right' as const,
       render: (b: B) => {
         const flow: OpMoreItem[] = [];
         if (!['中标', '未中标'].includes(b.stage)) flow.push({ label: b.stage === '开标' ? '登记开标结果' : `推进阶段（${b.stage} → 下一步）`, onClick: () => advance(b) });
         if (b.depositSt === '未交' || b.depositSt === '未退') flow.push({ label: b.depositSt === '未交' ? '登记保证金已交' : '解除 / 登记已退', onClick: () => { setDepAmt(b.deposit); setDepOpen(b); } });
         flow.push({ label: '证书池选择', onClick: () => setPoolOpen(true) });
+        flow.push({ label: '编辑', onClick: () => toast('已打开编辑表单（字段与发起投标向导一致）') });
+        const terminal = ['中标', '未中标'].includes(b.stage);
         return (
           <div className="nc-ops" onClick={(e) => e.stopPropagation()}>
-            {b.stage === '开标' && <Btn size="sm" kind="primary" onClick={() => { setResultOpen(b); setWinAmt(b.amt); }}>登记结果</Btn>}
-            {!['中标', '未中标'].includes(b.stage) && <OpMore label="流转 ▾" items={flow} />}
-            <Op onClick={() => toast('已打开编辑表单（字段与发起投标向导一致）')}>编辑</Op>
+            {b.stage === '开标'
+              ? <Btn size="sm" kind="primary" onClick={() => { setResultOpen(b); setWinAmt(b.amt); }}>登记结果</Btn>
+              : terminal
+                ? <OpNone title="已登记结果（终态），无待办操作" />
+                : <Op onClick={() => advance(b)}>推进</Op>}
             <Op onClick={() => { setDetail(b); setTab('overview'); }}>详情</Op>
+            <OpMore items={flow} />
           </div>
         );
       },
@@ -332,12 +341,8 @@ export default function BidPage({ go, role, nav }: { go: (p: string) => void; ro
           <DataTable
             cols={cols} rows={paged} rowKey={(b) => b.id} minWidth={1120}
             empty="没有符合筛选条件的投标项目；投标可由中标商机一键发起，也可在投标看板独立新建"
-            rowClass={(b) => {
-              const d = daysUntil(b.openDate);
-              if (b.depositSt === '未退' || (b.certGot < b.certNeed && b.stage === '报名')) return 'is-warn-row';
-              if (d === 0 && !['中标', '未中标'].includes(b.stage)) return 'is-danger-row';
-              return '';
-            }}
+            /* 条目背景色统一：不再整行铺黄底 / 红底（会压过行悬停反馈，且与「整行选中」的视觉冲突）。
+               风险与临近信息仍由行内标签承载：保证金状态、开标倒计时、证书缺口。 */
             onRowClick={(b) => { setDetail(b); setTab('overview'); }}
             foot={<TableFoot total={bids.length} filtered={rows.length} page={page} pageSize={pageSize} onPage={setPage} onPageSize={(n) => { setPageSize(n); setPage(1); }} extra={<span className="nc-cell-sub"> ｜ 行点击打开详情 · <Op onClick={() => setLedgerOpen(true)}>保证金台账</Op></span>} />}
           />
@@ -430,7 +435,9 @@ export default function BidPage({ go, role, nav }: { go: (p: string) => void; ro
                 {bc.pass && detail.depositSt !== '未退' && !(d >= 0 && d <= 7) && detail.certGot >= detail.certNeed && <div className="nc-issue is-ok"><Ico n="check" size={16} /> 资格预检通过：证书齐备 · 建造师三要素通过 · 保证金正常</div>}
               </div>
 
-              <ChainBar nodes={BID_STAGES.map((s) => {
+              {/* 8 阶段长条：抽屉宽度有限，改用紧凑模式 —— 去掉序号与节点最小宽度，一行铺满，
+                  只保留核心进行（已完成 = 蓝色 ✓ / 当前 = 蓝色 / 待办 = 灰色），不再折成两行。 */}
+              <ChainBar compact nodes={BID_STAGES.map((s) => {
                 const cur = (BID_STAGES as readonly string[]).indexOf(detail.stage);
                 const idx = (BID_STAGES as readonly string[]).indexOf(s);
                 const state = detail.stage === '未中标' && s === '未中标' ? 'rejected' : idx < cur ? 'done' : idx === cur ? 'cur' : 'todo';

@@ -220,7 +220,7 @@ export default function SupplierPage({ go, role, nav }: { go: (p: string) => voi
         <DataTable cols={cols} rows={paged} rowKey={(s) => s.id} minWidth={1560}
         empty="没有符合筛选条件的供应商；黑名单供应商在合同 / 付款 / 询价环节一律硬拦截"
         emptyCta={<Btn size="sm" kind="primary" onClick={() => { setNewOpen(true); resetNewSup(); }}>＋ 新增供应商</Btn>}
-          rowClass={(s) => s.blacklist ? 'is-danger-row' : ''}
+          /* 条目背景色统一：黑名单供应商不再整行铺红底，改由「黑名单」标签承担 */
           foot={<TableFoot total={rows.length} filtered={filtered.length} page={page} pageSize={pageSize} onPage={setPage} onPageSize={(n) => { setPageSize(n); setPage(1); }} />} />
       </Card>
 

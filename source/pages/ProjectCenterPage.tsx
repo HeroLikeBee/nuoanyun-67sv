@@ -297,7 +297,8 @@ export default function ProjectCenterPage({ go, role, nav }: { go: (p: string) =
           {LIFE.map((l, i) => (
             <React.Fragment key={l.n}>
               {i > 0 && <span className="nc-lifebar-arrow">→</span>}
-              <span className={`nc-lc${l.st ? ` is-${l.st}` : ''}`}>{l.n}{l.st === 'done' ? <> <Ico n="check" size={12} style={{ color: 'var(--c-success-deep)' }} /></> : null}</span>
+              {/* 生命周期节点：已完成统一蓝色 + ✓（与全局进度语义一致，不再用 success 绿） */}
+              <span className={`nc-lc${l.st ? ` is-${l.st}` : ''}`}>{l.n}{l.st === 'done' ? <> <Ico n="check" size={12} style={{ color: 'var(--c-primary)' }} /></> : null}</span>
             </React.Fragment>
           ))}
         </div>
@@ -563,7 +564,8 @@ export default function ProjectCenterPage({ go, role, nav }: { go: (p: string) =
               </tr></thead>
               <tbody>
                 {payRows.map((r) => (
-                  <tr key={r.id} className={r.st === 'overdue' ? 'is-warn-row' : r.st === 'hc' ? 'is-dead-row' : ''}>
+                  /* 条目背景色统一：逾期不再整行铺黄底，仅保留红冲（hc）的灰底弱化 */
+                  <tr key={r.id} className={r.st === 'hc' ? 'is-dead-row' : ''}>
                     <td><Code>{r.id}</Code></td>
                     <td><Tag tone={r.kind === '收入' ? 'green' : r.kind === '红字冲销单' ? 'gray' : 'orange'}>{r.kind}</Tag></td>
                     <td className="nc-cell-sub">{r.contract}</td>
@@ -637,7 +639,7 @@ export default function ProjectCenterPage({ go, role, nav }: { go: (p: string) =
                     <th style={{ width: 120 }} className="is-num">金额</th><th style={{ width: 110 }}>日期</th><th>说明</th><th style={{ width: 80 }}>操作</th></tr></thead>
                   <tbody>
                     {COST_ROWS.map((c) => (
-                      <tr key={c.id} className={c.st === 'approving' ? 'is-warn-row' : ''}>
+                      <tr key={c.id}>
                         <td><Tag tone={c.src === 'CG' ? 'orange' : c.src === 'CB' ? 'blue' : 'gray'}>{c.src}</Tag></td>
                         <td><Code>{c.id}</Code></td><td>{c.type}</td>
                         <td className="is-num"><b className="num"><Money v={c.amt} role={role} /></b></td>
@@ -946,7 +948,7 @@ export default function ProjectCenterPage({ go, role, nav }: { go: (p: string) =
             <th style={{ width: 110 }}>状态</th><th style={{ width: 130 }}>操作</th></tr></thead>
           <tbody>
             {DEPOSITS.map((d) => (
-              <tr key={d.id} className={d.st === '未退' && d.due < TODAY ? 'is-warn-row' : ''}>
+              <tr key={d.id}>
                 <td><b>{d.id}</b></td><td>{d.type}</td>
                 <td className="nc-cell-sub">{d.dir === 'in' ? ' 我方缴纳 · 待退回' : ' 我方收取 · 待退还'}<br />{d.party}</td>
                 <td className="is-num">{fmt(d.amt)}</td><td>{d.pay}</td><td>{d.due}</td>

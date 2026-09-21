@@ -448,7 +448,7 @@ export default function DocPage({ go, role, nav }: { go: (p: string) => void; ro
               <thead><tr><th style={{ width: 60 }}>版本</th><th style={{ width: 100 }}>时间</th><th style={{ width: 90 }}>操作人</th><th style={{ width: 80 }}>大小</th><th>变更说明</th><th style={{ width: 80 }}>操作</th></tr></thead>
               <tbody>
                 {detailVer.map((v) => (
-                  <tr key={v.ver} className={v.ver === detail.ver ? 'is-warn-row' : ''}>
+                  <tr key={v.ver}>
                     <td><b className="num">{v.ver}</b>{v.ver === detail.ver && <Tag tone="blue">当前</Tag>}</td>
                     <td className="num">{v.date}</td><td>{v.by}</td><td className="num">{v.size}</td>
                     <td>{v.note}</td>

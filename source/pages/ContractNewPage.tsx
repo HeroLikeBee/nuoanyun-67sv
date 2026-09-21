@@ -1,4 +1,6 @@
-// 新建合同向导（向导页）—— 布局 / 交互 / 页面结构复刻「合同新增.html」（六来源 · FR-CONT-001 · Step0~3）
+// 新建合同向导（向导页）—— 布局 / 交互 / 页面结构复刻「合同新增.html」（五来源 · FR-CONT-001 · Step0~3）
+// 创建来源：手工录入 / OCR 识别 / 标准模板 / 企业模板 / 复制历史合同。原「报价转化」入口已移除，
+// 改由合同明细的「从报价单导入」承接（报价台账仍可【转合同】直达本页，明细按单勾选导入）。
 // Step0 选择创建来源 → Step1 来源处理（OCR 上传 / 标准模板 / 企业模板 / 复制历史）→ Step2 OCR 左图右字段校对 → Step3 补充与提交
 // 硬规则：
 //  · 编号前缀由类型决定：HT 销售 / WB 维护保养 / CG 采购 / FK 分包 / KJ 框架（提交时生成 · 不可改）
@@ -11,9 +13,9 @@
 import React, { useEffect, useState } from 'react';
 import {
   Alert, Banner, Btn, Card, Check, Collapse, EntityLink, Field, Modal, Money, Op, PageHead, Tag, Tip, useToast, pressProps,} from '../components/ui';
-import { CUSTOMERS, PROJECTS, SUPPLIERS, QUOTES, QUOTE_STATUS, canSeeMoney, fmt, TODAY } from '../components/data';
+import { CUSTOMERS, PROJECTS, SUPPLIERS, QUOTES, canSeeMoney, fmt, TODAY } from '../components/data';
 import { addContract, getPendingContract, setPendingContract } from '../components/store';
-import { Ico, StatusIco } from '../components/icons';
+import { Ico, StatusIco, type IconName } from '../components/icons';
 
 /* ============================ 常量：来源 / 类型 / 路由 ============================ */
 type Src = 'manual' | 'ocr' | 'std' | 'ent' | 'copy' | null;
@@ -26,12 +28,12 @@ const SRC_META: Record<string, { n: string; r: number[] }> = {
   copy: { n: '复制历史合同', r: [0, 1, 3] },
 };
 
-const SRC_CARDS: { key: Src; ico: string; t: string; d: string; p: string }[] = [
-  { key: 'manual', ico: '', t: '手工录入', d: '空表单直入 Step3，从零填写合同信息、明细与收款计划', p: 'Step0 → Step3' },
-  { key: 'ocr', ico: '', t: 'OCR 识别', d: '上传 PDF/JPG ≤50MB → 异步识别 ≤10s → Step2 左图右字段校对', p: 'Step0 → 1 → 2 → 3' },
-  { key: 'std', ico: '', t: '标准模板', d: '全局模板 → 预览（内置风险条款标注）→ 变量替换 → 生成草稿', p: 'Step0 → 1 → 3' },
-  { key: 'ent', ico: '', t: '企业模板', d: '先选客户 → 其专属模板 → 同标准模板（预览 + 变量替换）', p: 'Step0 → 1 → 3' },
-  { key: 'copy', ico: '', t: '复制历史合同', d: '选择器（本客户优先 + 同类型）→ 差异预览 → 逐项确认带入', p: 'Step0 → 1 → 3' },
+const SRC_CARDS: { key: Src; ico: IconName; t: string; d: string; p: string }[] = [
+  { key: 'manual', ico: 'edit', t: '手工录入', d: '空表单直入 Step3，从零填写合同信息、明细与收款计划', p: 'Step0 → Step3' },
+  { key: 'ocr', ico: 'camera', t: 'OCR 识别', d: '上传 PDF/JPG ≤50MB → 异步识别 ≤10s → Step2 左图右字段校对', p: 'Step0 → 1 → 2 → 3' },
+  { key: 'std', ico: 'scroll', t: '标准模板', d: '全局模板 → 预览（内置风险条款标注）→ 变量替换 → 生成草稿', p: 'Step0 → 1 → 3' },
+  { key: 'ent', ico: 'building', t: '企业模板', d: '先选客户 → 其专属模板 → 同标准模板（预览 + 变量替换）', p: 'Step0 → 1 → 3' },
+  { key: 'copy', ico: 'clipboard', t: '复制历史合同', d: '选择器（本客户优先 + 同类型）→ 差异预览 → 逐项确认带入', p: 'Step0 → 1 → 3' },
 ];
 
 const TYPES = ['销售合同', '维护保养合同', '采购合同', '分包合同', '框架协议'];
@@ -285,6 +287,17 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
   const chain = getChain(f.type, f.amt);
   const proj = PROJ_OPTS.find((p) => p.id === f.proj);
 
+  /* ---------- 报价单导入候选（关键字 + 状态筛选） ----------
+     仅「已审批 / 已转化」报价单可作为合同明细依据：未审批完成的报价金额还会变，导进来就是错的。
+     状态筛选也只给这两种，避免出现点了必定空列表的选项。 */
+  const qList = QUOTES.filter((q) => {
+    if (q.status !== '已审批' && q.status !== '已转化') return false;
+    const kw = qKw.trim();
+    if (kw && !`${q.id} ${q.name} ${q.customer}`.includes(kw)) return false;
+    if (qStatus !== '全部' && q.status !== qStatus) return false;
+    return true;
+  });
+
   /* ---------- 校验（硬拦截） ---------- */
   const errors: Err[] = [];
   if (!f.name.trim()) errors.push(['name', '合同名称未填写']);
@@ -322,10 +335,12 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
   ].filter(Boolean).length;
 
   /* ---------- 导航 ---------- */
+  /** 内容区滚动容器是 AppShell 的 .nc-page，window 本身不滚动，回到顶部须直接滚动该容器 */
+  const scrollPageTop = () => document.querySelector('.nc-page')?.scrollTo({ top: 0 });
   const goStep = (n: number) => {
     setStep(n);
     if (n === 3) setForce(true);
-    window.scrollTo({ top: 0 });
+    scrollPageTop();
   };
   const advance = () => {
     if (step === 0) {
@@ -434,6 +449,30 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
     if (plan.length >= 12) { toast('收款计划最多 12 期', 'err'); return; }
     setPlan((p) => [...p, { node: '', amt: 0, date: '', qual: false }]);
   };
+
+  /* ---------- 合同明细 · 从报价单导入（替代原「报价转化」来源卡片） ----------
+     「报价转化」原为 Step0 的一个创建来源，但它只能由报价台账【转合同】触发、在本页点也点不动，
+     属于「占位却不可用」的入口。改为在合同明细里按报价单勾选导入明细行：合同仍在同一入口创建，
+     来源不再分裂。手动添加明细行保留为主入口。 */
+  const openQuoteImport = () => { setQSel([]); setQKw(''); setQStatus('全部'); setQuoteImport(true); };
+  /** 逐张报价单导入为一条合同明细：业务类型按报价名称推断，金额取报价总额，备注保留报价单号可追溯 */
+  const importQuotes = () => {
+    const chosen = qList.filter((q) => qSel.includes(q.id));
+    if (!chosen.length) { toast('请先勾选要导入的报价单', 'err'); return; }
+    const lines: Dtl[] = chosen.map((q) => ({
+      t: /维护|保养/.test(q.name) ? '维护保养服务' : /检测/.test(q.name) ? '消防检测' : '消防改造',
+      s: q.date || TODAY,
+      e: '',
+      a: q.total || 0,
+      r: `报价单 ${q.id} ${q.name} 导入`,
+    }));
+    setDtl((p) => [...p, ...lines]);
+    setQuoteImport(false);
+    setQSel([]);
+    setQKw('');
+    setQStatus('全部');
+    toast(`已从报价单导入 ${chosen.length} 行合同明细 · 合计 ${fmt(chosen.reduce((s, q) => s + q.total, 0))}`);
+  };
   const fillGap = () => {
     if (!gap) { toast('当前无差额需要补入'); return; }
     if (!plan.length) { setPlan([{ node: '尾款', amt: gap, date: '', qual: false }]); toast(`已将差额 ${fmt(gap)} 补入最后一期`); return; }
@@ -449,8 +488,8 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
       title: '拆解期次预览（≤12 期）',
       ok: '确认写入收款计划',
       body: (
-        <table className="nc-tbl" style={{ minWidth: 460 }}>
-          <thead><tr><th style={{ width: 60 }}>期数</th><th>收款节点</th><th style={{ width: 80 }} className="is-num">比例</th><th style={{ width: 120 }} className="is-num">金额（元）</th><th style={{ width: 90 }} className="is-center">质保金</th></tr></thead>
+        <table className="nc-tbl is-cols" style={{ minWidth: 460 }}>
+          <thead><tr><th style={{ width: '12%' }}>期数</th><th style={{ width: '36%' }}>收款节点</th><th style={{ width: '12%' }} className="is-num">比例</th><th style={{ width: '26%' }} className="is-num">金额（元）</th><th style={{ width: '14%' }} className="is-center">质保金</th></tr></thead>
           <tbody>
             {rows.map((r, i) => (
               <tr key={i}><td>第{i + 1}期</td><td>{r.node}</td><td className="is-num">{r.pct}%</td><td className="is-num">{fmt((base * r.pct) / 100)}</td><td className="is-center"><StatusIco kind={r.qual ? 'ok' : 'close'} /></td></tr>
@@ -543,7 +582,7 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
         setOkInfo({ no, line: projLine() });
         setConfirm(null);
         toast(`合同 ${no} 已提交审批 · 已回流合同台账（状态「审批中」）`);
-        window.scrollTo({ top: 0 });
+        scrollPageTop();
       },
     });
   };
@@ -570,10 +609,10 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
   const Sec = ({ id, children }: { id: string; children: React.ReactNode }) => <div id={`fi-${id}`} className="nc-anchor">{children}</div>;
 
   return (
-    <>
+    <div className="nc-wiz">
       <PageHead
         title="新建合同"
-        badges={<><Tag tone="blue">六来源向导 · Step0~3</Tag><Tag tone="gray">{src ? SRC_META[src].n : '未选择来源'}</Tag></>}
+        badges={<><Tag tone="blue">五来源向导 · Step0~3</Tag><Tag tone="gray">{src ? SRC_META[src].n : '未选择来源'}</Tag></>}
         sub="合同创建统一入口：手工录入 / OCR 识别 / 标准模板 / 企业模板 / 复制历史（合同明细支持从报价单导入）"
         actions={<Btn onClick={askReset}>重置向导</Btn>}
       />
@@ -602,7 +641,7 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
         </div>
       )}
 
-      {/* ============ Step0 六来源卡片 ============ */}
+      {/* ============ Step0 五来源卡片 ============ */}
       {step === 0 && (
         <Card>
           <div className="nc-src-grid">
@@ -612,7 +651,7 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
                   setSrc(s.key); setRoute(SRC_META[s.key!].r);
                   if (s.key === 'manual') { toast('已选择「手工录入」，直入 Step3'); goStep(3); } else goStep(1);
                 }}>
-                <div className="nc-src-ico">{s.ico}</div>
+                <div className="nc-src-ico"><Ico n={s.ico} size={22} /></div>
                 <h3>{s.t}</h3>
                 <p>{s.d}</p>
                 <p className="nc-src-path">路径：{s.p}</p>
@@ -735,8 +774,8 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
               return (
                 <>
                   <div className="nc-sec-title">差异预览（逐项确认带入）</div>
-                  <table className="nc-tbl" style={{ minWidth: 640 }}>
-                    <thead><tr><th style={{ width: 64 }} className="is-center">带入</th><th style={{ width: 160 }}>字段</th><th>源合同值</th></tr></thead>
+                  <table className="nc-tbl is-cols" style={{ minWidth: 640 }}>
+                    <thead><tr><th style={{ width: '10%' }} className="is-center">带入</th><th style={{ width: '22%' }}>字段</th><th style={{ width: '68%' }}>源合同值</th></tr></thead>
                     <tbody>
                       {rows.map((r) => (
                         <tr key={r[0]}>
@@ -764,16 +803,24 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
             <div className="nc-ocr-scan">
               <div className="nc-ocr-scan-hd"><span>合同扫描件 · P1（模拟）</span><span>ht-scan-demo.pdf</span></div>
               <div className="nc-ocr-scan-bd">
-                <div className="nc-ocr-line" style={{ width: '62%' }} />
-                <div className="nc-ocr-line" style={{ width: '40%' }} />
-                <div className="nc-ocr-line" style={{ width: '70%', marginTop: 24 }} />
-                <div className="nc-ocr-line" style={{ width: '52%' }} />
-                {OCR_INIT.map((x, i) => (
-                  <div key={x.k}
-                    className={`nc-ocr-box${(ocr.find((o) => o.k === x.k)?.c ?? 100) < 90 ? ' is-low' : ''}${hot === x.k ? ' is-hot' : ''}`}
-                    style={{ top: 92 + i * 44, left: 22, width: [52, 42, 34, 38, 48, 58][i] + '%' }}
-                    onClick={() => setHot(x.k)} />
-                ))}
+                <div className="nc-ocr-sec">甲方（发包方）与工程概况</div>
+                <div className="nc-ocr-row"><span className="nc-ocr-line" style={{ width: '62%' }} /></div>
+                <div className="nc-ocr-row"><span className="nc-ocr-line" style={{ width: '40%' }} /></div>
+                {ocr.map((x, i) => {
+                  const low = x.c < 90;
+                  return (
+                    <React.Fragment key={x.k}>
+                      {i === 2 && <div className="nc-ocr-sec">价款与履约约定</div>}
+                      <div className="nc-ocr-row">
+                        <div className={`nc-ocr-box${low ? ' is-low' : ''}${hot === x.k ? ' is-hot' : ''}`}
+                          style={{ width: [70, 56, 46, 52, 64, 100][i] + '%' }}
+                          onClick={() => setHot(x.k)} {...pressProps(() => setHot(x.k))}>
+                          <span className="nc-ocr-line" />
+                        </div>
+                      </div>
+                    </React.Fragment>
+                  );
+                })}
               </div>
             </div>
             <div>
@@ -826,45 +873,50 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
                   </select>
                 </Sec>
               </Field>
-              <Field label="负责人 / 实施地点">
-                <div className="nc-pair">
-                  <select className="nc-input" style={{ maxWidth: 180 }} value={f.owner} onChange={(e) => set('owner', e.target.value)}>
-                    {OWNERS.map((o) => <option key={o}>{o}</option>)}
-                  </select>
-                  <input className="nc-input" value={f.addr} onChange={(e) => set('addr', e.target.value)} placeholder="实施地点，如：××中心大厦 B2 消防泵房" />
-                </div>
+              <Field label="负责人">
+                <select className="nc-input" value={f.owner} onChange={(e) => set('owner', e.target.value)}>
+                  {OWNERS.map((o) => <option key={o}>{o}</option>)}
+                </select>
+              </Field>
+              <Field label="实施地点">
+                <input className="nc-input" value={f.addr} onChange={(e) => set('addr', e.target.value)} placeholder="如：××中心大厦 B2 消防泵房" />
               </Field>
             </div>
 
             <div className="nc-sec-title">关联项目</div>
             <Sec id="proj">
-              <div className="nc-pair" style={{ marginBottom: 8 }}>
-                <button type="button" className={`nc-fchip${pmode === 'exist' ? ' is-on' : ''}`} onClick={() => setPmode('exist')}>选择已有</button>
-                <button type="button" className={`nc-fchip${pmode === 'draft' ? ' is-on' : ''}`} onClick={() => setPmode('draft')}>新建草稿</button>
-                <button type="button" className={`nc-fchip${pmode === 'none' ? ' is-on' : ''}`} onClick={() => {
-                  if (f.type !== '框架协议') { toast('「暂不关联」仅框架协议可用：请先将合同类型切换为「框架协议」', 'err'); return; }
-                  setPmode('none');
-                }}>暂不关联（仅框架）</button>
+              <div className="nc-form-grid">
+                <Field label="关联方式" span={2} note="选择已有 = 挂到在办项目；新建草稿 = 签约后自动转已立项；暂不关联 = 仅框架协议可用">
+                  <div className="nc-pair">
+                    <button type="button" className={`nc-fchip${pmode === 'exist' ? ' is-on' : ''}`} onClick={() => setPmode('exist')}>选择已有</button>
+                    <button type="button" className={`nc-fchip${pmode === 'draft' ? ' is-on' : ''}`} onClick={() => setPmode('draft')}>新建草稿</button>
+                    <button type="button" className={`nc-fchip${pmode === 'none' ? ' is-on' : ''}`} onClick={() => {
+                      if (f.type !== '框架协议') { toast('「暂不关联」仅框架协议可用：请先将合同类型切换为「框架协议」', 'err'); return; }
+                      setPmode('none');
+                    }}>暂不关联（仅框架）</button>
+                  </div>
+                </Field>
+                {pmode === 'exist' && (
+                  <Field label="关联项目" span={2} err={showErr('proj')}>
+                    <select className="nc-input" value={f.proj} onChange={(e) => set('proj', e.target.value)}>
+                      <option value="">请选择项目</option>
+                      {PROJ_OPTS.map((p) => <option key={p.id} value={p.id}>{p.id} {p.name}</option>)}
+                    </select>
+                    <div className="nc-field-note"><Ico n="bolt" size={16} />A-04：提交时检测所选项目是否存在未归并收支（演示：XM000087 产业园一期消防工程 将被硬拦截）</div>
+                  </Field>
+                )}
+                {pmode === 'draft' && (
+                  <Field label="草稿项目名称" span={2} err={showErr('proj')}>
+                    <input className="nc-input" value={f.pjname} onChange={(e) => set('pjname', e.target.value)} placeholder="草稿项目名称，如：××医院消防维护保养（2027 年度）" />
+                    <div className="nc-field-note">保存为 <b>PRJ-DRAFT-001</b>（草稿项目）；<b>合同签约后自动转「已立项」</b>，无需先走项目立项流程</div>
+                  </Field>
+                )}
+                {pmode === 'none' && (
+                  <Field label="关联项目" span={2} err={showErr('proj')}>
+                    <Banner tone="info">本合同暂不关联项目（仅框架协议允许）。经营统计将归入「未关联」维度，后续可随时补挂项目。</Banner>
+                  </Field>
+                )}
               </div>
-              {pmode === 'exist' && (
-                <>
-                  <select className="nc-input" style={{ maxWidth: 460 }} value={f.proj} onChange={(e) => set('proj', e.target.value)}>
-                    <option value="">请选择项目</option>
-                    {PROJ_OPTS.map((p) => <option key={p.id} value={p.id}>{p.id} {p.name}</option>)}
-                  </select>
-                  <div className="nc-field-note"><Ico n="bolt" size={16} />A-04：提交时检测所选项目是否存在未归并收支（演示：XM000087 产业园一期消防工程 将被硬拦截）</div>
-                </>
-              )}
-              {pmode === 'draft' && (
-                <>
-                  <input className="nc-input" style={{ maxWidth: 460 }} value={f.pjname} onChange={(e) => set('pjname', e.target.value)} placeholder="草稿项目名称，如：××医院消防维护保养（2027 年度）" />
-                  <div className="nc-field-note">保存为 <b>PRJ-DRAFT-001</b>（草稿项目）；<b>合同签约后自动转「已立项」</b>，无需先走项目立项流程</div>
-                </>
-              )}
-              {pmode === 'none' && (
-                <Banner tone="info">本合同暂不关联项目（仅框架协议允许）。经营统计将归入「未关联」维度，后续可随时补挂项目。</Banner>
-              )}
-              {!!showErr('proj') && <div className="nc-field-err">{showErr('proj')}</div>}
             </Sec>
           </Card>
 
@@ -912,17 +964,17 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
               <Field label="签约日期" req err={showErr('sign')} note="≤ 今天（未来日期硬拦截）">
                 <Sec id="sign"><input className="nc-input" type="date" max={TODAY} value={f.sign} onChange={(e) => set('sign', e.target.value)} /></Sec>
               </Field>
-              <Field label="开工 / 到期日">
-                <div className="nc-pair">
-                  <input className="nc-input" type="date" value={f.start} onChange={(e) => set('start', e.target.value)} />
-                  <input className="nc-input" type="date" value={f.end} onChange={(e) => set('end', e.target.value)} />
-                </div>
+              <Field label="开工日期">
+                <input className="nc-input" type="date" value={f.start} onChange={(e) => set('start', e.target.value)} />
+              </Field>
+              <Field label="到期日">
+                <input className="nc-input" type="date" value={f.end} onChange={(e) => set('end', e.target.value)} />
               </Field>
               <Field label="工期起止" err={showErr('p1')} note="止 ≥ 起（硬拦截）；用于工期倒计时">
                 <Sec id="p1">
                   <div className="nc-pair">
                     <input className="nc-input" type="date" value={f.p1} onChange={(e) => set('p1', e.target.value)} />
-                    <span className="nc-cell-sub">~</span>
+                    <span className="nc-pair-sep">~</span>
                     <input className="nc-input" type="date" value={f.p2} onChange={(e) => set('p2', e.target.value)} />
                   </div>
                 </Sec>
@@ -951,13 +1003,13 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
           </Card>
 
           {/* 合同明细 */}
-          <Card hd="合同明细">
-            <table className="nc-tbl" style={{ minWidth: 860 }}>
+          <Card hd="合同明细" extra={<Btn size="sm" onClick={openQuoteImport} title="按报价单勾选导入明细行（仅「已审批 / 已转化」报价单可导入）">从报价单导入</Btn>}>
+            <table className="nc-tbl is-cols" style={{ minWidth: 800 }}>
               <thead>
                 <tr>
-                  <th style={{ width: 52 }}>序号</th><th style={{ width: 130 }}>业务类型</th>
-                  <th style={{ width: 140 }}>服务周期起</th><th style={{ width: 140 }}>服务周期止</th>
-                  <th style={{ width: 140 }} className="is-num">金额（元）</th><th>备注</th><th style={{ width: 60 }} className="is-center">操作</th>
+                  <th style={{ width: '6%' }}>序号</th><th style={{ width: '13%' }}>业务类型</th>
+                  <th style={{ width: '13%' }}>服务周期起</th><th style={{ width: '13%' }}>服务周期止</th>
+                  <th style={{ width: '14%' }} className="is-num">金额（元）</th><th style={{ width: '35%' }}>备注</th><th style={{ width: '6%' }} className="is-center">操作</th>
                 </tr>
               </thead>
               <tbody>
@@ -986,14 +1038,14 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
 
           {/* 收款计划 */}
           <Card hd="收款计划（≤ 12 期）">
-            <table className="nc-tbl" style={{ minWidth: 820 }}>
+            <table className="nc-tbl is-cols" style={{ minWidth: 760 }}>
               <thead>
                 <tr>
-                  <th style={{ width: 52 }}>期数</th><th>收款节点</th>
-                  <th style={{ width: 150 }} className="is-num">计划金额（元）</th>
-                  <th style={{ width: 160 }}>计划日期</th>
-                  <th style={{ width: 100 }} className="is-center">质保金节点</th>
-                  <th style={{ width: 60 }} className="is-center">操作</th>
+                  <th style={{ width: '7%' }}>期数</th><th style={{ width: '38%' }}>收款节点</th>
+                  <th style={{ width: '17%' }} className="is-num">计划金额（元）</th>
+                  <th style={{ width: '19%' }}>计划日期</th>
+                  <th style={{ width: '12%' }} className="is-center">质保金节点</th>
+                  <th style={{ width: '7%' }} className="is-center">操作</th>
                 </tr>
               </thead>
               <tbody>
@@ -1030,14 +1082,12 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
               <div className="nc-grp-t">① 付款条款</div>
               <div className="nc-form-grid">
                 <Field label="付款条款" req span={2} err={showErr('term')}
+                  extra={<span className="nc-label-extra"><Btn size="sm" onClick={splitTerm} title="按条款中的比例自动生成收款计划行，与明细合计勾稽">拆解为收款计划（≤ 12 期）</Btn></span>}
                   note={`${f.term.length} / 2000 · ${f.type === '销售合同' ? '销售类必填' : '选填'}`}>
                   <Sec id="term">
                     <textarea className="nc-input" rows={3} value={f.term} onChange={(e) => set('term', e.target.value)}
                       placeholder="试输：签订后7日内付30%预付款；竣工验收后付60%；质保期满付10%" />
                   </Sec>
-                </Field>
-                <Field label="拆解为收款计划" note="可按条款中比例自动生成收款计划行，与明细合计勾稽">
-                  <div className="nc-pair"><Btn size="sm" onClick={splitTerm}>拆解期次</Btn><span className="nc-cell-sub">≤ 12 期</span></div>
                 </Field>
               </div>
 
@@ -1046,18 +1096,18 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
                 <Field label="履约保证金">
                   <div className="nc-pair">
                     <input className="nc-input num" type="number" style={{ maxWidth: 140 }} placeholder="比例 0~100" value={f.pbr} onChange={(e) => set('pbr', e.target.value)} />
-                    <span className="nc-cell-sub">%</span>
+                    <span className="nc-pair-sep">%</span>
                     <input className="nc-input num" type="number" style={{ maxWidth: 130 }} placeholder="期限 1~36" value={f.pbm} onChange={(e) => set('pbm', e.target.value)} />
-                    <span className="nc-cell-sub">月</span>
+                    <span className="nc-pair-sep">月</span>
                   </div>
                 </Field>
                 <Sec id="rat">
                   <Field label="质量保证金" req err={showErr('rat')} note={+f.ratm > 24 ? `缺陷责任期 ${f.ratm} 个月：超过 24 个月，请确认资金占用与回收风险` : '法定上限 3%（建质〔2017〕138 号）· ＞3% 硬拦截 · 缺陷责任期建议 ≤24 个月'} warn={+f.ratm > 24}>
                     <div className="nc-pair">
                       <input className="nc-input num" type="number" style={{ maxWidth: 140 }} placeholder="比例 0~100" value={f.rat} onChange={(e) => set('rat', e.target.value)} />
-                      <span className="nc-cell-sub">%</span>
-                      <input className="nc-input num" type="number" style={{ maxWidth: 120 }} placeholder="1~36" value={f.ratm} onChange={(e) => set('ratm', e.target.value)} />
-                      <span className="nc-cell-sub">月</span>
+                      <span className="nc-pair-sep">%</span>
+                      <input className="nc-input num" type="number" style={{ maxWidth: 130 }} placeholder="1~36" value={f.ratm} onChange={(e) => set('ratm', e.target.value)} />
+                      <span className="nc-pair-sep">月</span>
                     </div>
                   </Field>
                 </Sec>
@@ -1066,26 +1116,26 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
               <div className="nc-grp-t">③ 质保 · 维护保养 · 续签</div>
               <div className="nc-form-grid">
                 <Field label="质保期" note={`质保到期日：${addMonths(f.start || f.sign, +f.war)}（自动）`}>
-                  <select className="nc-input" style={{ maxWidth: 150 }} value={f.war} onChange={(e) => set('war', e.target.value)}>
+                  <select className="nc-input" style={{ maxWidth: 220 }} value={f.war} onChange={(e) => set('war', e.target.value)}>
                     <option value="">请选择</option>{['3', '6', '12', '24'].map((v) => <option key={v} value={v}>{v} 个月</option>)}
                   </select>
                 </Field>
                 <Field label="维护保养多年期">
-                  <select className="nc-input" style={{ maxWidth: 150 }} value={f.multi} onChange={(e) => set('multi', e.target.value)}>
+                  <select className="nc-input" style={{ maxWidth: 220 }} value={f.multi} onChange={(e) => set('multi', e.target.value)}>
                     <option value="">请选择</option><option>否</option><option>是</option>
                   </select>
                 </Field>
                 {f.multi === '是' && (
-                  <Field label="服务年限" span={2} note="建议按服务年度生成收款计划（每年一期，尾期补差）">
+                  <Field label="服务年限" note="建议按服务年度生成收款计划（每年一期，尾期补差）">
                     <div className="nc-pair">
                       <input className="nc-input num" type="number" style={{ maxWidth: 110 }} min={2} max={5} value={f.myears} onChange={(e) => set('myears', +e.target.value || 3)} />
-                      <span className="nc-cell-sub">年（2~5）</span>
+                      <span className="nc-pair-sep">年（2~5）</span>
                       <Btn size="sm" onClick={genYearPlan}>按服务年度生成收款计划</Btn>
                     </div>
                   </Field>
                 )}
-                <Field label="续签提醒" note="写入续证 / 续签待办，临近二次提醒">
-                  <select className="nc-input" style={{ maxWidth: 200 }} value={f.renew} onChange={(e) => set('renew', e.target.value)}>
+                <Field label="续签提醒" span={f.multi === '是' ? undefined : 2} note="写入续证 / 续签待办，临近二次提醒">
+                  <select className="nc-input" style={{ maxWidth: 220 }} value={f.renew} onChange={(e) => set('renew', e.target.value)}>
                     <option value="">请选择</option>
                     {[['30', '到期前 30 天提醒'], ['60', '到期前 60 天提醒'], ['90', '到期前 90 天提醒']].map(([v, t]) => <option key={v} value={v}>{t}</option>)}
                   </select>
@@ -1111,25 +1161,25 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
 
               <div className="nc-grp-t">⑤ 联系人</div>
               <div className="nc-form-grid">
-                <Field label="发包方联系人 / 电话">
-                  <div className="nc-pair">
-                    <input className="nc-input" style={{ maxWidth: 200 }} placeholder="档案带出 · 可改" value={f.ct} onChange={(e) => set('ct', e.target.value)} />
-                    <input className="nc-input" style={{ maxWidth: 200 }} placeholder="联系电话 · 档案带出 · 可改" value={f.tel} onChange={(e) => set('tel', e.target.value)} />
-                  </div>
+                <Field label="发包方联系人">
+                  <input className="nc-input" placeholder="档案带出 · 可改" value={f.ct} onChange={(e) => set('ct', e.target.value)} />
+                </Field>
+                <Field label="联系电话">
+                  <input className="nc-input num" placeholder="档案带出 · 可改" value={f.tel} onChange={(e) => set('tel', e.target.value)} />
                 </Field>
               </div>
 
               <div className="nc-grp-t">⑥ 行业 / 地区</div>
               <div className="nc-form-grid">
-                <Field label="行业 / 地区">
-                  <div className="nc-pair">
-                    <select className="nc-input" style={{ maxWidth: 200 }} value={f.ind} onChange={(e) => set('ind', e.target.value)}>
-                      <option value="">请选择</option>{INDUSTRIES.map((x) => <option key={x}>{x}</option>)}
-                    </select>
-                    <select className="nc-input" style={{ maxWidth: 200 }} value={f.reg} onChange={(e) => set('reg', e.target.value)}>
-                      <option value="">请选择</option>{REGIONS.map((x) => <option key={x}>{x}</option>)}
-                    </select>
-                  </div>
+                <Field label="行业">
+                  <select className="nc-input" style={{ maxWidth: 220 }} value={f.ind} onChange={(e) => set('ind', e.target.value)}>
+                    <option value="">请选择</option>{INDUSTRIES.map((x) => <option key={x}>{x}</option>)}
+                  </select>
+                </Field>
+                <Field label="地区">
+                  <select className="nc-input" style={{ maxWidth: 220 }} value={f.reg} onChange={(e) => set('reg', e.target.value)}>
+                    <option value="">请选择</option>{REGIONS.map((x) => <option key={x}>{x}</option>)}
+                  </select>
                 </Field>
               </div>
             </Collapse>
@@ -1150,12 +1200,12 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
 
           {/* 附件分类 */}
           <Card hd="附件（分类上传 · 单份 ≤50MB · 每类 ≤5 份）">
-            <div className="nc-pair" style={{ marginBottom: 8 }}>
-              <select className="nc-input" style={{ maxWidth: 170 }} value={attCat} onChange={(e) => setAttCat(e.target.value)}>
+            <div className="nc-att-bar">
+              <select className="nc-input nc-att-cat" value={attCat} onChange={(e) => setAttCat(e.target.value)}>
                 {Object.keys(ATT_CATS).map((c) => <option key={c}>{c}</option>)}
               </select>
               <Btn onClick={() => toast('演示：文件选择器（DWG/DXF 仅「其他」类可传）')}>＋ 选择本地文件</Btn>
-              <select className="nc-input" style={{ maxWidth: 250 }} defaultValue="demo-contract.pdf|8.2">
+              <select className="nc-input nc-att-demo" defaultValue="demo-contract.pdf|8.2">
                 <option value="demo-contract.pdf|8.2">示例：合同扫描件.pdf · 8.2MB</option>
                 <option value="demo-structure.dwg|12.6">示例：结构图.dwg · 12.6MB</option>
                 <option value="demo-fireplan.dxf|9.8">示例：消防平面图.dxf · 9.8MB</option>
@@ -1170,19 +1220,23 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
             </div>
             <div className="nc-dropzone is-mini">或将文件拖拽到此处（DWG/DXF 仅「其他」类可传）</div>
             <Sec id="att">
-              <div style={{ marginTop: 12 }}>
+              <div className="nc-att-sum">
+                <span className="nc-att-sum-lbl">分类计数</span>
                 {Object.keys(ATT_CATS).map((c) => (
                   <span key={c} className="nc-att-cnt">{c} <b className="num">{files.filter((x) => x.cat === c).length}/{ATT_MAX}</b></span>
                 ))}
-                <span className="nc-att-cnt">合计 <b className="num">{files.length}</b></span>
+                <span className="nc-att-cnt is-total">合计 <b className="num">{files.length}</b></span>
               </div>
-              <div style={{ marginTop: 8 }}>
+              <div className="nc-att-list">
                 {files.map((x, i) => (
-                  <span key={i} className="nc-att-chip">[{x.cat}] {x.n} · {x.sz}
-                    {!x.fix && <a className="nc-att-x" onClick={() => setFiles((p) => p.filter((_, j) => j !== i))}>×</a>}
-                  </span>
+                  <div key={i} className="nc-att-item">
+                    <Tag tone="gray">{x.cat}</Tag>
+                    <span className="nc-att-name" title={x.n}>{x.n}</span>
+                    <span className="nc-att-size num">{x.sz}</span>
+                    {!x.fix && <Op danger title="移除" onClick={() => setFiles((p) => p.filter((_, j) => j !== i))}><Ico n="close" size={16} /></Op>}
+                  </div>
                 ))}
-                {!files.length && <span className="nc-cell-sub">暂无附件</span>}
+                {!files.length && <div className="nc-att-empty">暂无附件</div>}
               </div>
               {!!showErr('att') && <div className="nc-field-err">{showErr('att')}</div>}
             </Sec>
@@ -1254,33 +1308,29 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
           </Field>
           <Field label="状态筛选">
             <div className="nc-pair">
-              {['全部', ...QUOTE_STATUS].map((s) => (
+              {/* 仅列可导入的两种状态，避免出现「点了必定空列表」的筛选 */}
+              {['全部', '已审批', '已转化'].map((s) => (
                 <button key={s} type="button" className={`nc-fchip${qStatus === s ? ' is-on' : ''}`} onClick={() => setQStatus(s)}>{s}</button>
               ))}
             </div>
           </Field>
         </div>
-        <div className="nc-cell-sub" style={{ marginBottom: 6 }}>仅「已审批 / 已转化」报价单可导入；勾选后导入为合同明细行（金额、备注可继续在下方编辑）。</div>
-        <table className="nc-tbl" style={{ minWidth: 640 }}>
-          <thead><tr><th style={{ width: 48 }} className="is-center">选择</th><th>报价单号</th><th>客户</th><th>名称</th><th style={{ width: 130 }} className="is-num">金额（元）</th><th style={{ width: 80 }} className="is-center">状态</th></tr></thead>
+        <div className="nc-cell-sub" style={{ marginBottom: 6 }}>仅「已审批 / 已转化」报价单可导入；勾选后逐张导入为合同明细行（金额、备注可继续在下方编辑）。</div>
+        <table className="nc-tbl is-cols" style={{ minWidth: 640 }}>
+          <thead><tr><th style={{ width: '5%' }} className="is-center">选择</th><th style={{ width: '17%' }}>报价单号</th><th style={{ width: '18%' }}>客户</th><th style={{ width: '24%' }}>名称</th><th style={{ width: '20%' }} className="is-num">金额（元）</th><th style={{ width: '16%' }} className="is-center">状态</th></tr></thead>
           <tbody>
             {qList.map((q) => {
-              const ok = q.status === '已审批' || q.status === '已转化';
               const on = qSel.includes(q.id);
               return (
                 <tr key={q.id} className={on ? 'is-on' : ''}>
                   <td className="is-center">
-                    {ok ? (
-                      <input type="checkbox" checked={on} onChange={(e) => setQSel((p) => (e.target.checked ? [...p, q.id] : p.filter((x) => x !== q.id)))} />
-                    ) : (
-                      <span className="nc-cell-sub" title="报价单未审批完成，暂不可导入">—</span>
-                    )}
+                    <input type="checkbox" checked={on} onChange={(e) => setQSel((p) => (e.target.checked ? [...p, q.id] : p.filter((x) => x !== q.id)))} />
                   </td>
                   <td className="nc-cell-sub">{q.id}</td>
                   <td>{q.customer}</td>
                   <td>{q.name}</td>
                   <td className="is-num"><Money v={q.total} role={role} /></td>
-                  <td className="is-center"><Tag tone={q.status === '已审批' ? 'green' : q.status === '已转化' ? 'blue' : q.status === '作废' ? 'red' : 'gray'}>{q.status}</Tag></td>
+                  <td className="is-center"><Tag tone={q.status === '已审批' ? 'green' : 'blue'}>{q.status}</Tag></td>
                 </tr>
               );
             })}
@@ -1288,6 +1338,6 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
           </tbody>
         </table>
       </Modal>
-    </>
+    </div>
   );
 }

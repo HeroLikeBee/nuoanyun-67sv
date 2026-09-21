@@ -6,7 +6,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Banner, Btn, Card, ChainBar, DataTable, Drawer, EntityLink, Field, KvGrid, ListToolbar, Modal,
-  Op, OpSep, PageHead, TableFoot, Tag, Tabs, Timeline, Tile, useToast, Code, pressProps,} from '../components/ui';
+  Op, OpSep, PageHead, TableFoot, Tag, Tabs, Timeline, Tile, useToast, Code, IdCell, pressProps,} from '../components/ui';
 import { OPPS, OPP_STAGES, OPP_STAGE_PROB, OPP_TERMINAL, OPP_POST, OPP_AMT_REQUIRED_FROM, fmtWan, canSeeMoney, TODAY } from '../components/data';
 import { getFocus, setFocus } from '../components/store';
 import { Ico } from '../components/icons';
@@ -295,7 +295,7 @@ export default function OppPage({ go, role, nav }: { go: (p: string) => void; ro
             <DataTable<O>
               minWidth={1520}
               cols={[
-                { key: 'id', title: '商机编号', width: 110, render: (o) => <span className="num" style={{ color: 'var(--c-primary)', fontWeight: 600 }}>{o.id}</span> },
+                { key: 'id', title: '商机编号', width: 110, render: (o) => <IdCell onClick={() => { setDetail(o); setDTab('overview'); }} title="查看商机详情">{o.id}</IdCell> },
                 { key: 'name', title: '商机名称', width: 250, render: (o) => (<div><div className="nc-td-main">{o.name}{converted[o.id] && <Tag tone="green">已转化</Tag>}</div><div className="nc-td-sub">{BIZ_NAME[o.biz]} · {o.type} · 报价 {o.quotes} 版</div></div>) },
                 { key: 'customer', title: '客户', width: 190, render: (o) => <EntityLink target="customer" id={o.customerId} go={go} title="下钻到客户档案">{o.customer}</EntityLink> },
                 { key: 'stage', title: '阶段', width: 92, render: (o) => <Tag tone={STAGE_TONE[o.stage]}>{o.stage}</Tag> },

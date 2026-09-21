@@ -424,7 +424,7 @@ export default function CertPage({ go, role, nav }: { go: (p: string) => void; r
             cols={certCols} rows={paged} rowKey={(c) => c.id} minWidth={1420}
             empty="没有符合筛选条件的证书；证书分人员证书 / 企业资质两类，支持 OCR 扫码建档"
             emptyCta={<Btn size="sm" kind="primary" onClick={() => { setNewOpen(true); resetNewCert(); }}>＋ 新增证书</Btn>}
-            rowClass={(c) => (c.validTo < TODAY ? 'is-danger-row' : c.level === 'company-red' ? 'is-warn-row' : '')}
+            /* 条目背景色统一：证件到期 / 高风险不再整行铺色，改由行内标签与状态列承担 */
             onRowClick={(c) => setDetail(c)}
             foot={<TableFoot total={certs.length} filtered={rows.length} page={page} pageSize={pageSize} onPage={setPage} onPageSize={(n) => { setPageSize(n); setPage(1); }} unit="本" extra={<span className="nc-cell-sub"> ｜ 行点击打开详情</span>} />}
           />

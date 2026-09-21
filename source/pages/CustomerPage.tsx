@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Btn, Banner, Card, DataTable, Drawer, EntityLink, Field, KvGrid, ListToolbar, Modal, Op, OpSep,
-  PageHead, Progress, TableFoot, Tabs, Tag, Timeline, Tip, useToast, Code, pressProps,} from '../components/ui';
+  PageHead, Progress, TableFoot, Tabs, Tag, Timeline, Tip, useToast, Code, IdCell, pressProps,} from '../components/ui';
 import { CUSTOMERS, FOLLOWS, OPPS, OPP_TERMINAL, PROJECTS, QUOTES, CONTRACTS, fmtWan, canSeeMoney, TODAY } from '../components/data';
 import { getFocus, setFocus } from '../components/store';
 import { Ico } from '../components/icons';
@@ -295,7 +295,7 @@ export default function CustomerPage({ go, role, nav }: { go: (p: string) => voi
             minWidth={1720}
             cols={[
               { key: '__idx', title: '序号', width: 56, render: (c) => <span className="num">{rows.indexOf(c) + 1}</span> },
-              { key: 'id', title: '客户编号', width: 150, render: (c) => <span className="num">{c.id}</span> },
+              { key: 'id', title: '客户编号', width: 150, render: (c) => <IdCell onClick={() => setDetail(c)} title="查看客户详情">{c.id}</IdCell> },
               {
                 key: 'name', title: '客户名称', width: 250, render: (c) => (
                   <div>
