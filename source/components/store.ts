@@ -65,7 +65,7 @@ export function setBizStatus(no: string, st: string) {
   emit();
 }
 
-/** 从审批单 ref 中解析上游业务单据号（BJ…/HT…/WB…/TB…/BG…/PF…） */
+/** 从审批单 ref 中解析上游业务单据号（BJ…/HT…/WB…/TB…/BG…/PF…/XM…） */
 export function refBizNo(ref: string): string {
   const m = /^([A-Z]{2}\d{8}-\d{4}|[A-Z]{2}\d{6})/.exec(ref);
   return m ? m[1] : '';
@@ -99,6 +99,15 @@ export function syncBizFromApproval(
     setBizStatus(no, st);
     return no;
   }
+  // 项目立项审批：XM… → 项目 status（通过 → 已立项 · 退回 → 草稿；立项闭环 v2 新增）
+  if (no.startsWith('XM')) {
+    const p = projects.find((x) => x.id === no);
+    if (!p) return '';
+    const st = rejected ? '草稿' : allDone ? '已立项' : '待审批';
+    setBizStatus(no, st);
+    (p as { status: string }).status = st;
+    return no;
+  }
   // 其余（变更 BG / 付款 PF / 借阅 JY）：通用三态
   const st = rejected ? '已退回' : allDone ? '已通过' : '审批中';
   setBizStatus(no, st);
@@ -120,7 +129,7 @@ export function setPendingContract(v: typeof pendingContract) {
 }
 
 /* ============================ 详情页聚焦实体（G3：消除硬编码索引 0） ============================ */
-// 列表页跳转详情页前调用 setFocus('<pageId>', '<实体ID>')，详情页用 getFocus 取，
+// 列表页跳转详情页前调用 setFocus('<page>', '<实体ID>')，详情页用 getFocus 取，
 // 取不到时回落到首条 —— 保证「点哪条看哪条」，而非永远展示 PROJECTS[0] / QUOTES[0]。
 let focus: Record<string, string> = {};
 

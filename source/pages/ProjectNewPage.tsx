@@ -1,60 +1,55 @@
-// 诺安云 6.0 · 新增项目（立项向导）· PRD §14
+// 诺安云 6.0 · 新增项目（立项向导 v2）· PRD §14 重构版
+// 设计口径（评审定稿）：
+//   ① 入口塌缩两类：有合同立项（常规）/ 应急工程·无合同（30 日补签）—— 上游溯源由合同继承，不再手选
+//   ② 服务周期明细不在立项填报 —— 立项后于「项目经营中心 · 计划管理」按巡检/施工计划滚动补录
+//   ③ 证书三段式：立项=合规预检+需求清单存档（只读）｜借出=开工前证书中心办理｜齐套=开工闸门
+//   ④ 提交走审批中心闭环（pushApproval + XM 回写，见 store.syncBizFromApproval）
+//   ⑤ 草稿真存续（localStorage），重进可恢复
 import React, { useMemo, useState } from 'react';
 import {
-  Btn, Card, Check, EntityLink, Field, KvGrid, Modal, Op, OpSep, PageHead, Steps, Tag, Tip, useToast, pressProps,} from '../components/ui';
+  Btn, Card, Check, EntityLink, Field, KvGrid, Modal, PageHead, Steps, Tag, Tip, pressProps, useToast,
+} from '../components/ui';
 import {
-  CERTS, CONTRACTS, CUSTOMERS, OPP_STAGES, OPP_POST, OPPS, PROJECTS, PROJECT_SOURCES, QUOTES, ROLES, TODAY,
-  approveLevel, fmt, fmtWan,
+  APPROVALS, BIDS, CERTS, CONTRACTS, CUSTOMERS, OPPS, PROJECTS, QUOTES,
+  TODAY, approveLevel, fmt, fmtWan, normContractStatus,
 } from '../components/data';
-import { addProject } from '../components/store';
+import { addProject, getApprovals, getProjects, pushApproval } from '../components/store';
 import { Ico, StatusIco, type IconName } from '../components/icons';
 
-/* ============ 入口来源（4 类） ============ */
-type SrcKey = 'bid' | 'opp' | 'quote' | 'emergency';
-const SRC_CARDS: { key: SrcKey; label: string; desc: string; icon: IconName; tone: string }[] = [
-  { key: 'bid', label: '投标中标', desc: '由已登记「中标」的投标单发起 · 自动带出中标金额与客户', icon: 'trophy', tone: 'blue' },
-  { key: 'opp', label: '商机直签', desc: '由「待启动 / 已签」阶段商机发起 · 未走投标流程', icon: 'users', tone: 'green' },
-  { key: 'quote', label: '报价转化', desc: '由「已审批」报价单转化 · 带出报价明细作为预算基线', icon: 'file', tone: 'purple' },
-  { key: 'emergency', label: '应急工程', desc: '抢险 / 抢修先施工 · 系统标记「无合同施工」，须限期补签', icon: 'flame', tone: 'red' },
+/* ============ 入口（2 类） ============ */
+type Mode = 'contract' | 'emergency';
+const ENTRY_CARDS: { key: Mode; label: string; desc: string; icon: IconName; tone: string }[] = [
+  { key: 'contract', label: '有合同立项', desc: '选择一份「已签约」合同发起 · 自动带出客户 / 金额 / 工期，并继承商机→报价→投标溯源链', icon: 'receipt', tone: 'blue' },
+  { key: 'emergency', label: '应急工程 · 无合同', desc: '抢险抢修先施工 · 标记「无合同施工」，须 30 日内完成合同补签', icon: 'flame', tone: 'red' },
 ];
 
-/* ============ 项目类型 / 业务条线 ============ */
 const PTYPES = ['新建', '改造', '维护保养'];
 const BIZ = [{ k: 'GC', n: '工程施工' }, { k: 'WB', n: '维护保养' }, { k: 'RJ', n: '消防软件' }, { k: 'QT', n: '其他' }];
+const SIGN_TYPES = ['维护保养合同', '销售合同'];
 
-/* ============ 服务明细：业务类型（按行选择，不设合同级统一类型） ============ */
-const BTYPES = ['火灾自动报警系统', '消火栓系统', '自动喷淋系统', '防排烟系统', '应急照明与疏散指示', '气体灭火系统', '防火门 / 防火卷帘', '维护保养巡检（年度）', '消防设施检测评估', '深化设计与验收辅导', '其他'];
-type DetRow = { type: string; ps: string; pe: string; amt: number; note: string };
+/** 服务明细后补口径（立项环节不填报的说明，确认页复述） */
+const DETAIL_HINT =
+  '服务周期明细与工程量清单不在立项环节填报：立项后由「项目经营中心 · 计划管理」按巡检 / 施工计划滚动补录，累计金额超出合同额时引导走合同变更。';
 
-/* ============ 证书需求预判：按行业自动勾选 ============ */
-const CERT_NEED = ['消防专包资质', '建造师（项目经理）', '专职安全员 C 证 ×2', '电工证', '焊工证'] as const;
-const CERT_MAP: Record<string, string[]> = {
-  商业综合体: ['消防专包资质', '专职安全员 C 证 ×2', '电工证', '焊工证'],
-  医疗: ['专职安全员 C 证 ×2', '电工证'],
-  教育: ['消防专包资质', '电工证'],
-  电力: ['电工证'],
-  文旅: ['消防专包资质', '电工证'],
-  地产: ['消防专包资质', '建造师（项目经理）', '电工证'],
-  园区: ['消防专包资质', '电工证'],
-  其他: ['电工证'],
-  化工: ['焊工证', '电工证'],
-};
-const certPredict = (ind: string) => CERT_MAP[ind] || ['电工证'];
-
-/* ============ 附件 4 类（统一入口 + 选分类） ============ */
-const FILE_CATS = ['报价清单', '安全协议', '中标通知书', '其他'] as const;
-type FileItem = { cat: string; name: string; size: number };
-
-/* ============ 合同 → 项目：行业 / 地区字典 ============ */
-const INDS = ['商业综合体', '医疗', '教育', '电力', '化工', '地产', '文旅', '园区', '其他'];
-const REGIONS = ['昆明', '曲靖', '楚雄', '文山', '大理', '普洱', '丽江', '广西'];
-/** 合同未存行业 / 地区，按承包方主体反查客户档案派生（无档案时兜底） */
-const ctMeta = (party: string) => {
-  const cu = CUSTOMERS.find((x) => x.name === party);
-  return { industry: cu?.industry || '其他', region: cu?.region || '昆明' };
+/** 合同类型 → 项目类型 / 业务条线 */
+const mapTypeBiz = (t: string) => {
+  const s = t || '';
+  if (s.includes('维保') || s.includes('维护')) return { type: '维护保养', biz: 'WB' };
+  if (s.includes('综合')) return { type: '改造', biz: 'GC' };
+  return { type: '新建', biz: 'GC' };
 };
 
-/* ============ 证书需求矩阵：按项目类型 × 面积/金额 预判 ============ */
+/** 里程碑模板：立项时全部未完成；「消防验收」为验收节点（需提交核验单） */
+const MILESTONE_TPL = [
+  { n: '进场准备', d: '', ok: false },
+  { n: '主体施工', d: '', ok: false },
+  { n: '安装调试', d: '', ok: false },
+  { n: '消防验收', d: '', ok: true },
+  { n: '竣工移交', d: '', ok: false },
+];
+type Mile = { n: string; d: string; ok: boolean };
+
+/** 证书需求预判：项目类型 × 金额 × 面积（只读生成，立项不现场占用证书） */
 function predictCertNeed(type: string, amt: number, area: number) {
   const rows: { name: string; need: number; why: string }[] = [];
   const scale = amt >= 5000000 || area >= 40000 ? 3 : amt >= 2000000 || area >= 15000 ? 2 : 1;
@@ -67,7 +62,7 @@ function predictCertNeed(type: string, amt: number, area: number) {
   return rows;
 }
 
-/* ============ 建造师三要素校验 ============ */
+/** 建造师三要素校验（证书有效 + B 证有效 + 无在建） */
 function builderCheck(name: string) {
   const c = CERTS.find((x) => x.isBuilder && x.holder === name);
   if (!c) return { ok: false, why: '无本公司注册建造师记录' };
@@ -78,816 +73,686 @@ function builderCheck(name: string) {
   return { ok: true, why: '' };
 }
 
+/** 建造师候选：从证书台账动态取持证人员（不再硬编码名单） */
+const builderNames = () =>
+  Array.from(new Set(CERTS.filter((c) => c.isBuilder).map((c) => c.holder as string)));
+
+const daysTo = (d: string) => Math.ceil((new Date(d).getTime() - new Date(TODAY).getTime()) / 86400000);
+const addDays = (d: string, n: number) => new Date(new Date(d).getTime() + n * 86400000).toISOString().slice(0, 10);
+
+/** 编号：递增取号 + 查重（静态台账 + store 新增，杜绝随机撞号） */
+function nextXmId() {
+  const all = [...PROJECTS, ...getProjects()];
+  const nums = all.map((p) => Number(String(p.id).replace(/\D/g, ''))).filter((n) => !Number.isNaN(n));
+  const used = new Set(all.map((p) => p.id));
+  let n = (nums.length ? Math.max(...nums) : 100) + 1;
+  let id = `XM${String(n).padStart(6, '0')}`;
+  while (used.has(id)) { n += 1; id = `XM${String(n).padStart(6, '0')}`; }
+  return id;
+}
+
+/** 审批单号：SP-YYYY-MMDD-序，当日递增查重 */
+function nextSpId() {
+  const y = TODAY.slice(0, 4);
+  const md = TODAY.slice(5, 7) + TODAY.slice(8, 10);
+  const used = new Set(getApprovals().map((a) => a.id));
+  let i = 1;
+  let id = `SP-${y}-${md}-${String(i).padStart(2, '0')}`;
+  while (used.has(id)) { i += 1; id = `SP-${y}-${md}-${String(i).padStart(2, '0')}`; }
+  return id;
+}
+
+/** 审批路由升级（成本红线 >80% 时升一级）：部门负责人 → 分管副总 → 总经理 */
+const LEVELS = ['部门负责人', '分管副总', '总经理'];
+const upLevel = (lv: string) => LEVELS[Math.min(LEVELS.indexOf(lv) + 1, LEVELS.length - 1)] || lv;
+
+/* ============ 草稿（localStorage 真存续） ============ */
+const DRAFT_KEY = 'nc.projectNew.draft.v2';
+type Draft = Record<string, unknown>;
+const loadDraft = (): Draft | null => {
+  try { const s = localStorage.getItem(DRAFT_KEY); return s ? JSON.parse(s) : null; } catch { return null; }
+};
+const clearDraft = () => { try { localStorage.removeItem(DRAFT_KEY); } catch { /* 忽略 */ } };
+const putDraft = (d: Draft) => { try { localStorage.setItem(DRAFT_KEY, JSON.stringify(d)); } catch { /* 忽略 */ } };
+
 export default function ProjectNewPage({ go, role, nav }: { go: (p: string) => void; role: string; nav?: number }) {
   const toast = useToast();
-  /** 入口形态：来源向导（4 类） / 从合同新增（存量合同补建项目） */
-  const [mode, setMode] = useState<'src' | 'contract'>('src');
+
+  /* ---------- 页面形态 ---------- */
+  const [mode, setMode] = useState<Mode | ''>('');
   const [step, setStep] = useState(0);
-  const [src, setSrc] = useState<SrcKey | ''>('');
-  const [srcPick, setSrcPick] = useState('');
+  const [restore, setRestore] = useState<Draft | null>(() => loadDraft());
+  const [leave, setLeave] = useState<null | (() => void)>(null);
 
-  // 从合同新增
-  const [ctIdx, setCtIdx] = useState(0);
-  const [cSummary, setCSummary] = useState('');
-  const [cCert, setCCert] = useState<string[]>([]);
-
-  // 服务明细（服务周期明细行）
-  const [details, setDetails] = useState<DetRow[]>([{ type: '', ps: '', pe: '', amt: 0, note: '' }]);
-  const [balModal, setBalModal] = useState(false);
-
-  // 附件（4 类）
-  const [files, setFiles] = useState<FileItem[]>([
-    { cat: '报价清单', name: '消防系统升级报价清单.pdf', size: 520 },
-    { cat: '其他', name: '现场勘察照片.zip', size: 8600 },
-  ]);
-
-  // Step1 基本信息
+  /* ---------- 模式 A：有合同立项 ---------- */
+  const [ctIdx, setCtIdx] = useState(-1);
+  const [kw, setKw] = useState('');
   const [name, setName] = useState('');
   const [type, setType] = useState('新建');
   const [biz, setBiz] = useState('GC');
-  const [customer, setCustomer] = useState('');
-  const [area, setArea] = useState(0);
-  const [amt, setAmt] = useState(0);
   const [pm, setPm] = useState('');
-  const [start, setStart] = useState('2026-10-08');
-  const [end, setEnd] = useState('2027-04-30');
-  const [parent, setParent] = useState('');
+  const [area, setArea] = useState(0);
+  const [start, setStart] = useState('');
+  const [end, setEnd] = useState('');
+  const [miles, setMiles] = useState<Mile[]>(MILESTONE_TPL.map((m) => ({ ...m })));
+  const [budget, setBudget] = useState<{ n: string; v: number }[]>([]);
+  const [budgetInit, setBudgetInit] = useState(false);
+  const [agree, setAgree] = useState(false);
 
-  // Step2 证书需求
-  const [certRows, setCertRows] = useState<{ name: string; need: number; why: string; picked: string[] }[]>([]);
-  const [gapModal, setGapModal] = useState(false);
+  /* ---------- 模式 B：应急工程 ---------- */
+  const [eName, setEName] = useState('');
+  const [ePm, setEPm] = useState('');
+  const [eType, setEType] = useState('维护保养');
+  const [eCust, setECust] = useState('');
+  const [eAmt, setEAmt] = useState(0);
+  const [eSign, setESign] = useState(SIGN_TYPES[0]);
+  const [eAgree, setEAgree] = useState(false);
+  const [emModal, setEmModal] = useState(false);
 
-  // Step3
-  const [milestones, setMilestones] = useState([
-    { n: '进场准备', d: '2026-10-08', ok: true },
-    { n: '主体施工', d: '2026-12-20', ok: true },
-    { n: '安装调试', d: '2027-02-28', ok: false },
-    { n: '消防验收', d: '2027-03-25', ok: false },
-    { n: '竣工移交', d: '2027-04-30', ok: false },
+  /* ---------- 候选合同：已签约 + 未立项 + 非框架主协议 ---------- */
+  const usedIds = new Set<string>([
+    ...CONTRACTS.filter((k) => k.project).map((k) => k.id),
+    ...getProjects().map((p) => (p as { contractId?: string }).contractId || '').filter(Boolean),
   ]);
-  const [budget, setBudget] = useState([
-    { n: '人工费', v: 620000 }, { n: '材料费', v: 1180000 }, { n: '机械费', v: 180000 },
-    { n: '分包费', v: 460000 }, { n: '其他直接费', v: 120000 },
-  ]);
-  const [agreed, setAgreed] = useState(false);
-  const [leaveModal, setLeaveModal] = useState(false);
+  const cands = CONTRACTS.filter(
+    (k) => normContractStatus(k.status) === '已签约' && k.type !== '框架协议' && !usedIds.has(k.id),
+  );
+  const list = cands.filter((k) => !kw || (k.id + k.name + k.party).includes(kw));
+  const picked = ctIdx >= 0 ? CONTRACTS[ctIdx] : null;
+  const amt = picked ? picked.execAmt || picked.amt : 0;
 
-  /* ============ 来源候选 ============ */
-  const srcOptions = useMemo(() => {
-    if (src === 'bid') return [
-      { id: 'TB000028', t: '产业园一期消防工程', s: '中标 · ¥260.0万 · ××工业园区开发有限公司', amt: 2600000 },
-      { id: 'TB000035', t: '昆明万达广场消防改造', s: '中标 · ¥320.0万 · 昆明万达广场商业管理有限公司', amt: 3200000 },
-    ];
-    if (src === 'opp') return OPPS.filter((o) => OPP_POST.includes(o.stage)).map((o) => ({
-      id: o.id, t: o.name, s: `${o.stage} · 预计 ${fmtWan(o.amt)} · ${o.customer}`, amt: o.amt,
-    }));
-    if (src === 'quote') return QUOTES.filter((q) => q.status === '已审批').map((q) => ({
-      id: q.id, t: q.name, s: `已审批 · ${fmtWan(q.total)}（含税）· ${q.customer}`, amt: q.total,
-    }));
-    return [{ id: 'EMG0001', t: '××酒店消防设施应急抢修', s: '抢险抢修 · 成本 ¥18.6万 · 无合同（须补签）', amt: 0 }];
-  }, [src]);
-
-  const pickSrc = (o: { id: string; t: string; s: string; amt: number }) => {
-    setSrcPick(o.id);
-    setName(o.t);
-    setAmt(o.amt);
-    const seg = o.s.split(' · ');
-    if (seg.length > 2) setCustomer(seg[2].replace(/^.*· /, ''));
-    if (src === 'emergency') { setType('维护保养'); setBiz('QT'); }
-    if (src === 'bid') setType('新建');
-    if (src === 'opp') setType('新建');
-    if (src === 'quote') setType('新建');
-    setMilestones((m) => m.map((x, i) => ({ ...x, ok: i < 2 })));
-  };
-
-  const mkCertRows = () => setCertRows(predictCertNeed(type, amt, area).map((r) => ({ ...r, picked: [] })));
-
-  /* ============ 服务明细：汇总 / 差额 / 补平 ============ */
-  const detSum = details.reduce((a, d) => a + (Number(d.amt) || 0), 0);
-  const diff = detSum - (Number(amt) || 0);
-  const detErrs = details.flatMap((d, i) => {
-    const e: string[] = [];
-    if (!d.type) e.push(`第 ${i + 1} 行：请选择业务类型`);
-    if (!d.ps || !d.pe) e.push(`第 ${i + 1} 行：服务周期起止必填`);
-    else if (d.pe <= d.ps) e.push(`第 ${i + 1} 行：周期止须晚于周期起`);
-    if (!(Number(d.amt) > 0)) e.push(`第 ${i + 1} 行：金额须大于 0`);
-    return e;
-  });
-  const addRow = () => setDetails((ds) => [...ds, { type: '', ps: '', pe: '', amt: 0, note: '' }]);
-  const delRow = (i: number) => {
-    if (details.length <= 1) { toast('至少保留一行明细', 'err'); return; }
-    setDetails((ds) => ds.filter((_, k) => k !== i));
-  };
-  /** 一键补平：差额补入最后一行；明细超出预计则须手动调整 */
-  const balance = () => {
-    if (Math.abs(diff) <= 0.5) { toast('明细已与预计金额一致'); return; }
-    if (diff < 0) { toast(`明细超出预计金额 ${fmt(-diff)}，请手动调整明细`, 'err'); return; }
-    setDetails((ds) => {
-      const last = { ...ds[ds.length - 1] };
-      if (!last.type) last.type = '其他';
-      last.amt = (Number(last.amt) || 0) + diff;
-      return [...ds.slice(0, -1), last];
-    });
-    toast(`已将差额 ${fmt(diff)} 补入最后一行`);
-  };
-
-  /* ============ 从合同新增项目 ============ */
-  const ct = CONTRACTS[ctIdx];
   const pickContract = (i: number) => {
-    setCtIdx(i);
     const c = CONTRACTS[i];
+    setCtIdx(i);
+    const tb = mapTypeBiz(c.type);
     setName(`${c.name}（履约）`);
-    setCustomer(c.party);
-    setAmt(c.amt || c.execAmt);
-    setStart(c.start); setEnd(c.end);
-    setCSummary(c.name);
-    setCCert(certPredict(ctMeta(c.party).industry));
+    setType(tb.type);
+    setBiz(tb.biz);
+    setStart(c.start);
+    setEnd(c.end);
+    setBudgetInit(false);
+    setAgree(false);
   };
-  const createFromContract = () => {
-    if (!name.trim()) { toast('请填写项目名称', 'err'); return; }
-    if (!customer.trim()) { toast('请填写客户', 'err'); return; }
-    if (!pm) { toast('请指定项目负责人', 'err'); return; }
-    if (end <= start) { toast('项目周期止须晚于周期起', 'err'); return; }
-    if (!(Number(amt) > 0)) { toast('预计金额须大于 0', 'err'); return; }
-    /* G1 跨页 Q18：原仅 toast + 跳转，项目台帐查不到新建项目。写入共享 store。 */
+
+  /* ---------- 溯源参考（同客户关联单据，由合同继承，只读） ---------- */
+  const chain = useMemo(() => {
+    if (!picked) return { opps: [], quotes: [], bids: [] };
+    const cid = CUSTOMERS.find((c) => c.name === picked.party)?.id || '';
+    return {
+      opps: cid ? OPPS.filter((o) => o.customerId === cid) : [],
+      quotes: cid ? QUOTES.filter((q) => q.customerId === cid) : [],
+      bids: cid ? BIDS.filter((b) => b.customerId === cid) : [],
+    };
+  }, [picked]);
+
+  /* ---------- 合规预检（只读三灯） ---------- */
+  const pre = useMemo(() => {
+    if (!picked) return null;
+    const chk = (nm: string): { tone: string; why: string } => {
+      const c = CERTS.find((x) => x.name.includes(nm));
+      if (!c) return { tone: 'red', why: '证书中心无此资质记录' };
+      if (c.validTo < TODAY) return { tone: 'red', why: `已于 ${c.validTo} 过期` };
+      if (daysTo(c.validTo) <= 30) return { tone: 'orange', why: `${c.validTo} 到期（${daysTo(c.validTo)} 天）· 建议即办续期` };
+      return { tone: 'green', why: `有效期至 ${c.validTo}` };
+    };
+    const builders = builderNames();
+    const okB = builders.filter((b) => builderCheck(b).ok);
+    return {
+      qual: chk('消防设施工程专业承包'),
+      safety: chk('安全生产许可'),
+      reserve: {
+        tone: okB.length === 0 ? 'red' : okB.length === 1 ? 'orange' : 'green',
+        why: `持证 ${builders.length} 人 · 当前可派任 ${okB.length} 人`,
+      },
+    };
+  }, [picked]);
+
+  const certNeeds = useMemo(
+    () => (picked ? predictCertNeed(type, amt, area) : []),
+    [picked, type, amt, area],
+  );
+
+  /* ---------- 计划与预算 ---------- */
+  const budgetTotal = budget.reduce((a, b) => a + b.v, 0);
+  const costRate = amt ? (budgetTotal / amt) * 100 : 0;
+  const belowRedline = costRate > 80;
+  const routeLevel = belowRedline ? upLevel(approveLevel(amt)) : approveLevel(amt);
+
+  /* ---------- 离开保护 ---------- */
+  const dirty = mode === 'contract' ? ctIdx >= 0 || !!name || !!pm : !!(eName || ePm || eCust);
+  const guard = (action: () => void) => (dirty ? setLeave(() => action) : action());
+  const backToEntry = () => guard(() => { setMode(''); setStep(0); });
+
+  /* ---------- 草稿 ---------- */
+  const snapshot = (): Draft => ({
+    mode, step, ctId: picked?.id || '', name, type, biz, pm, area, start, end,
+    miles, budget, eName, ePm, eType, eCust, eAmt, eSign,
+  });
+  const saveDraft = () => { putDraft(snapshot()); setRestore(null); toast('草稿已保存至本地 · 重新进入本页可恢复'); };
+  const applyDraft = (d: Draft) => {
+    const m = (d.mode as Mode) || 'contract';
+    setMode(m);
+    setStep(Number(d.step) || 0);
+    setName(String(d.name || ''));
+    setType(String(d.type || '新建'));
+    setBiz(String(d.biz || 'GC'));
+    setPm(String(d.pm || ''));
+    setArea(Number(d.area) || 0);
+    setStart(String(d.start || ''));
+    setEnd(String(d.end || ''));
+    if (Array.isArray(d.miles)) setMiles(d.miles as Mile[]);
+    if (Array.isArray(d.budget)) { setBudget(d.budget as { n: string; v: number }[]); setBudgetInit(true); }
+    setEName(String(d.eName || ''));
+    setEPm(String(d.ePm || ''));
+    setEType(String(d.eType || '维护保养'));
+    setECust(String(d.eCust || ''));
+    setEAmt(Number(d.eAmt) || 0);
+    setESign(String(d.eSign || SIGN_TYPES[0]));
+    if (d.ctId) { const i = CONTRACTS.findIndex((k) => k.id === d.ctId); if (i >= 0) setCtIdx(i); }
+    setRestore(null);
+    toast('已恢复上次草稿');
+  };
+
+  /* ---------- 提交（模式 A） ---------- */
+  const submit = () => {
+    if (!picked) return;
+    const id = nextXmId();
     addProject({
-      id: `XM000${132 + Math.floor(Math.random() * 800)}`, name: name.trim(), type: '改造', biz: 'GC',
-      source: '商机直签', customer: customer.trim(), customerId: '', owner: pm || '—', pm: pm || '—',
-      contractAmt: Number(amt), execAmt: Number(amt), cost: 0, milestone: 0, milestoneName: '待启动',
-      recvPct: 0, risk: 'none', status: '执行中', start, end, profit: 0,
-    } as (typeof PROJECTS)[number]);
-    toast(`项目「${name}」创建成功，已关联合同 ${ct.id} · 证书需求 ${cCert.length} 项已同步证书资源中心 · 已回流项目台帐`);
+      id, name: name.trim(), type, biz, source: '合同立项',
+      customer: picked.party,
+      customerId: CUSTOMERS.find((c) => c.name === picked.party)?.id || '',
+      owner: picked.owner, pm, contractAmt: amt, execAmt: amt, cost: 0,
+      milestone: 0, milestoneName: '待启动', recvPct: 0, risk: 'none', status: '待审批',
+      start, end, profit: 0,
+      contractId: picked.id,          // 合同 ↔ 项目互链（relOfContract / relOfProject 生效）
+      certNeeds,                      // 证书需求清单随项目落库（档案跟踪 + 开工齐套校验依据）
+    } as unknown as (typeof PROJECTS)[number]);
+    const ck = CONTRACTS.find((k) => k.id === picked.id);
+    if (ck) ck.project = id;
+    pushApproval({
+      id: nextSpId(), ap: pm || picked.owner, type: '立项审批', obj: `${name.trim()} · 立项申请`,
+      ref: `${id} 立项申请单`, amt, time: `${TODAY} 10:24`, status: '待审批',
+      level: routeLevel, node: 1, reason: '', cc: [],
+    } as (typeof APPROVALS)[number]);
+    clearDraft();
+    toast(`项目「${name.trim()}」已提交立项审批 · 路由至 ${routeLevel}${belowRedline ? '（成本红线升级）' : ''} · 证书需求 ${certNeeds.length} 项已存档 · 已回流项目台帐`);
     go('project');
   };
 
+  /* ---------- 提交（模式 B · 应急） ---------- */
+  const submitEmergency = () => {
+    const id = nextXmId();
+    const deadline = addDays(TODAY, 30);
+    const lv = approveLevel(eAmt || 0);
+    addProject({
+      id, name: eName.trim(), type: eType, biz: eType === '维护保养' ? 'WB' : 'GC', source: '应急工程',
+      customer: eCust.trim() || '待补充',
+      customerId: CUSTOMERS.find((c) => c.name === eCust.trim())?.id || '',
+      owner: ePm, pm: ePm, contractAmt: eAmt || 0, execAmt: eAmt || 0, cost: 0,
+      milestone: 0, milestoneName: '待启动', recvPct: 0, risk: 'nocontract', status: '待审批',
+      start: TODAY, end: '', profit: 0,
+      contractId: '', isEmergency: true, signDeadline: deadline, signType: eSign,
+      certNeeds: predictCertNeed(eType, eAmt || 0, 0),
+    } as unknown as (typeof PROJECTS)[number]);
+    pushApproval({
+      id: nextSpId(), ap: ePm || '蓝峰', type: '立项审批', obj: `${eName.trim()} · 应急立项（无合同）`,
+      ref: `${id} 立项申请单（应急）`, amt: eAmt || 0, time: `${TODAY} 10:24`, status: '待审批',
+      level: lv, node: 1, reason: '', cc: [],
+    } as (typeof APPROVALS)[number]);
+    clearDraft();
+    toast(`应急项目「${eName.trim()}」已提交立项审批 · 路由至 ${lv} · 须于 ${deadline} 前完成合同补签`);
+    setEmModal(false);
+    go('project');
+  };
+
+  /* ---------- 步骤推进（模式 A） ---------- */
   const next = () => {
     if (step === 0) {
-      if (!src) { toast('请先选择项目来源', 'err'); return; }
-      if (!srcPick) { toast('请选择要转化的来源单据', 'err'); return; }
-      // 应急工程：无合同来源，需二次确认
-      if (src === 'emergency') {
-        setModalEmergency(true);
-        return;
-      }
+      if (!picked) { toast('请先选择一份已签约合同', 'err'); return; }
       setStep(1);
       return;
     }
     if (step === 1) {
       if (!name.trim()) { toast('请填写项目名称', 'err'); return; }
-      if (!customer) { toast('请选择建设单位（客户）', 'err'); return; }
       if (!pm) { toast('请指定项目负责人', 'err'); return; }
       const b = builderCheck(pm);
       if (!b.ok) { toast(`项目负责人不合规：${b.why}`, 'err'); return; }
-      if (!amt && src !== 'emergency') { toast('请填写合同金额', 'err'); return; }
+      if (!start || !end) { toast('请填写计划周期', 'err'); return; }
+      if (end <= start) { toast('周期止须晚于周期起', 'err'); return; }
+      if (start < picked!.start) { toast(`周期起（${start}）早于合同开工日（${picked!.start}）`, 'err'); return; }
+      if (end > picked!.end) { toast(`周期止（${end}）超出合同完工日（${picked!.end}）`, 'err'); return; }
+      if (!budgetInit && amt > 0) {
+        const r = [['人工费', 0.32], ['材料费', 0.42], ['机械费', 0.06], ['分包费', 0.12], ['其他直接费', 0.08]] as const;
+        setBudget(r.map(([n, p]) => ({ n, v: Math.round((amt * p) / 1000) * 1000 })));
+        setBudgetInit(true);
+      }
       setStep(2);
       return;
     }
     if (step === 2) {
-      if (detErrs.length) { toast(detErrs[0], 'err'); return; }
-      if (Math.abs(diff) > 0.5) { setBalModal(true); return; }
-      mkCertRows();
+      if (budgetTotal <= 0) { toast('请填写成本预算（可后补细化，但提交时须有基线）', 'err'); return; }
       setStep(3);
       return;
     }
     if (step === 3) {
-      const unfilled = certRows.filter((r) => r.need > 0 && r.picked.length < Math.min(r.need, 1));
-      const gap = certRows.filter((r) => r.picked.length < r.need);
-      if (gap.length) { setGapModal(true); return; }
-      if (unfilled.length) { toast('存在未关联证书的必填项', 'err'); return; }
-      setStep(4);
-      return;
-    }
-    if (step === 4) {
-      if (!agreed) { toast('请确认立项承诺条款', 'err'); return; }
-      addProject({
-        id: `XM000${132 + Math.floor(Math.random() * 800)}`, name: name.trim(), type: type || '改造', biz: 'GC',
-        source: src === 'emergency' ? '应急工程' : src === 'bid' ? '投标中标' : src === 'quote' ? '报价转化' : '商机直签',
-        customer: customer.trim(), customerId: '', owner: pm || '—', pm: pm || '—',
-        contractAmt: Number(amt), execAmt: Number(amt), cost: 0, milestone: 0, milestoneName: '待启动',
-        recvPct: 0, risk: 'none', status: '执行中', start, end, profit: 0,
-      } as (typeof PROJECTS)[number]);
-      toast(`项目「${name}」已提交立项审批，路由至 ${approveLevel(amt)} · 附件 ${files.length} 份已归档 · 已回流项目台帐`);
-      go('project');
+      if (!agree) { toast('请先确认立项承诺条款', 'err'); return; }
+      submit();
     }
   };
 
-  const saveDraft = () => toast('草稿已保存 · 可在「项目经营中心 · 草稿」继续编辑');
-
-  const [modalEmergency, setModalEmergency] = useState(false);
+  const submitEmergencyCheck = () => {
+    if (!eName.trim()) { toast('请填写项目名称', 'err'); return; }
+    if (!ePm) { toast('请指定项目负责人', 'err'); return; }
+    const b = builderCheck(ePm);
+    if (!b.ok) { toast(`项目负责人不合规：${b.why}`, 'err'); return; }
+    if (!eAgree) { toast('请先确认 30 日补签承诺', 'err'); return; }
+    setEmModal(true);
+  };
 
   const STEPS = [
-    { label: '选择来源', sub: src === 'emergency' ? '应急工程' : '4 类入口' },
-    { label: '基本信息', sub: '主体与规模' },
-    { label: '服务明细', sub: `${details.length} 行 · 周期与金额` },
-    { label: '证书需求', sub: '预判与关联' },
-    { label: '计划与预算', sub: '里程碑 / 成本 / 附件' },
+    { label: '选择合同', sub: '已签约 · 未立项' },
+    { label: '立项信息', sub: '主体 · 负责人 · 预检' },
+    { label: '计划与预算', sub: '里程碑 · 成本基线' },
+    { label: '确认提交', sub: `审批路由 · ${mode === 'contract' ? routeLevel : '—'}` },
   ];
 
-  /* ============ 证书可选池 ============ */
-  const poolFor = (certName: string) => {
-    const kw = certName.replace(/（.*?）/g, '');
-    return CERTS.filter((c) => c.name.includes(kw) || c.subType === kw || (certName.includes('建构筑物') && c.subType === '建构筑物消防员'))
-      .map((c) => {
-        const expired = c.validTo < TODAY;
-        const full = c.mode === 'single' && (c.used as string[]).length >= c.cap;
-        return {
-          c,
-          disabled: expired || full,
-          why: expired ? `已过期（${c.validTo}）` : full ? '已达并行占用上限（一证一项目）' : '',
-          label: `${c.holder} · ${c.name}${c.subType ? `（${c.subType}）` : ''} · 有效期至 ${c.validTo} · ${c.mode === 'single' ? '一证一项目' : c.mode === 'multi' ? '多项目引用' : '按次登记'}`,
-        };
-      });
-  };
-
-  const budgetTotal = budget.reduce((a, b) => a + b.v, 0);
-  const costRate = amt ? (budgetTotal / amt) * 100 : 0;
-  const belowRedline = costRate > 80; // 成本红线 80%（毛利率红线 20%）
-
-  /* 证书缺口汇总 */
-  const gaps = certRows.filter((r) => r.picked.length < r.need);
-
+  /* ============ 渲染 ============ */
   return (
     <>
       <PageHead
-        crumbs={['项目管理', mode === 'contract' ? '从合同新增项目' : '新增项目']}
-        title={mode === 'contract' ? '从合同新增项目' : '新增项目 · 立项'}
-        badges={<>
-          {mode === 'contract'
-            ? <><Tag tone="blue">存量合同补建项目</Tag><Tag tone="gray">归集证书 / 附件 / 回款</Tag></>
-            : <Tag tone="blue">向导</Tag>}
-        </>}
-        sub={mode === 'contract'
-          ? '选择存量合同 → 系统带出客户 / 负责人 / 行业 / 地区 / 金额 / 工期 → 确认后创建项目并自动关联合同'
-          : '来源单据 → 基本信息 → 服务明细 → 证书需求 → 计划与预算，五步完成立项；立项后自动进入「项目经营中心」并生成证书借用台账'}
-        actions={mode === 'contract'
-          ? <><Btn onClick={() => setMode('src')}>← 改用来源向导</Btn><Btn kind="primary" onClick={createFromContract}>创建项目</Btn></>
-          : <>
-            <Btn onClick={() => { pickContract(ctIdx); setMode('contract'); }}><Ico n="file" size={16} /> 从合同新增项目</Btn>
-            <Btn onClick={() => setLeaveModal(true)}>取消</Btn>
-            <Btn onClick={saveDraft}>保存草稿</Btn>
-            <Btn kind="primary" onClick={next}>{step === 4 ? '提交立项审批' : '下一步'}</Btn>
-          </>}
+        crumbs={['项目管理', '新增项目']}
+        title="新增项目 · 立项"
+        badges={<Tag tone="blue">立项 v2</Tag>}
+        sub="有合同立项 / 应急工程两条入口；提交后进入审批中心，审批通过与驳回实时回写项目状态"
+        actions={mode ? <Btn onClick={backToEntry}>← 返回入口</Btn> : undefined}
       />
 
-      {mode === 'src' && (
-        <div style={{ marginBottom: 16 }}>
-          <Steps items={STEPS} cur={step} onStep={(i) => { if (i < step) setStep(i); }} />
+      {/* 草稿恢复提示（入口层） */}
+      {!mode && restore && (
+        <div className="nc-warnbox is-info" style={{ marginBottom: 16 }}>
+          <b><Ico n="file" size={16} /> 检测到未提交的立项草稿</b>
+          <div style={{ marginTop: 8 }}>
+            <Btn size="sm" kind="primary" onClick={() => applyDraft(restore)}>恢复草稿</Btn>
+            <Btn size="sm" onClick={() => { clearDraft(); setRestore(null); toast('已放弃草稿'); }} style={{ marginLeft: 8 }}>放弃</Btn>
+          </div>
         </div>
       )}
 
-      {/* ================= 从合同新增项目（存量合同补建） ================= */}
-      {mode === 'contract' && (
-        <>
-          <Card hd="合同信息（只读引用）" extra={<span className="nc-muted">合同编号 {ct.id}（已签约）</span>}>
-            <div style={{ marginBottom: 12 }}>
-              <select className="nc-input" style={{ width: 420 }} value={ctIdx} onChange={(e) => pickContract(Number(e.target.value))}>
-                {CONTRACTS.map((c, i) => <option key={c.id} value={i}>{c.id} · {c.name}</option>)}
-              </select>
-            </div>
-            <KvGrid cols={4} rows={[
-              { k: '客户', v: ct.party },
-              { k: '合同总额', v: fmt(ct.amt || ct.execAmt) },
-              { k: '签约日期', v: ct.sign },
-              { k: '合同工期', v: `${ct.start} ~ ${ct.end}` },
-              { k: '行业', v: ctMeta(ct.party).industry },
-              { k: '地区', v: ctMeta(ct.party).region },
-              { k: '负责人', v: ct.owner },
-              { k: '服务内容', v: cSummary || ct.name },
-            ]} />
-          </Card>
-
-          <div className="nc-issuestrip">
-            <span className="nc-issue is-orange">客户 / 负责人 / 行业 / 地区 / 金额 / 周期 已由合同带出，可修改</span>
-            <span className="nc-issue">项目周期须落在合同工期（{ct.start} ~ {ct.end}）内，超出将提示核实</span>
+      {/* ================= 入口层：两张卡片 ================= */}
+      {!mode && (
+        <Card hd="选择立项方式" extra={<span className="nc-muted">上游转化（商机→报价→投标→签约）已在各自模块完成，立项只认「已签约」合同</span>}>
+          <div className="nc-src-grid">
+            {ENTRY_CARDS.map((s) => (
+              <div
+                key={s.key}
+                className={`nc-src-card is-${s.tone}`}
+                onClick={() => guard(() => setMode(s.key))}
+                {...pressProps(() => guard(() => setMode(s.key)))}
+              >
+                <div className="nc-src-ic"><Ico n={s.icon} size={20} /></div>
+                <div className="nc-src-t">{s.label}</div>
+                <div className="nc-src-d">{s.desc}</div>
+              </div>
+            ))}
           </div>
-
-          <Card hd="新建项目" extra={<span className="nc-muted">带 <b style={{ color: 'var(--c-primary)' }}>proj</b> 徽标的字段已由合同带出，可修改</span>}>
-            <div className="nc-form-grid">
-              <Field label="项目名称" req span={2}><input className="nc-input" value={name} onChange={(e) => setName(e.target.value)} /></Field>
-              <Field label="客户" req note={CUSTOMERS.some((c) => c.name === customer) ? ' 已匹配客户档案' : '未匹配档案 —— 保存后自动建档'}>
-                <input className="nc-input" list="ncCustList" value={customer} onChange={(e) => setCustomer(e.target.value)} />
-              </Field>
-              <datalist id="ncCustList">{CUSTOMERS.map((c) => <option key={c.id} value={c.name} />)}</datalist>
-              <Field label="负责人" req>
-                <select className="nc-input" value={pm || ct.owner} onChange={(e) => setPm(e.target.value)}>
-                  {[ct.owner, '张工', '王工', '李工', '陈工'].filter((v, i, a) => a.indexOf(v) === i).map((p) => {
-                    const b = builderCheck(p);
-                    return <option key={p} value={p}>{p}{b.ok ? '' : ` · ${b.why}`}</option>;
-                  })}
-                </select>
-              </Field>
-              <Field label="行业" req>
-                <select className="nc-input" value={ctMeta(ct.party).industry} onChange={(e) => setCCert(certPredict(e.target.value))}>
-                  {INDS.map((t) => <option key={t} value={t}>{t}</option>)}
-                </select>
-              </Field>
-              <Field label="地区" req>
-                <select className="nc-input" defaultValue={ctMeta(ct.party).region}>{REGIONS.map((r) => <option key={r} value={r}>{r}</option>)}</select>
-              </Field>
-              <Field label="签约日期" req note="= 合同签约日"><input className="nc-input" type="date" defaultValue={ct.sign} /></Field>
-              <Field label="项目周期起" req><input className="nc-input" type="date" value={start} onChange={(e) => setStart(e.target.value)} /></Field>
-              <Field label="项目周期止" req note="周期需落在合同工期内"><input className="nc-input" type="date" value={end} onChange={(e) => setEnd(e.target.value)} /></Field>
-              <Field label="预计金额（元）" req note="= 合同总额 · 可改">
-                <input className="nc-input" type="number" value={amt || ''} onChange={(e) => setAmt(Number(e.target.value))} />
-              </Field>
-              <Field label="服务内容摘要" span={4}><input className="nc-input" value={cSummary} onChange={(e) => setCSummary(e.target.value)} placeholder="用于项目资料归档与证书需求预判" /></Field>
-            </div>
-
-            <div className="nc-sec-title" style={{ margin: '16px 0 10px' }}>
-              证书需求预判
-              <span className="nc-hint" style={{ fontWeight: 400, marginLeft: 8 }}>按行业自动勾选 · 可调整</span>
-            </div>
-            <div className="nc-pick-inline">
-              {CERT_NEED.map((k) => (
-                <label key={k} className={`nc-pick-chip${cCert.includes(k) ? ' is-on' : ''}`}>
-                  <input type="checkbox" className="nc-check" checked={cCert.includes(k)}
-                    onChange={() => setCCert((p) => p.includes(k) ? p.filter((x) => x !== k) : [...p, k])} />
-                  <span>{k}</span>
-                </label>
-              ))}
-            </div>
-            <div className="nc-hint" style={{ marginTop: 8 }}>创建后同步至证书资源中心的项目需求清单，配备情况可在项目详情跟踪</div>
-
-            <div className="nc-dnote" style={{ marginTop: 16 }}>
-              <b>系统判定：</b>将创建项目 <b className="num">XM0001xx</b>（编号自动生成） · 客户
-              {CUSTOMERS.some((c) => c.name === customer)
-                ? <span style={{ color: 'var(--c-success-deep)' }}>已匹配档案</span>
-                : <span style={{ color: 'var(--c-warning-deep)' }}>未匹配档案，将自动建档</span>}
-              {' '}· 证书需求 {cCert.length} 项将同步证书资源中心
-              {end > ct.end && <span style={{ color: 'var(--c-warning-deep)' }}> · 项目周期止（{end}）超出合同工期（{ct.end}），请核实</span>}
-            </div>
-          </Card>
-        </>
+          <div className="nc-rulebar" style={{ marginTop: 12 }}>
+            <b>闭环说明</b>
+            <Tip w={380} text={<> ① 一份已签约合同只能立项一个项目（候选自动排除已立项合同）；<br /> ② 立项提交 → 审批中心待办 → 通过后项目置为「已立项」、驳回回到草稿；<br /> ③ 应急项目通过后启动 30 日补签倒计时，逾期计入项目经理考核。 </>} />
+          </div>
+        </Card>
       )}
 
-      {mode === 'src' && (<>
-
-      {/* ================= Step 0 选择来源 ================= */}
-      {step === 0 && (
+      {/* ================= 模式 A · 有合同立项 ================= */}
+      {mode === 'contract' && (
         <>
-          <Card hd="① 选择项目来源" extra={<span className="nc-muted">来源决定带出字段与后续闭环路径</span>}>
-            <div className="nc-src-grid">
-              {SRC_CARDS.map((s) => (
-                <div key={s.key} className={`nc-src-card is-${s.tone}${src === s.key ? ' is-on' : ''}`} onClick={() => { setSrc(s.key); setSrcPick(''); }} {...pressProps(() => { setSrc(s.key); setSrcPick(''); })}>
-                  <div className="nc-src-ic"><Ico n={s.icon as IconName} size={20} /></div>
-                  <div className="nc-src-t">{s.label}</div>
-                  <div className="nc-src-d">{s.desc}</div>
-                  {src === s.key && <span className="nc-src-on"><Ico n="check" size={16} /> 已选</span>}
-                </div>
-              ))}
-            </div>
-          </Card>
+          <div style={{ marginBottom: 16 }}>
+            <Steps items={STEPS} cur={step} onStep={(i) => { if (i < step) setStep(i); }} />
+          </div>
 
-          {src && (
-            <Card hd={`② 选择来源单据（${SRC_CARDS.find((s) => s.key === src)?.label}）`} extra={<span className="nc-muted">共 {srcOptions.length} 条可转化</span>}>
-              {src === 'emergency' && (
-                <div className="nc-warnbox is-danger">
-                  <b><Ico n="warning" size={16} /> 应急工程将标记「无合同施工」</b>
-                  <div>系统在项目卡片与驾驶舱风险区持续提示，须在 <b>30 日内</b>完成合同补签，否则计入项目经理考核。</div>
+          {/* ---- Step 1 选择合同 ---- */}
+          {step === 0 && (
+            <Card hd="① 选择已签约合同" extra={<span className="nc-muted">共 {list.length} 份可立项（已自动排除已立项合同与框架主协议）</span>}>
+              <div style={{ marginBottom: 12 }}>
+                <input className="nc-input" style={{ width: 360 }} placeholder="搜索合同编号 / 名称 / 客户" value={kw} onChange={(e) => setKw(e.target.value)} />
+              </div>
+              {list.length === 0 ? (
+                <div className="nc-warnbox is-info">
+                  <b>暂无符合条件合同</b>
+                  <div>「已签约」且未立项的合同为空。可前往合同管理完成签约，或先由审批中心通过在途合同审批。</div>
+                  <div style={{ marginTop: 8 }}><Btn size="sm" onClick={() => go('contract')}>前往合同管理</Btn></div>
+                </div>
+              ) : (
+                <div className="nc-pick-list">
+                  {list.map((k) => {
+                    const i = CONTRACTS.findIndex((x) => x.id === k.id);
+                    return (
+                      <label key={k.id} className={`nc-pick-row${ctIdx === i ? ' is-on' : ''}`}>
+                        <input type="radio" className="nc-check" checked={ctIdx === i} onChange={() => pickContract(i)} />
+                        <span className="nc-pick-id num">{k.id}</span>
+                        <span className="nc-pick-t">{k.name}</span>
+                        <span className="nc-pick-s">{k.type} · {k.party} · {fmtWan(k.execAmt || k.amt)} · {k.start} ~ {k.end}</span>
+                      </label>
+                    );
+                  })}
                 </div>
               )}
-              <div className="nc-pick-list">
-                {srcOptions.map((o) => (
-                  <label key={o.id} className={`nc-pick-row${srcPick === o.id ? ' is-on' : ''}`}>
-                    <input type="radio" className="nc-check" checked={srcPick === o.id} onChange={() => pickSrc(o)} />
-                    <span className="nc-pick-id num">{(() => {
-                      // 单据穿透：来源单据号可下钻回原单（商机 / 报价 / 投标），先看原单再决定是否转化
-                      const t = o.id.startsWith('SJ') ? 'opp' : o.id.startsWith('BJ') ? 'quote-detail' : o.id.startsWith('TB') ? 'bid' : '';
-                      return t ? <EntityLink target={t} id={o.id} go={go} title="查看来源单据详情">{o.id}</EntityLink> : o.id;
-                    })()}</span>
-                    <span className="nc-pick-t">{o.t}</span>
-                    <span className="nc-pick-s">{o.s}</span>
-                  </label>
-                ))}
+              {picked && (
+                <>
+                  <div className="nc-sec-title" style={{ margin: '16px 0 10px' }}>合同带出信息（只读引用）</div>
+                  <KvGrid
+                    cols={4}
+                    rows={[
+                      { k: '客户', v: picked.party },
+                      { k: '合同总额', v: fmt(amt) },
+                      { k: '合同工期', v: `${picked.start} ~ ${picked.end}` },
+                      { k: '签约日 / 负责人', v: `${picked.sign} · ${picked.owner}` },
+                      { k: '回款节点', v: picked.nodes },
+                      { k: '项目类型预映射', v: `${mapTypeBiz(picked.type).type} · ${BIZ.find((b) => b.k === mapTypeBiz(picked.type).biz)?.n}` },
+                    ]}
+                  />
+                  <div className="nc-sec-title" style={{ margin: '16px 0 10px' }}>
+                    溯源参考（同客户关联单据 · 由合同继承，只读）
+                    <Tip w={340} text="立项不再手选上游单据：商机→报价→投标链路由合同自动继承，此处展示同客户关联单据供核对。" />
+                  </div>
+                  <div className="nc-pick-inline">
+                    {chain.opps.map((o) => <EntityLink key={o.id} target="opp" id={o.id} go={go} title="查看商机">{o.id}</EntityLink>)}
+                    {chain.quotes.map((q) => <EntityLink key={q.id} target="quote-detail" id={q.id} go={go} title="查看报价">{q.id}</EntityLink>)}
+                    {chain.bids.map((b) => <EntityLink key={b.id} target="bid" id={b.id} go={go} title="查看投标">{b.id}</EntityLink>)}
+                    {!chain.opps.length && !chain.quotes.length && !chain.bids.length && <span className="nc-muted">无同客户关联单据（合同直签）</span>}
+                  </div>
+                </>
+              )}
+              <div className="nc-wizard-foot">
+                <Btn onClick={saveDraft}>保存草稿</Btn>
+                <Btn kind="primary" onClick={next}>下一步 · 立项信息</Btn>
               </div>
             </Card>
           )}
 
-          <div className="nc-rulebar">
-            <b>闭环说明</b>
-            <Tip w={360} text={<>
-              ① 来源单据在立项成功后回写「已立项」，原单不可再重复发起；<br />
-              ② 应急工程无合同来源，立项时须指定拟补签合同类型；<br />
-              ③ 项目编号自动生成 XM + 6 位流水。
-            </>} />
-          </div>
+          {/* ---- Step 2 立项信息 ---- */}
+          {step === 1 && picked && (
+            <>
+              <Card hd="② 立项信息" extra={<Tag tone="gray">{picked.id}</Tag>}>
+                <div className="nc-form-grid">
+                  <Field label="项目名称" req span={2}><input className="nc-input" value={name} onChange={(e) => setName(e.target.value)} /></Field>
+                  <Field label="项目编号" note="系统生成 · 递增取号"><input className="nc-input" value="提交时自动生成（XM + 6 位）" readOnly disabled /></Field>
+                  <Field label="项目类型" req note="按合同类型预映射 · 可改">
+                    <select className="nc-input" value={type} onChange={(e) => setType(e.target.value)}>{PTYPES.map((t) => <option key={t}>{t}</option>)}</select>
+                  </Field>
+                  <Field label="业务条线" req>
+                    <select className="nc-input" value={biz} onChange={(e) => setBiz(e.target.value)}>{BIZ.map((b) => <option key={b.k} value={b.k}>{b.n}</option>)}</select>
+                  </Field>
+                  <Field label="建设单位" note="随合同锁定，保证口径一致">
+                    <input className="nc-input" value={picked.party} readOnly disabled />
+                  </Field>
+                  <Field label="合同金额（含税）" note="以合同为准，不可在此修改"><input className="nc-input" value={fmt(amt)} readOnly disabled /></Field>
+                  <Field label="项目负责人" req note="候选 = 本公司持证建造师 · 三要素实时校验">
+                    <select className="nc-input" value={pm} onChange={(e) => setPm(e.target.value)}>
+                      <option value="">请选择</option>
+                      {builderNames().map((p) => {
+                        const b = builderCheck(p);
+                        return <option key={p} value={p} disabled={!b.ok}>{p}{b.ok ? ' · 可派任' : ` · ${b.why}`}</option>;
+                      })}
+                    </select>
+                  </Field>
+                  <Field label="建筑面积（㎡）" note="用于证书需求预判"><input className="nc-input" type="number" value={area || ''} onChange={(e) => setArea(Number(e.target.value))} /></Field>
+                  <Field label="计划周期起" req note={`≥ 合同开工日 ${picked.start}`}>
+                    <input className="nc-input" type="date" value={start} onChange={(e) => setStart(e.target.value)} />
+                  </Field>
+                  <Field label="计划周期止" req note={`≤ 合同完工日 ${picked.end}`}>
+                    <input className="nc-input" type="date" value={end} onChange={(e) => setEnd(e.target.value)} />
+                  </Field>
+                </div>
+
+                {pm && (
+                  <div className={`nc-builder-box${builderCheck(pm).ok ? ' is-ok' : ' is-bad'}`}>
+                    <b>建造师三要素校验 · {pm}</b>
+                    <div className="nc-builder-grid">
+                      <span><StatusIco kind={builderCheck(pm).ok ? 'ok' : 'ban'} /> ① 注册建造师证书有效</span>
+                      <span><StatusIco kind={CERTS.find((c) => c.isBuilder && c.holder === pm)?.hasB ? 'ok' : 'ban'} /> ② B 证有效期内</span>
+                      <span><StatusIco kind={((CERTS.find((c) => c.isBuilder && c.holder === pm)?.used as string[]) || []).length === 0 ? 'ok' : 'ban'} /> ③ 无在建项目</span>
+                    </div>
+                  </div>
+                )}
+              </Card>
+
+              {pre && (
+                <Card hd="合规预检（只读 · 结论随项目存档）" extra={<span className="nc-muted">资质与许可证状态实时取自证书中心</span>}>
+                  <div className="nc-builder-box is-ok">
+                    <div className="nc-builder-grid">
+                      <span>
+                        {pre.qual.tone === 'green' ? <StatusIco kind="ok" /> : pre.qual.tone === 'red' ? <StatusIco kind="ban" /> : <Ico n="warning" size={16} />}{' '}
+                        企业施工资质 · <span className="nc-muted">{pre.qual.why}</span>
+                      </span>
+                      <span>
+                        {pre.safety.tone === 'green' ? <StatusIco kind="ok" /> : pre.safety.tone === 'red' ? <StatusIco kind="ban" /> : <Ico n="warning" size={16} />}{' '}
+                        安全生产许可证 · <span className="nc-muted">{pre.safety.why}</span>
+                      </span>
+                      <span>
+                        {pre.reserve.tone === 'green' ? <StatusIco kind="ok" /> : pre.reserve.tone === 'red' ? <StatusIco kind="ban" /> : <Ico n="warning" size={16} />}{' '}
+                        建造师储备 · <span className="nc-muted">{pre.reserve.why}</span>
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="nc-sec-title" style={{ margin: '16px 0 10px' }}>
+                    证书需求清单（按 项目类型 × 金额 × 面积 预判 · 存档不占用）
+                    <Tip w={380} text="立项只声明需求，不现场占用证书：开工前在「证书管理」按清单办理关联借出（占用自借出生效起算），齐套方可开工。" />
+                  </div>
+                  <table className="nc-tbl" style={{ minWidth: 720 }}>
+                    <thead><tr><th style={{ width: 280 }}>证书 / 资质</th><th style={{ width: 70, textAlign: 'center' }}>需求</th><th>预判依据</th></tr></thead>
+                    <tbody>
+                      {certNeeds.map((r) => (
+                        <tr key={r.name}>
+                          <td><b>{r.name}</b></td>
+                          <td style={{ textAlign: 'center' }} className="num">{r.need}</td>
+                          <td><span className="nc-tiny">{r.why}</span></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </Card>
+              )}
+
+              <div className="nc-rulebar">
+                <b>关于服务明细</b>
+                <Tip w={400} text={DETAIL_HINT} />
+              </div>
+              <div className="nc-wizard-foot">
+                <Btn onClick={() => setStep(0)}>上一步</Btn>
+                <Btn onClick={saveDraft}>保存草稿</Btn>
+                <Btn kind="primary" onClick={next}>下一步 · 计划与预算</Btn>
+              </div>
+            </>
+          )}
+
+          {/* ---- Step 3 计划与预算 ---- */}
+          {step === 2 && (
+            <>
+              <Card hd="③ 里程碑计划（可后补细化）" extra={<span className="nc-muted">立项时全部未完成 · 日期可留空后补</span>}>
+                <div className="nc-mile-axis">
+                  {miles.map((m, i) => (
+                    <div key={m.n} className="nc-mile-node">
+                      <i>{i + 1}</i>
+                      <b>{m.n}</b>
+                      <span className="num">{m.d || '待排'}</span>
+                    </div>
+                  ))}
+                </div>
+                <table className="nc-tbl" style={{ minWidth: 600, marginTop: 12 }}>
+                  <thead><tr><th>里程碑</th><th style={{ width: 170 }}>计划完成</th><th style={{ width: 190 }}>验收节点</th></tr></thead>
+                  <tbody>
+                    {miles.map((m, i) => (
+                      <tr key={m.n}>
+                        <td>{m.n}</td>
+                        <td><input className="nc-cell-in" type="date" value={m.d} onChange={(e) => setMiles((ms) => ms.map((x, j) => (j === i ? { ...x, d: e.target.value } : x)))} /></td>
+                        <td><Check checked={m.ok} onChange={(v) => setMiles((ms) => ms.map((x, j) => (j === i ? { ...x, ok: v } : x)))} label={m.ok ? '需提交核验单' : '普通节点'} /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </Card>
+
+              <Card hd="③ 成本预算基线（可后补细化）" extra={<span className="nc-muted">立项后作为「成本台账」预算口径 · 超支触发驾驶舱预警</span>}>
+                <table className="nc-tbl" style={{ minWidth: 620 }}>
+                  <thead><tr><th>成本科目</th><th style={{ width: 180, textAlign: 'right' }}>预算金额</th><th style={{ width: 110, textAlign: 'right' }}>占合同额</th></tr></thead>
+                  <tbody>
+                    {budget.map((b, i) => (
+                      <tr key={b.n}>
+                        <td>{b.n}</td>
+                        <td className="is-num"><input className="nc-cell-in" style={{ textAlign: 'right' }} type="number" value={b.v} onChange={(e) => setBudget((bs) => bs.map((x, j) => (j === i ? { ...x, v: Number(e.target.value) } : x)))} /></td>
+                        <td className="is-num">{amt ? ((b.v / amt) * 100).toFixed(1) + '%' : '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr>
+                      <td><b>预算合计</b></td>
+                      <td className="is-num"><b className="num">{fmt(budgetTotal)}</b></td>
+                      <td className="is-num"><b className={belowRedline ? 'nc-v-red' : ''}>{costRate.toFixed(1)}%</b></td>
+                    </tr>
+                  </tfoot>
+                </table>
+                {belowRedline && (
+                  <div className="nc-warnbox is-danger" style={{ marginTop: 12 }}>
+                    <b><Ico n="warning" size={16} /> 成本率 {costRate.toFixed(1)}% 已超 80% 红线</b>
+                    <div>对应毛利率 {(100 - costRate).toFixed(1)}%，低于公司 20% 毛利红线 —— 审批路由已自动升级：<b>{approveLevel(amt)} → {routeLevel}</b>。</div>
+                  </div>
+                )}
+              </Card>
+
+              <div className="nc-wizard-foot">
+                <Btn onClick={() => setStep(1)}>上一步</Btn>
+                <Btn onClick={saveDraft}>保存草稿</Btn>
+                <Btn kind="primary" onClick={next}>下一步 · 确认提交</Btn>
+              </div>
+            </>
+          )}
+
+          {/* ---- Step 4 确认提交 ---- */}
+          {step === 3 && picked && (
+            <>
+              <Card hd="④ 立项确认">
+                <KvGrid
+                  cols={3}
+                  rows={[
+                    { k: '立项方式', v: `有合同立项 · ${picked.id}` },
+                    { k: '项目名称', v: name || '—' },
+                    { k: '建设单位', v: picked.party },
+                    { k: '项目类型 / 条线', v: `${type} · ${BIZ.find((b) => b.k === biz)?.n}` },
+                    { k: '合同金额（含税）', v: fmt(amt) },
+                    { k: '项目负责人', v: pm || '—' },
+                    { k: '计划工期', v: `${start} ~ ${end}（合同工期 ${picked.start} ~ ${picked.end}）` },
+                    { k: '里程碑', v: `${miles.length} 项 · 验收节点 ${miles.filter((m) => m.ok).length} 个` },
+                    { k: '预算成本 / 成本率', v: `${fmt(budgetTotal)} · ${costRate.toFixed(1)}%${belowRedline ? '（超红线）' : ''}` },
+                    { k: '证书需求', v: `${certNeeds.length} 项（已存档 · 开工前齐套）` },
+                    { k: '合规预检', v: `${pre?.qual.tone === 'green' && pre?.safety.tone === 'green' ? '资质齐备' : '存在黄 / 红灯项，详见预检卡'}` },
+                    { k: '审批路由', v: `${routeLevel}${belowRedline ? '（成本红线升级）' : ''}` },
+                  ]}
+                />
+                <div style={{ marginTop: 12 }}>
+                  <Check
+                    checked={agree}
+                    onChange={setAgree}
+                    label="本人确认：① 合同真实有效且为本项目唯一立项合同；② 项目负责人三要素齐备；③ 证书需求清单已核对，知悉开工前须办齐关联借出；④ 服务周期明细由计划管理阶段滚动补录。"
+                  />
+                </div>
+                <div className="nc-dnote" style={{ marginTop: 12 }}>
+                  <b>提交后：</b>审批中心生成待办（{routeLevel}）· 审批通过项目置为「已立项」、驳回回到草稿 · 项目台帐实时可见。
+                </div>
+              </Card>
+              <div className="nc-wizard-foot">
+                <Btn onClick={() => setStep(2)}>上一步</Btn>
+                <Btn kind="primary" onClick={next}>提交立项审批</Btn>
+              </div>
+            </>
+          )}
         </>
       )}
 
-      {/* ================= Step 1 基本信息 ================= */}
-      {step === 1 && (
+      {/* ================= 模式 B · 应急工程（单步） ================= */}
+      {mode === 'emergency' && (
         <>
-          {src === 'emergency' && (
-            <div className="nc-warnbox is-danger" style={{ marginBottom: 12 }}>
-              <b>应急工程 · 无合同施工</b>
-              <div>合同金额暂缺，以成本台账归口；补签合同后由系统自动回填合同金额。</div>
-            </div>
-          )}
-          <Card hd="基本信息" extra={<Tag tone="gray">{srcPick || '未选来源'}</Tag>}>
+          <div className="nc-warnbox is-danger" style={{ marginBottom: 12 }}>
+            <b><Ico n="flame" size={16} /> 应急工程 · 无合同施工</b>
+            <div>立项通过后生成「无合同施工」风险标记：每 7 日向项目经理与分管副总推送提醒；<b>30 日内</b>未补签自动升级红色风险并计入项目经理考核。</div>
+          </div>
+          <Card hd="应急立项信息" extra={<span className="nc-muted">带出字段最少化 · 客户与金额可后补</span>}>
             <div className="nc-form-grid">
-              <Field label="项目名称" req span={2}><input className="nc-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="如：柳州钢铁厂区消防管网改造" /></Field>
-              <Field label="项目编号" note="系统生成 · 不可修改"><input className="nc-input" value="XM0001xx（自动生成）" readOnly disabled /></Field>
-              <Field label="建设单位（客户）" req>
-                <select className="nc-input" value={customer} onChange={(e) => setCustomer(e.target.value)}>
+              <Field label="项目名称" req span={2}><input className="nc-input" value={eName} onChange={(e) => setEName(e.target.value)} placeholder="如：××酒店消防设施应急抢修" /></Field>
+              <Field label="项目负责人" req note="三要素实时校验">
+                <select className="nc-input" value={ePm} onChange={(e) => setEPm(e.target.value)}>
                   <option value="">请选择</option>
-                  {CUSTOMERS.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
-                </select>
-              </Field>
-              <Field label="项目类型" req>
-                <select className="nc-input" value={type} onChange={(e) => setType(e.target.value)}>{PTYPES.map((t) => <option key={t} value={t}>{t}</option>)}</select>
-              </Field>
-              <Field label="业务条线" req>
-                <select className="nc-input" value={biz} onChange={(e) => setBiz(e.target.value)}>{BIZ.map((b) => <option key={b.k} value={b.k}>{b.n}</option>)}</select>
-              </Field>
-              <Field label="合同金额（含税）" req note={src === 'emergency' ? '应急工程可暂缺' : '取自来源单据 · 可修正'}>
-                <input className="nc-input" type="number" value={amt || ''} onChange={(e) => setAmt(Number(e.target.value))} />
-              </Field>
-              <Field label="建筑面积（㎡）"><input className="nc-input" type="number" value={area || ''} onChange={(e) => setArea(Number(e.target.value))} placeholder="用于证书需求预判" /></Field>
-              <Field label="上级框架协议" note="框架协议下的子项目须关联主协议，用于额度扣减">
-                <select className="nc-input" value={parent} onChange={(e) => setParent(e.target.value)}>
-                  <option value="">无（独立项目）</option>
-                  {CONTRACTS.filter((c) => c.type === '框架协议').map((c) => <option key={c.id} value={c.id}>{c.id} · {c.name}（额度 {fmtWan(c.execAmt)}）</option>)}
-                </select>
-              </Field>
-              <Field label="项目负责人" req note="须为「证书有效 + B 证有效 + 无在建」三要素齐备的建造师">
-                <select className="nc-input" value={pm} onChange={(e) => setPm(e.target.value)}>
-                  <option value="">请选择</option>
-                  {['张工', '王工', '李工'].map((p) => {
+                  {builderNames().map((p) => {
                     const b = builderCheck(p);
                     return <option key={p} value={p} disabled={!b.ok}>{p}{b.ok ? ' · 可派任' : ` · ${b.why}`}</option>;
                   })}
                 </select>
               </Field>
-              <Field label="计划开工" req><input className="nc-input" type="date" value={start} onChange={(e) => setStart(e.target.value)} /></Field>
-              <Field label="计划完工" req><input className="nc-input" type="date" value={end} onChange={(e) => setEnd(e.target.value)} /></Field>
+              <Field label="项目类型">
+                <select className="nc-input" value={eType} onChange={(e) => setEType(e.target.value)}>{PTYPES.map((t) => <option key={t}>{t}</option>)}</select>
+              </Field>
+              <Field label="建设单位（可后补）">
+                <input className="nc-input" list="ncCustList" value={eCust} onChange={(e) => setECust(e.target.value)} />
+              </Field>
+              <datalist id="ncCustList">{CUSTOMERS.map((c) => <option key={c.id} value={c.name} />)}</datalist>
+              <Field label="预计金额（可后补）" note="暂缺时以成本台账归口，补签后自动回填">
+                <input className="nc-input" type="number" value={eAmt || ''} onChange={(e) => setEAmt(Number(e.target.value))} />
+              </Field>
+              <Field label="拟补签合同类型" req>
+                <select className="nc-input" value={eSign} onChange={(e) => setESign(e.target.value)}>{SIGN_TYPES.map((t) => <option key={t}>{t}</option>)}</select>
+              </Field>
             </div>
-            {pm && (
-              <div className={`nc-builder-box${builderCheck(pm).ok ? ' is-ok' : ' is-bad'}`}>
-                <b>建造师三要素校验 · {pm}</b>
-                <div className="nc-builder-grid">
-                  <span><StatusIco kind={builderCheck(pm).ok ? 'ok' : 'ban'} /> ① 注册建造师证书有效</span>
-                  <span><StatusIco kind={CERTS.find((c) => c.isBuilder && c.holder === pm)?.hasB ? 'ok' : 'ban'} /> ② B 证有效期内</span>
-                  <span><StatusIco kind={((CERTS.find((c) => c.isBuilder && c.holder === pm)?.used as string[]) || []).length === 0 ? 'ok' : 'ban'} /> ③ 无在建项目</span>
-                </div>
-              </div>
-            )}
-          </Card>
-          <div className="nc-wizard-foot">
-            <Btn onClick={() => setStep(0)}>上一步</Btn>
-            <Btn kind="primary" onClick={next}>下一步 · 服务明细</Btn>
-          </div>
-        </>
-      )}
-
-      {/* ================= Step 2 服务明细（服务周期明细行 + 差额汇总） ================= */}
-      {step === 2 && (
-        <>
-          <div className="nc-sum3">
-            <div className="nc-sum3-cell">
-              <span>明细合计（自动汇总）</span>
-              <b className="num">{fmt(detSum)}</b>
-              <em>由明细行实时计算，不可直接填写</em>
-            </div>
-            <div className="nc-sum3-cell">
-              <span>预计金额</span>
-              <b className="num">{fmt(Number(amt) || 0)}</b>
-              <em>来自步骤①，如需调整请返回修改</em>
-            </div>
-            <div className={`nc-sum3-cell${Math.abs(diff) <= 0.5 ? ' is-ok' : ' is-bad'}`}>
-              <span>差额</span>
-              <b className="num">{diff > 0 ? '+' : ''}{fmt(diff)}</b>
-              <em>{Math.abs(diff) <= 0.5 ? ' 明细与预计金额一致' : diff > 0 ? '明细超出预计，请核对' : '明细不足 · 可一键补平'}</em>
-            </div>
-          </div>
-
-          <Card flush hd="服务周期明细" extra={<Btn size="sm" onClick={balance} disabled={Math.abs(diff) <= 0.5 || diff < 0} title={Math.abs(diff) <= 0.5 ? '各周期占比已平衡，无需补平' : diff < 0 ? '占比合计已超 100%，请先调减后再补平' : '按比例自动补平到 100%'}>一键补平</Btn>}>
-            <div className="nc-listhint">
-              <span>服务周期明细<Tip text="业务类型按行选择，不设项目级统一类型；金额合计需与预计金额一致（不一致将提示，可一键补平）。" /></span>
-              <span className="nc-listhint-sp" />
-              <span>共 {details.length} 行 · 合计 {fmt(detSum)}</span>
-            </div>
-            <div style={{ padding: '0 16px 8px' }}>
-              <table className="nc-tbl" style={{ minWidth: 860 }}>
-                <thead>
-                  <tr>
-                    <th style={{ width: 190 }}>业务类型</th>
-                    <th style={{ width: 150 }}>服务周期起</th>
-                    <th style={{ width: 150 }}>服务周期止</th>
-                    <th style={{ width: 140, textAlign: 'right' }}>金额（元）</th>
-                    <th>备注</th>
-                    <th style={{ width: 56 }}></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {details.map((d, i) => {
-                    const bad = d.pe && d.ps && d.pe <= d.ps;
-                    return (
-                      <tr key={i}>
-                        <td>
-                          <select className="nc-cell-in" style={{ width: '100%' }} value={d.type}
-                            onChange={(e) => setDetails((ds) => ds.map((x, j) => j === i ? { ...x, type: e.target.value } : x))}>
-                            <option value="">请选择</option>
-                            {BTYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-                          </select>
-                        </td>
-                        <td><input className="nc-cell-in" type="date" value={d.ps} onChange={(e) => setDetails((ds) => ds.map((x, j) => j === i ? { ...x, ps: e.target.value } : x))} /></td>
-                        <td>
-                          <input className="nc-cell-in" type="date" value={d.pe} onChange={(e) => setDetails((ds) => ds.map((x, j) => j === i ? { ...x, pe: e.target.value } : x))} />
-                          {bad && <div className="nc-cell-sub" style={{ color: 'var(--c-danger)' }}>周期止须晚于周期起</div>}
-                        </td>
-                        <td className="is-num"><input className="nc-cell-in" style={{ textAlign: 'right', width: '100%' }} type="number" min={0} value={d.amt || ''} onChange={(e) => setDetails((ds) => ds.map((x, j) => j === i ? { ...x, amt: Number(e.target.value) } : x))} /></td>
-                        <td><input className="nc-cell-in" style={{ width: '100%' }} value={d.note} onChange={(e) => setDetails((ds) => ds.map((x, j) => j === i ? { ...x, note: e.target.value } : x))} placeholder="如 住院楼 1~6 层" /></td>
-                        <td><span className="nc-ops"><Op danger onClick={() => delRow(i)}><Ico n="close" size={16} /></Op></span></td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-                <tfoot>
-                  <tr className="nc-tbl-sum">
-                    <td colSpan={3}>明细合计</td>
-                    <td className="is-num"><b className="num">{fmt(detSum)}</b></td>
-                    <td colSpan={2} style={{ fontWeight: 400, color: 'var(--ink-3)' }}>
-                      与预计金额差额 {diff > 0 ? '+' : ''}{fmt(diff)} · {details.length} 行
-                    </td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-            <div style={{ padding: '0 16px 16px' }}>
-              <button className="nc-addrow" onClick={addRow}>＋ 添加明细行</button>
-            </div>
-          </Card>
-
-          {detErrs.length > 0 && (
-            <div className="nc-warnbox is-warn">
-              <b><Ico n="warning" size={16} /> 明细行存在 {detErrs.length} 项待完善</b>
-              <div>{detErrs.slice(0, 4).join('；')}{detErrs.length > 4 ? ' …' : ''}</div>
-            </div>
-          )}
-
-          <div className="nc-wizard-foot">
-            <Btn onClick={() => setStep(1)}>上一步</Btn>
-            <Btn onClick={saveDraft}>保存草稿</Btn>
-            <Btn kind="primary" onClick={next}>下一步 · 证书需求预判</Btn>
-          </div>
-        </>
-      )}
-
-      {/* ================= Step 3 证书需求 ================= */}
-      {step === 3 && (
-        <>
-          <Card
-            hd="证书需求预判"
-            extra={<><span className="nc-muted">依据 项目类型 × 金额 × 面积 自动预判，可人工调整</span><Btn size="sm" onClick={mkCertRows}>重新预判</Btn></>}
-          >
-            <div className="nc-warnbox is-info">
-              <b>占用方式三分法</b>
-              <div>【一证一项目】同一证书同时只能被 1 个项目占用；【多项目引用】企业资质类，可被多项目同时引用；【按次登记】作业人员类，按项目登记使用次数，不占用排他额度。</div>
-            </div>
-            <table className="nc-tbl" style={{ minWidth: 900 }}>
-              <thead>
-                <tr><th style={{ width: 260 }}>证书 / 资质</th><th style={{ width: 70, textAlign: 'center' }}>需求</th><th style={{ width: 100 }}>预判依据</th><th>关联证书（借给本项目）</th><th style={{ width: 90 }}>状态</th></tr>
-              </thead>
-              <tbody>
-                {certRows.map((r, i) => {
-                  const pool = poolFor(r.name);
-                  const short = r.picked.length < r.need;
-                  return (
-                    <tr key={r.name}>
-                      <td><b>{r.name}</b></td>
-                      <td style={{ textAlign: 'center' }}>
-                        <input className="nc-cell-in" style={{ width: 48, textAlign: 'center' }} type="number" value={r.need}
-                          onChange={(e) => setCertRows((rs) => rs.map((x, j) => j === i ? { ...x, need: Number(e.target.value) } : x))} />
-                      </td>
-                      <td><span className="nc-tiny">{r.why}</span></td>
-                      <td>
-                        {pool.length === 0 ? <span className="nc-muted">无可用证书，需先到「证书管理」新增或续期</span> : (
-                          <div className="nc-pick-inline">
-                            {pool.map((p) => {
-                              const on = r.picked.includes(p.c.id);
-                              return (
-                                <label key={p.c.id} className={`nc-pick-chip${on ? ' is-on' : ''}${p.disabled ? ' is-disabled' : ''}`} title={p.why}>
-                                  <input type="checkbox" className="nc-check" disabled={p.disabled} checked={on}
-                                    onChange={() => setCertRows((rs) => rs.map((x, j) => j === i ? {
-                                      ...x, picked: on ? x.picked.filter((k) => k !== p.c.id) : (x.picked.length >= x.need ? x.picked : [...x.picked, p.c.id]),
-                                    } : x))} />
-                                  <span>{p.label}{p.disabled && <em className="nc-pick-why"> · {p.why}</em>}</span>
-                                </label>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </td>
-                      <td>{short ? <Tag tone="red">缺 {r.need - r.picked.length}</Tag> : <Tag tone="green">已齐</Tag>}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </Card>
-
-          {gaps.length > 0 && (
-            <div className="nc-warnbox is-warn">
-              <b><Ico n="warning" size={16} /> 存在 {gaps.length} 项证书缺口</b>
-              <div>
-                缺口项：{gaps.map((g) => `${g.name}（缺 ${g.need - g.picked.length}）`).join('、')}。
-                缺口不阻断立项，但会阻断投标与开工；请到「证书管理」办理续期或提额。
-              </div>
-              <div style={{ marginTop: 8 }}>
-                <Btn size="sm" kind="primary" onClick={() => setGapModal(true)}>一键补平（差额调配）</Btn>
-                <Btn size="sm" onClick={() => go('cert')}>前往证书管理</Btn>
-              </div>
-            </div>
-          )}
-
-          <div className="nc-wizard-foot">
-            <Btn onClick={() => setStep(2)}>上一步</Btn>
-            <Btn onClick={saveDraft}>保存草稿</Btn>
-            <Btn kind="primary" onClick={next}>下一步 · 计划与预算</Btn>
-          </div>
-        </>
-      )}
-
-      {/* ================= Step 4 计划与预算 ================= */}
-      {step === 4 && (
-        <>
-          <Card hd="里程碑计划" extra={<span className="nc-muted">验收节点用于「竣工验收消防查验记录」校验，缺失必需资料不予结项</span>}>
-            <div className="nc-mile-axis">
-              {milestones.map((m, i) => (
-                <div key={m.n} className={`nc-mile-node${m.ok ? ' is-done' : ''}`}>
-                  {/* 已完成 = ✓ 打勾（success 语义）；未完成为序号 */}
-                  <i>{m.ok ? <Ico n="check" size={12} /> : i + 1}</i>
-                  <b>{m.n}</b>
-                  <span className="num">{m.d}</span>
-                </div>
-              ))}
-            </div>
-            <table className="nc-tbl" style={{ minWidth: 600, marginTop: 12 }}>
-              <thead><tr><th>里程碑</th><th style={{ width: 160 }}>计划完成</th><th style={{ width: 120 }}>是否验收节点</th></tr></thead>
-              <tbody>
-                {milestones.map((m, i) => (
-                  <tr key={m.n}>
-                    <td>{m.n}</td>
-                    <td><input className="nc-cell-in" type="date" value={m.d} onChange={(e) => setMilestones((ms) => ms.map((x, j) => j === i ? { ...x, d: e.target.value } : x))} /></td>
-                    <td><Check checked={m.ok} onChange={(v) => setMilestones((ms) => ms.map((x, j) => j === i ? { ...x, ok: v } : x))} label={m.ok ? '需提交核验单' : '普通节点'} /></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </Card>
-
-          <Card hd="成本预算基线" extra={<span className="nc-muted">立项后作为「成本台账」的预算口径，超支触发驾驶舱预警</span>}>
-            <table className="nc-tbl" style={{ minWidth: 620 }}>
-              <thead><tr><th>成本科目</th><th style={{ width: 180, textAlign: 'right' }}>预算金额</th><th style={{ width: 110, textAlign: 'right' }}>占合同额</th></tr></thead>
-              <tbody>
-                {budget.map((b, i) => (
-                  <tr key={b.n}>
-                    <td>{b.n}</td>
-                    <td className="is-num"><input className="nc-cell-in" style={{ textAlign: 'right' }} type="number" value={b.v} onChange={(e) => setBudget((bs) => bs.map((x, j) => j === i ? { ...x, v: Number(e.target.value) } : x))} /></td>
-                    <td className="is-num">{amt ? ((b.v / amt) * 100).toFixed(1) + '%' : '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot>
-                <tr><td><b>预算合计</b></td><td className="is-num"><b className="num">{fmt(budgetTotal)}</b></td><td className="is-num"><b className={belowRedline ? 'nc-v-red' : ''}>{costRate.toFixed(1)}%</b></td></tr>
-              </tfoot>
-            </table>
-            {belowRedline && (
-              <div className="nc-warnbox is-danger" style={{ marginTop: 12 }}>
-                <b><Ico n="warning" size={16} /> 成本率 {costRate.toFixed(1)}% 已超 80% 红线</b>
-                <div>对应毛利率 {(100 - costRate).toFixed(1)}%，低于公司 20% 毛利红线，立项金额将路由至 {approveLevel(amt)} 审批。</div>
-              </div>
-            )}
-          </Card>
-
-          <Card hd="附件（4 类 · 统一入口 + 选分类）" extra={<span className="nc-muted">共 {files.length} 份 · 立项后归入项目资料归档</span>}>
-            {FILE_CATS.map((cat) => {
-              const fs = files.filter((f) => f.cat === cat);
-              return (
-                <div key={cat} style={{ marginBottom: 12 }}>
-                  <div className="nc-fg-head">
-                    <span className="nc-fg-title">{cat}</span>
-                    <span className="nc-fg-count">{fs.length} 份</span>
-                  </div>
-                  {fs.length
-                    ? fs.map((f, i) => (
-                      <span className="nc-filechip" key={`${f.name}-${i}`}>
-                        <b>{f.name}</b>
-                        <span className="nc-cell-sub">{f.size} KB</span>
-                        <Op danger onClick={() => setFiles((p) => p.filter((x) => x !== f))}>删除</Op>
-                      </span>
-                    ))
-                    : <div className="nc-empty-mini">暂无文件</div>}
-                  <div>
-                    <Btn size="sm" onClick={() => {
-                      const n = `${cat}-${name.slice(0, 10) || '项目'}-${Math.floor(Math.random() * 900 + 100)}.pdf`;
-                      setFiles((p) => [...p, { cat, name: n, size: Math.floor(Math.random() * 2000 + 300) }]);
-                      toast(`已添加「${cat}」附件（演示）`);
-                    }}>＋ 添加{cat}</Btn>
-                  </div>
-                </div>
-              );
-            })}
-          </Card>
-
-          <Card hd="立项确认">
-            <KvGrid cols={3} rows={[
-              { k: '项目来源', v: SRC_CARDS.find((s) => s.key === src)?.label || '—' },
-              { k: '来源单据', v: srcPick || '—' },
-              { k: '服务明细', v: `${details.length} 行 · 合计 ${fmt(detSum)}` },
-              { k: '项目名称', v: name || '—' },
-              { k: '建设单位', v: customer || '—' },
-              { k: '项目类型 / 条线', v: `${type} · ${BIZ.find((b) => b.k === biz)?.n}` },
-              { k: '合同金额（含税）', v: amt ? fmt(amt) : '待补签' },
-              { k: '项目负责人', v: pm || '—' },
-              { k: '计划工期', v: `${start} ~ ${end}` },
-              { k: '上级框架协议', v: parent || '无' },
-              { k: '证书需求项', v: `${certRows.length} 项 · 缺口 ${gaps.length} 项` },
-              { k: '预算成本 / 成本率', v: `${fmt(budgetTotal)} · ${costRate.toFixed(1)}%` },
-              { k: '审批路由', v: approveLevel(amt) },
-            ]} />
             <div style={{ marginTop: 12 }}>
-              <Check checked={agreed} onChange={setAgreed}
-                label="本人确认：① 项目来源真实有效；② 项目负责人三要素齐备；③ 证书缺口已如实申报；④ 应急工程将在 30 日内完成合同补签。" />
+              <Check checked={eAgree} onChange={setEAgree} label={`本人承诺：本项目为真实应急抢险，将于立项通过后 30 日内（${addDays(TODAY, 30)} 前）完成合同补签，逾期接受考核。`} />
+            </div>
+            <div className="nc-wizard-foot">
+              <Btn onClick={saveDraft}>保存草稿</Btn>
+              <Btn kind="primary" onClick={submitEmergencyCheck}>提交立项审批</Btn>
             </div>
           </Card>
-
-          <div className="nc-wizard-foot">
-            <Btn onClick={() => setStep(3)}>上一步</Btn>
-            <Btn onClick={saveDraft}>保存草稿</Btn>
-            <Btn kind="primary" onClick={next}>提交立项审批</Btn>
-          </div>
         </>
       )}
 
-      </>)}
-
-      {/* ================= 明细金额不平衡 ================= */}
-      <Modal open={balModal} title="金额不平衡" width={560} onClose={() => setBalModal(false)}
-        foot={<><Btn onClick={() => setBalModal(false)}>返回调整明细</Btn><Btn kind="primary" onClick={() => { setBalModal(false); mkCertRows(); setStep(3); }}>继续提交</Btn></>}>
-        <div style={{ fontSize: 13, lineHeight: 1.9 }}>
-          明细合计 <b className="num">{fmt(detSum)}</b> 与预计金额 <b className="num">{fmt(Number(amt) || 0)}</b> 相差{' '}
-          <b style={{ color: 'var(--c-warning-deep)' }}>{fmt(Math.abs(diff))}</b>。
-          <div className="nc-hint">可返回调整明细或一键补平，也可继续提交（转合同时以明细为准逐行转入）。</div>
-          <div style={{ marginTop: 12 }}>
-            <Btn size="sm" onClick={() => { balance(); setBalModal(false); }} disabled={diff < 0}>
-              一键补平（差额 {fmt(Math.abs(diff))} 补入最后一行）
-            </Btn>
-            {diff < 0 && <span className="nc-hint" style={{ marginLeft: 8 }}>明细超出预计金额，不支持自动补平，请手动调整</span>}
-          </div>
-        </div>
-      </Modal>
-
-      {/* ================= 缺口补平 ================= */}
-      <Modal open={gapModal} title={`证书缺口补平 · 差额调配（${gaps.length} 项）`} width={720} onClose={() => setGapModal(false)}
-        foot={<><Btn onClick={() => { setGapModal(false); go('cert'); }}>前往证书管理处理</Btn><Btn kind="primary" onClick={() => {
-          // 一键补平：对可调配的按次登记类自动补足
-          setCertRows((rs) => rs.map((r) => {
-            if (r.picked.length >= r.need) return r;
-            const pool = poolFor(r.name).filter((p) => !p.disabled);
-            const add = pool.filter((p) => !r.picked.includes(p.c.id)).slice(0, r.need - r.picked.length).map((p) => p.c.id);
-            return { ...r, picked: [...r.picked, ...add] };
-          }));
-          setGapModal(false);
-          toast('已按差额补齐可用证书，仍缺项请前往证书管理办理');
-        }}>一键补平可用差额</Btn></>}>
-        <div className="nc-issuestrip">
-          <span className="nc-issue is-red">硬约束：一证一项目类证书不可跨项目复用</span>
-          <span className="nc-issue is-orange">到期类须先续期</span>
-        </div>
-        <table className="nc-tbl" style={{ minWidth: 640 }}>
-          <thead><tr><th>证书 / 资质</th><th style={{ width: 70, textAlign: 'center' }}>需求</th><th style={{ width: 70, textAlign: 'center' }}>已联</th><th style={{ width: 70, textAlign: 'center' }}>缺口</th><th>可补方案</th></tr></thead>
-          <tbody>
-            {gaps.map((g) => {
-              const avail = poolFor(g.name).filter((p) => !p.disabled && !g.picked.includes(p.c.id));
-              return (
-                <tr key={g.name}>
-                  <td><b>{g.name}</b></td>
-                  <td style={{ textAlign: 'center' }} className="num">{g.need}</td>
-                  <td style={{ textAlign: 'center' }} className="num">{g.picked.length}</td>
-                  <td style={{ textAlign: 'center' }}><Tag tone="red">{g.need - g.picked.length}</Tag></td>
-                  <td>{avail.length ? <span className="nc-tiny">可补：{avail.map((a) => a.c.holder).join('、')}（{avail.length} 个）</span> : <span className="nc-tiny nc-v-red">无可用证书 → 须新增/续期/提额</span>}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </Modal>
-
-      {/* ================= 应急工程确认 ================= */}
-      <Modal open={modalEmergency} title="应急工程 · 无合同施工确认" width={520} onClose={() => setModalEmergency(false)}
-        foot={<><Btn onClick={() => setModalEmergency(false)}>再想想</Btn><Btn kind="primary" danger onClick={() => { setModalEmergency(false); setStep(1); }}>确认立项</Btn></>}>
+      {/* ================= 弹层 ================= */}
+      {/* 应急提交确认 */}
+      <Modal
+        open={emModal}
+        title="应急工程 · 无合同施工确认"
+        width={520}
+        onClose={() => setEmModal(false)}
+        foot={<>
+          <Btn onClick={() => setEmModal(false)}>再想想</Btn>
+          <Btn kind="primary" danger onClick={submitEmergency}>确认提交</Btn>
+        </>}
+      >
         <div className="nc-warnbox is-danger">
-          <b><Ico n="warning" size={16} /> 该来源无合同，立项后将生成「无合同施工」风险标记</b>
-          <div style={{ marginTop: 8 }}>系统将：① 在项目卡片与驾驶舱风险区持续提示；② 每 7 日向项目经理与分管副总推送提醒；③ 超过 30 日未补签自动升级为红色风险。</div>
+          <b><Ico n="warning" size={16} /> 提交后系统将：</b>
+          <div>① 在项目卡片与驾驶舱风险区持续提示「无合同施工」；② 每 7 日推送补签提醒；③ 超 30 日未补签升级红色风险。</div>
         </div>
-        <KvGrid rows={[{ k: '来源单据', v: srcPick || '—' }, { k: '项目名称', v: name || '—' }, { k: '拟补签合同类型', v: '维护保养合同 / 销售合同' }, { k: '补签期限', v: '立项日起 30 日内' }]} />
+        <KvGrid
+          rows={[
+            { k: '项目名称', v: eName || '—' },
+            { k: '项目负责人', v: ePm || '—' },
+            { k: '拟补签合同类型', v: eSign },
+            { k: '补签期限', v: `${addDays(TODAY, 30)}（立项日起 30 日）` },
+          ]}
+        />
       </Modal>
 
-      {/* ================= 离开确认 ================= */}
-      <Modal open={leaveModal} title="离开向导？" width={420} onClose={() => setLeaveModal(false)}
-        foot={<><Btn onClick={() => setLeaveModal(false)}>继续编辑</Btn><Btn kind="primary" danger onClick={() => { setLeaveModal(false); go('project'); }}>放弃并离开</Btn></>}>
-        <p style={{ margin: 0 }}>已填写的立项信息将不会保存，确定离开吗？</p>
+      {/* 离开确认（切换入口 / 返回入口且有已填内容） */}
+      <Modal
+        open={!!leave}
+        title="放弃当前填写内容？"
+        width={420}
+        onClose={() => setLeave(null)}
+        foot={<>
+          <Btn onClick={() => setLeave(null)}>继续编辑</Btn>
+          <Btn onClick={() => { saveDraft(); const fn = leave; setLeave(null); fn?.(); }}>保存草稿并离开</Btn>
+          <Btn kind="primary" danger onClick={() => { const fn = leave; setLeave(null); fn?.(); }}>直接离开</Btn>
+        </>}
+      >
+        <p style={{ margin: 0 }}>当前页面已填写的内容将不会带入新流程。可先保存草稿（重新进入本页可恢复）。</p>
       </Modal>
     </>
   );

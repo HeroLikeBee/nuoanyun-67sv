@@ -308,6 +308,7 @@ export const CONTRACTS: Contract[] = [
   { id: 'FK20260910-0008', name: '万达广场秋季维保服务（框架子合同）', type: '框架协议', party: '昆明万达广场商业管理有限公司', project: 'XM000123', amt: 380000, execAmt: 380000, status: '履约中', recvPct: 30, recv: 114000, owner: '蓝峰', sign: '2026-09-10', start: '2026-09-15', end: '2026-12-15', nodes: '完工 100%', overdue: false, overpay: false, sub: true },
   { id: 'CG20260415-0002', name: '××酒店灭火器批次采购合同', type: '采购合同', party: '云南××消防设备有限公司', project: 'XM000105', amt: 120000, execAmt: 120000, status: '已终止', recvPct: 0, recv: 0, owner: '陈静', sign: '2026-04-15', start: '2026-04-20', end: '2026-06-30', nodes: '到货 100%', overdue: false, overpay: false },
   { id: 'HT20260920-0011', name: '柳州钢铁厂区消防管网改造合同', type: '销售合同', party: '广西柳州钢铁集团有限公司', project: 'XM000098', amt: 5600000, execAmt: 5600000, status: '审批中', recvPct: 0, recv: 0, owner: '赵薇', sign: '2026-09-20', start: '2026-10-08', end: '2027-04-30', nodes: '预付 20% · 进度 50% · 竣工 27% · 质保 3%', overdue: false, overpay: false },
+  { id: 'HT20260918-0012', name: '文山三七产业园消防验收整改工程合同', type: '销售合同', party: '文山三七产业园管委会', project: '', amt: 1680000, execAmt: 1680000, status: '已签约', recvPct: 0, recv: 0, owner: '刘宇', sign: '2026-09-18', start: '2026-10-10', end: '2027-03-15', nodes: '预付 30% · 进度 40% · 竣工 25% · 质保 5%', overdue: false, overpay: false },
 ];
 
 /* ============================ 项目（XM + 6 位，4 来源） ============================ */
