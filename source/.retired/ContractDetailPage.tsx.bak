@@ -1,0 +1,363 @@
+// 合同详情（详情）—— 一页聚合一份合同全部信息（回应「信息分散在多个页面」痛点）
+// 9 Tab · 主按钮 ≤3 + 「更多操作 ⋯」· 收款红冲一笔仅一次 · 付款超限硬拦截 · 政府/部队四件套
+import React, { useState } from 'react';
+import {
+  Banner, Btn, Card, ChainBar, Field, KvGrid, Modal, Op, OpSep, PageHead, Progress, Tabs,
+  Tag, Timeline, useToast, Check, Code, Alert, DataTable,
+} from '../components/ui';
+import { CONTRACTS, PROJECTS, INVOICES, fmt, fmtWan, TODAY } from '../components/data';
+
+const C = CONTRACTS[0]; // HT20260912-0009
+
+const RECV_PLAN = [
+  { no: '期次1', node: '预付款 30%', pct: 30, amt: 960000, due: '2026-09-25', status: '已收款', recv: 960000, date: '2026-09-22', overdue: 0 },
+  { no: '期次2', node: '进度款 40%', pct: 40, amt: 1280000, due: '2026-12-31', status: '待收款', recv: 540000, date: '', overdue: 0 },
+  { no: '期次3', node: '竣工款 25%', pct: 25, amt: 800000, due: '2027-03-31', status: '未到期', recv: 0, date: '', overdue: 0 },
+  { no: '期次4', node: '质保金 5%', pct: 5, amt: 160000, due: '2028-03-31', status: '未到期', recv: 0, date: '', overdue: 0 },
+];
+
+const PAYMENTS = [
+  { id: 'PF000031', name: '消防设备采购付款（报警系统）', party: '云南××消防设备有限公司', amt: 258000, type: '采购付款', status: '审批中', date: '2026-09-21', check: '已付 + 本次 ≤ 执行金额 × 100% ✓' },
+  { id: 'PF000028', name: '劳务分包进度款（第一期）', party: '昆明××建筑劳务有限公司', amt: 180000, type: '分包付款', status: '已付款', date: '2026-09-10', check: '校验通过' },
+  { id: 'PF000025', name: '安全文明施工措施费', party: '昆明××建筑劳务有限公司', amt: 46000, type: '费用付款', status: '已付款', date: '2026-09-05', check: '校验通过' },
+];
+
+const CHANGES = [
+  { id: 'BG000009', name: '设计变更（增机房气体灭火）', amt: 80000, status: '审批中', date: '2026-09-22', reason: '甲方要求机房增设七氟丙烷灭火系统' },
+  { id: 'BG000004', name: '工程量签证（管道增加 68 米）', amt: 32000, status: '已生效', date: '2026-09-14', reason: '现场实际走向调整，经监理确认' },
+];
+
+export default function ContractDetailPage({ go, role }: { go: (p: string) => void; role: string }) {
+  const toast = useToast();
+  const [tab, setTab] = useState('overview');
+  const [rebutOpen, setRebuttal] = useState<null | typeof RECV_PLAN[number]>(null);
+  const [payOpen, setPayOpen] = useState<null | typeof PAYMENTS[number]>(null);
+  const [changeOpen, setChangeOpen] = useState(false);
+  const [settleOpen, setSettleOpen] = useState(false);
+  const [termOpen, setTermOpen] = useState(false);
+  const [actOpen, setActOpen] = useState(false);
+  const [special, setSpecial] = useState(false);
+
+  const warranty = Math.round(C.execAmt * 0.05);
+  const received = RECV_PLAN.reduce((a, r) => a + r.recv, 0);
+  const dLeft = Math.round((new Date(C.end).getTime() - new Date(TODAY).getTime()) / 86400000);
+  const isGov = C.party.includes('医院') || C.party.includes('政府');
+
+  return (
+    <>
+      <PageHead
+        title={<span className="nc-mono-lg">{C.id}</span>}
+        badges={<><Tag tone="green">{C.status}</Tag><Tag tone="blue">{C.type}</Tag><Tag tone="gray">剩余 {dLeft} 天</Tag></>}
+        sub={`${C.name} · ${C.party}`}
+        actions={<>
+          <Btn onClick={() => go('contract')}>← 返回列表</Btn>
+          <Btn kind="primary" onClick={() => setChangeOpen(true)}>变更 / 签证</Btn>
+          <Btn onClick={() => setSettleOpen(true)}>结算</Btn>
+          <Btn onClick={() => setActOpen(true)}>更多操作 ⋯</Btn>
+        </>}
+      />
+
+      {/* 金额区 */}
+      <div className="nc-money-row">
+        <div className="nc-money-cell"><span>原金额</span><b className="num">{fmt(C.amt)}</b></div>
+        <div className="nc-money-cell"><span>执行金额</span><b className="num">{fmt(C.execAmt)}</b></div>
+        <div className="nc-money-cell"><span>已收</span><b className="num is-green">{fmt(received)}</b></div>
+        <div className="nc-money-cell"><span>未收</span><b className="num is-orange">{fmt(C.execAmt - received)}</b></div>
+        <div className="nc-money-cell"><span>质保金（5%）</span><b className="num is-gold">{fmt(warranty)}</b></div>
+        <div className="nc-money-cell"><span>已花</span><b className="num">{fmt(120000)}</b></div>
+        <div className="nc-money-cell"><span>工期倒计时</span><b className={`num${dLeft < 30 ? ' is-red' : ''}`}>剩余 {dLeft} 天</b></div>
+      </div>
+
+      {/* 状态步进器 */}
+      <Card>
+        <ChainBar nodes={['草稿', '审批中', '已审批', '已签约', '履约中', '结算中', '已结项'].map((s) => {
+          const cur = 4; const idx = ['草稿', '审批中', '已审批', '已签约', '履约中', '结算中', '已结项'].indexOf(s);
+          return { label: s, state: (idx < cur ? 'done' : idx === cur ? 'cur' : 'todo') as 'done' | 'cur' | 'todo' };
+        })} />
+        <div className="nc-issues">
+          <div className="nc-issue is-red">⛔ 期次 2（进度款）已收 ¥54 万 / 应收 ¥128 万，差额 ¥74 万 · 逾期风险</div>
+          <div className="nc-issue is-orange">⚠ AI 审查命中「违约金 30%」高风险条款，建议复核</div>
+          {isGov && <div className="nc-issue is-gold">🔔 政府 / 部队项目：安全 / 廉政 / 农民工工资 / 技术协议四件套须齐备</div>}
+        </div>
+      </Card>
+
+      {/* 9 Tab */}
+      <Card flush>
+        <div className="nc-card-hd">
+          <Tabs
+            items={[
+              { key: 'overview', label: '概览' },
+              { key: 'list', label: '合同清单' },
+              { key: 'recv', label: '收款计划' },
+              { key: 'pay', label: '付款与请款' },
+              { key: 'change', label: '变更与签证', cnt: CHANGES.length },
+              { key: 'attach', label: '附件分类' },
+              { key: 'ai', label: 'AI 审查' },
+              { key: 'borrow', label: '借阅记录' },
+              { key: 'log', label: '操作日志' },
+            ]}
+            value={tab} onChange={setTab}
+          />
+        </div>
+
+        {tab === 'overview' && (
+          <div className="nc-card-bd">
+            <KvGrid cols={3} rows={[
+              { k: '合同编号（我方）', v: <Code>{C.id}</Code> },
+              { k: '甲方编号（双编号）', v: <Code>WD-2026-XF-0912</Code> },
+              { k: '合同类型', v: C.type },
+              { k: '相对方', v: C.party },
+              { k: '关联项目', v: <span>{PROJECTS.find((p) => p.id === C.project)?.name}<div className="nc-cell-sub"><Code>{C.project}</Code></div></span> },
+              { k: '负责人', v: C.owner },
+              { k: '签约日期', v: C.sign },
+              { k: '工期', v: `${C.start} → ${C.end}` },
+              { k: '收款节点', v: C.nodes },
+              { k: '收入确认口径', v: '按履约进度（节点验收）确认' },
+              { k: '质保金留存', v: `${fmt(warranty)}（= 合同总额 × 5%，自动计算）` },
+              { k: '是否政府 / 部队', v: isGov ? <Tag tone="red">是 · 四件套校验</Tag> : '否' },
+            ]} />
+            <div className="nc-sec-title">政府 / 部队四件套（硬拦截 · 缺一不可）</div>
+            <div className="nc-check-grid">
+              {['安全协议', '廉政协议', '农民工工资支付协议', '技术协议'].map((n) => (
+                <div key={n} className="nc-check-cell is-ok">✓ {n}<span className="nc-cell-sub">已归档（2026-09-12）</span></div>
+              ))}
+            </div>
+            <div className="nc-listhint">合同文件页 = 基础信息 + 纸面 + AI（零切换）；关联对象列表化管理；金额变更走「变更签证」留痕。</div>
+          </div>
+        )}
+
+        {tab === 'list' && (
+          <div className="nc-card-bd">
+            <table className="nc-tbl" style={{ minWidth: 820 }}>
+              <thead><tr><th>序号</th><th>名称</th><th style={{ width: 80 }}>单位</th><th style={{ width: 90 }} className="is-num">数量</th><th style={{ width: 120 }} className="is-num">单价</th><th style={{ width: 130 }} className="is-num">金额</th><th style={{ width: 100 }}>业务类型</th></tr></thead>
+              <tbody>
+                {[
+                  ['火灾自动报警系统（含探测器 860 只）', '系统', 1, 1280000, 1280000, '消防电'],
+                  ['自动喷淋灭火系统（喷洒头 1240 个）', '系统', 1, 860000, 860000, '消防水'],
+                  ['防排烟系统（风机 8 台 + 阀 42 个）', '系统', 1, 620000, 620000, '防排烟'],
+                  ['消防设施改造配套土建', '项', 1, 280000, 280000, '土建配合'],
+                  ['消防检测与验收辅导', '项', 1, 240000, 240000, '服务费'],
+                ].map((r, i) => (
+                  <tr key={i}>
+                    <td className="is-num">{i + 1}</td><td>{r[0] as string}</td><td>{r[1] as string}</td>
+                    <td className="is-num">{r[2] as number}</td><td className="is-num">{fmt(r[3] as number)}</td>
+                    <td className="is-num"><b className="num">{fmt(r[4] as number)}</b></td>
+                    <td><Tag tone="gray">{r[5] as string}</Tag></td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot><tr className="nc-tbl-sum"><td colSpan={5}>合计 <span className="nc-cell-sub">合同族汇总自动计算，不许手算</span></td><td className="is-num"><b className="num">{fmt(3280000)}</b></td><td /></tr></tfoot>
+            </table>
+          </div>
+        )}
+
+        {tab === 'recv' && (
+          <div className="nc-card-bd">
+            <div className="nc-toolbar">
+              <span className="nc-listhint">收款计划支持增删改 · 登记后首笔触发「履约中」· 红冲一笔仅一次</span>
+              <span className="nc-toolbar-sp" />
+              <Btn size="sm" onClick={() => toast('已新增收款期次')}>＋ 新增期次</Btn>
+            </div>
+            <table className="nc-tbl" style={{ minWidth: 1020 }}>
+              <thead><tr><th style={{ width: 80 }}>期次</th><th>收款节点</th><th style={{ width: 70 }} className="is-num">比例</th><th style={{ width: 120 }} className="is-num">计划金额</th><th style={{ width: 110 }}>计划日期</th><th style={{ width: 90 }}>状态</th><th style={{ width: 120 }} className="is-num">已收</th><th style={{ width: 200 }}>操作</th></tr></thead>
+              <tbody>
+                {RECV_PLAN.map((r) => (
+                  <tr key={r.no}>
+                    <td>{r.no}</td><td>{r.node}</td><td className="is-num">{r.pct}%</td>
+                    <td className="is-num">{fmt(r.amt)}</td><td>{r.due}</td>
+                    <td><Tag tone={r.status === '已收款' ? 'green' : r.status === '待收款' ? 'blue' : 'gray'}>{r.status}</Tag></td>
+                    <td className="is-num">{r.recv ? fmt(r.recv) : '/'}</td>
+                    <td><div className="nc-ops">
+                      {r.status !== '已收款' && <><Op gold onClick={() => toast(`已登记收款 ${r.node}`)}>登记收款</Op><OpSep /></>}
+                      {!!r.recv && <><Op danger onClick={() => setRebuttal(r)}>红冲</Op><OpSep /></>}
+                      <Op onClick={() => toast('已修改期次')}>编辑</Op>
+                    </div></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="nc-warnbox is-red">⛔ 期次 2 应收 ¥128 万，已收 ¥54 万，差额 <b>¥74 万</b>；驾驶舱「逾期应收」已联动。</div>
+          </div>
+        )}
+
+        {tab === 'pay' && (
+          <div className="nc-card-bd">
+            <div className="nc-listhint">付款超限硬拦截：已付 + 本次 &gt; 执行金额 × 比例上限 → 硬拦截 + 校验明细；特批开关填理由放行并留痕。无关联合同付款固定路由老板审批。</div>
+            <table className="nc-tbl" style={{ minWidth: 1020 }}>
+              <thead><tr><th style={{ width: 110 }}>付款单号</th><th>事由</th><th style={{ width: 200 }}>相对方</th><th style={{ width: 90 }}>类型</th><th style={{ width: 120 }} className="is-num">金额</th><th style={{ width: 90 }}>状态</th><th style={{ width: 200 }}>校验 / 操作</th></tr></thead>
+              <tbody>
+                {PAYMENTS.map((p) => (
+                  <tr key={p.id}>
+                    <td><Code>{p.id}</Code></td><td>{p.name}</td><td className="nc-cell-sub">{p.party}</td>
+                    <td><Tag tone="orange">{p.type}</Tag></td>
+                    <td className="is-num"><b className="num">{fmt(p.amt)}</b></td>
+                    <td><Tag tone={p.status === '已付款' ? 'green' : 'blue'}>{p.status}</Tag></td>
+                    <td><div className="nc-ops">
+                      <Op onClick={() => setPayOpen(p)}>校验明细</Op><OpSep />
+                      {p.status === '审批中' && <Op onClick={() => go('approval')}>去审批</Op>}
+                      {p.status === '已付款' && <Op danger onClick={() => toast('付款红冲：生成负数红冲单，原单只读，一笔仅一次')}>红冲</Op>}
+                    </div></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {tab === 'change' && (
+          <div className="nc-card-bd">
+            <div className="nc-toolbar"><span className="nc-listhint">任何变更留痕：记录用户 / 时间 / 内容 / 原因，不可覆盖删除</span><span className="nc-toolbar-sp" /><Btn size="sm" kind="primary" onClick={() => setChangeOpen(true)}>＋ 新增变更</Btn></div>
+            <table className="nc-tbl" style={{ minWidth: 900 }}>
+              <thead><tr><th style={{ width: 110 }}>变更单号</th><th>变更内容</th><th style={{ width: 120 }} className="is-num">金额</th><th style={{ width: 90 }}>状态</th><th style={{ width: 110 }}>日期</th><th style={{ width: 80 }}>操作</th></tr></thead>
+              <tbody>
+                {CHANGES.map((c) => (
+                  <tr key={c.id}>
+                    <td><Code>{c.id}</Code></td>
+                    <td>{c.name}<div className="nc-cell-sub">{c.reason}</div></td>
+                    <td className="is-num"><b className="num">{fmt(c.amt)}</b></td>
+                    <td><Tag tone={c.status === '已生效' ? 'green' : 'blue'}>{c.status}</Tag></td>
+                    <td>{c.date}</td>
+                    <td><Op onClick={() => toast('已查看变更详情')}>详情</Op></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {tab === 'attach' && (
+          <div className="nc-card-bd">
+            <div className="nc-listhint">附件按分类归集，与「文档中心」双向同源（任一入口上传 / 删除实时同步）。</div>
+            <div className="nc-check-grid">
+              {[['主合同', 1], ['补充协议', 1], ['中标通知书', 1], ['安全协议', 1], ['技术协议', 1], ['廉政协议', 1]].map(([n, c]) => (
+                <div key={n as string} className="nc-check-cell is-ok">✓ {n as string}<span className="nc-cell-sub">已归档 {c as number} 份</span></div>
+              ))}
+            </div>
+            <div className="nc-ops" style={{ marginTop: 12 }}>
+              <Btn size="sm" onClick={() => go('doc')}>前往文档中心 →</Btn>
+              <Btn size="sm" onClick={() => toast('已上传附件')}>＋ 上传附件</Btn>
+            </div>
+          </div>
+        )}
+
+        {tab === 'ai' && (
+          <div className="nc-card-bd">
+            <Banner tone="warn">🤖 AI 审查：自动比对标准模板与风险条款库，命中即标红并给出修改建议（供参考，不替代法务判断）。</Banner>
+            <table className="nc-tbl" style={{ minWidth: 820 }}>
+              <thead><tr><th style={{ width: 90 }}>风险级</th><th style={{ width: 180 }}>条款</th><th>原文摘录</th><th style={{ width: 240 }}>修改建议</th></tr></thead>
+              <tbody>
+                <tr className="is-danger-row"><td><Tag tone="red">高风险</Tag></td><td>违约责任</td><td className="nc-cell-sub">「承包方违约按合同总额 30% 支付违约金」</td><td>建议降至 ≤10%，或改为按实际损失计算</td></tr>
+                <tr className="is-warn-row"><td><Tag tone="orange">中风险</Tag></td><td>付款条件</td><td className="nc-cell-sub">「竣工验收合格后 90 日内付清余款」</td><td>建议缩至 60 日，并增设逾期利息条款</td></tr>
+                <tr><td><Tag tone="gray">低风险</Tag></td><td>不可抗力</td><td className="nc-cell-sub">未明确疫情 / 政策停工的处理方式</td><td>建议补充不可抗力的工期顺延与费用分担</td></tr>
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {tab === 'borrow' && (
+          <div className="nc-card-bd">
+            <table className="nc-tbl" style={{ minWidth: 720 }}>
+              <thead><tr><th style={{ width: 110 }}>借阅单号</th><th>借阅人</th><th style={{ width: 110 }}>申请时间</th><th style={{ width: 110 }}>归还时间</th><th style={{ width: 90 }}>状态</th></tr></thead>
+              <tbody>
+                <tr><td><Code>JY000017</Code></td><td>行政</td><td>2026-09-17</td><td>2026-09-18</td><td><Tag tone="green">已归还</Tag></td></tr>
+                <tr><td><Code>JY000021</Code></td><td>赵薇</td><td>2026-09-20</td><td>—</td><td><Tag tone="blue">借阅中</Tag></td></tr>
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {tab === 'log' && (
+          <div className="nc-card-bd">
+            <Timeline items={[
+              { date: '2026-09-12', text: `合同签约生效 · 双编号登记（我方 ${C.id} / 甲方 WD-2026-XF-0912）`, tone: 'ok' },
+              { date: '2026-09-12', text: '质保金自动留存 ¥16 万（= 合同总额 × 5%）', tone: 'gray' },
+              { date: '2026-09-20', text: '盖章登记完成 → 触发项目立项（XM000123）', tone: 'ok' },
+              { date: '2026-09-22', text: '登记期次 1 预付款 ¥96 万 · 合同转「履约中」', tone: 'ok' },
+              { date: '2026-09-22', text: '提交变更 BG000009 设计变更（增机房气体灭火）¥8 万 → 部门负责人', tone: 'gold' },
+              { date: '2026-09-14', text: '变更 BG000004 工程量签证生效 ¥3.2 万 · 执行金额联动更新', tone: 'ok' },
+            ]} />
+          </div>
+        )}
+      </Card>
+
+      {/* ============ 收款红冲 ============ */}
+      <Modal
+        open={!!rebutOpen} onClose={() => setRebuttal(null)} width={540} title={`收款红冲 · ${rebutOpen?.no ?? ''}`}
+        foot={<><Btn onClick={() => setRebuttal(null)}>取消</Btn><Btn danger onClick={() => { toast('已生成负数红冲单 · 原单只读「已红冲」· 合同状态不回退'); setRebuttal(null); }}>确认红冲</Btn></>}>
+        <Banner tone="danger">收款红冲：生成<b>负数红冲单</b>、原单只读「已红冲」、<b>一笔仅一次</b>、合同状态不回退。</Banner>
+        <div className="nc-form-grid">
+          <div className="nc-field nc-field-2"><div className="nc-field-label">原收款金额</div><input className="nc-input" value={rebutOpen ? fmt(rebutOpen.recv) : ''} readOnly /></div>
+          <div className="nc-field nc-field-2"><div className="nc-field-label is-req">红冲原因</div><textarea className="nc-input" rows={3} placeholder="例：客户重复付款，按实际退回冲正" /></div>
+        </div>
+      </Modal>
+
+      {/* ============ 付款校验明细 ============ */}
+      <Modal
+        open={!!payOpen} onClose={() => setPayOpen(null)} width={600} title={`付款校验明细 · ${payOpen?.id ?? ''}`}
+        foot={<><Btn onClick={() => setPayOpen(null)}>关闭</Btn><Btn onClick={() => { setSpecial(true); toast('已开启特批开关：请填写理由后将放行并留痕'); }}>特批放行</Btn></>}>
+        {payOpen && (
+          <>
+            <KvGrid cols={2} rows={[
+              { k: '付款单号', v: <Code>{payOpen.id}</Code> },
+              { k: '本次金额', v: fmt(payOpen.amt) },
+              { k: '执行金额', v: fmt(C.execAmt) },
+              { k: '比例上限', v: '100%' },
+              { k: '已付（含本次）', v: fmt(484000) },
+              { k: '校验结果', v: <Tag tone="green">✓ 通过（已付 + 本次 ≤ 执行金额 × 100%）</Tag> },
+            ]} />
+            {special && (
+              <Field label="特批理由" req note="超限放行须填理由并留痕（记录用户 / 时间 / 内容 / 原因）">
+                <textarea className="nc-input" rows={3} placeholder="例：供应商要求预付比例提高，经分管副总同意" />
+              </Field>
+            )}
+          </>
+        )}
+      </Modal>
+
+      {/* ============ 变更 / 签证 ============ */}
+      <Modal
+        open={changeOpen} onClose={() => setChangeOpen(false)} width={640} title="新增变更 / 签证"
+        foot={<><Btn onClick={() => setChangeOpen(false)}>取消</Btn><Btn kind="primary" onClick={() => { toast('变更单已提交 · 生效后执行金额与收款期次联动'); setChangeOpen(false); }}>提交变更</Btn></>}>
+        <div className="nc-form-grid">
+          <Field label="变更类型" req><select className="nc-input"><option>设计变更</option><option>工程量签证</option><option>工期变更</option><option>金额变更</option></select></Field>
+          <Field label="变更金额" req note="计入合同执行金额"><input className="nc-input" type="number" placeholder="元（可负）" /></Field>
+          <Field label="变更内容" req span={2}><input className="nc-input" placeholder="例：增机房气体灭火系统" /></Field>
+          <Field label="变更原因" req span={2}><textarea className="nc-input" rows={3} placeholder="记录用户 / 时间 / 内容 / 原因，不可覆盖删除" /></Field>
+          <Field label="甲方确认函" span={2} note="政府 / 部队项目建议上传书面确认"><input className="nc-input" type="file" /></Field>
+        </div>
+      </Modal>
+
+      {/* ============ 结算 ============ */}
+      <Modal
+        open={settleOpen} onClose={() => setSettleOpen(false)} width={620} title="合同结算"
+        foot={<><Btn onClick={() => setSettleOpen(false)}>取消</Btn><Btn kind="primary" onClick={() => { toast('已进入结算流程 · 合同转「结算中」'); setSettleOpen(false); }}>发起结算</Btn></>}>
+        <Banner tone="info">结算：核对执行金额、收款期次、成本归集、质保金留存，生成结算单。</Banner>
+        <KvGrid cols={2} rows={[
+          { k: '合同金额', v: fmt(C.amt) },
+          { k: '执行金额（含变更）', v: fmt(C.execAmt) },
+          { k: '已收', v: fmt(received) },
+          { k: '未收', v: fmt(C.execAmt - received) },
+          { k: '质保金留存', v: fmt(warranty) },
+          { k: '已发生成本', v: fmt(120000) },
+        ]} />
+        <Field label="结算说明" span={2}><textarea className="nc-input" rows={3} placeholder="结算依据与差异说明" /></Field>
+      </Modal>
+
+      {/* ============ 更多操作 ============ */}
+      <Modal open={actOpen} onClose={() => setActOpen(false)} width={480} title="更多操作" foot={<Btn onClick={() => setActOpen(false)}>关闭</Btn>}>
+        <div className="nc-oplist">
+          <button className="nc-oplist-item" onClick={() => { toast('已发起续签流程'); setActOpen(false); }}>续签<small>生成续签合同草稿</small></button>
+          <button className="nc-oplist-item" onClick={() => { setTermOpen(true); setActOpen(false); }}>终止<small>需填原因，走审批</small></button>
+          <button className="nc-oplist-item" onClick={() => { toast('已登记中止（可恢复）'); setActOpen(false); }}>中止<small>临时停工，可恢复</small></button>
+          <button className="nc-oplist-item" onClick={() => { toast('已登记解除（不可恢复）'); setActOpen(false); }}>解除<small>不可恢复</small></button>
+          <button className="nc-oplist-item is-danger" onClick={() => { toast('作废需管理员权限，已提交申请'); setActOpen(false); }}>作废<small>仅草稿可作废</small></button>
+        </div>
+      </Modal>
+
+      <Modal open={termOpen} onClose={() => setTermOpen(false)} width={520} title="终止合同" foot={<><Btn onClick={() => setTermOpen(false)}>取消</Btn><Btn danger onClick={() => { toast('合同已终止 · 未执行期次置为「终止」'); setTermOpen(false); }}>确认终止</Btn></>}>
+        <Banner tone="warn">终止后未执行期次置为「终止」，已收款不受影响；须填写终止原因并走审批。</Banner>
+        <Field label="终止原因" req><textarea className="nc-input" rows={3} /></Field>
+      </Modal>
+    </>
+  );
+}
