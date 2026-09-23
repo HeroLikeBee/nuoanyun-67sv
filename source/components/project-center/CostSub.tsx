@@ -3,9 +3,9 @@
 // 回答「钱花到哪里去了」：预算 → 科目 → 流水 → 现场投入，一笔钱从预算到发生可追。
 // 不重复概览页的绝对值口径：本页只承接科目分解、流水单据与人工/机械/材料明细。
 import React, { useState } from 'react';
-import { Btn, Card, Code, Drawer, IdCell, Tag, Tip } from '../ui';
+import { Btn, Card, Code, Drawer, IdCell, Op, Tag, Tip } from '../ui';
 import { Ico } from '../icons';
-import { TODAY } from '../data';
+import { BUDGET_SRC_LABEL, TODAY } from '../data';
 import { PjSection } from './PjSection';
 import type { PjCtx, PjCostRow } from './ctx';
 
@@ -94,8 +94,12 @@ export default function CostSub({ C }: { C: PjCtx }) {
 
   /** 资金穿透链：目标成本 → 预算科目 → 已发生流水 → 已付款 → 现金流 */
   const paidOut = C.payRows.filter((r) => r.kind !== '收入' && r.st === 'paid').reduce((s, r) => s + r.amt, 0);
+  /** 目标成本来源：立项录入（手工 / 从报价带入）或未录入时的估算口径，据实标注 */
+  const budgetNote = C.BUDGET_EST
+    ? '未录入立项预算 · 按执行额 72% 估算'
+    : `立项预算 · ${BUDGET_SRC_LABEL[C.BUDGET_SRC ?? 'manual']}`;
   const chain = [
-    { k: '目标成本', v: C.PLAN_SUM, n: '立项预算（可编辑留痕）' },
+    { k: '目标成本', v: C.PLAN_SUM, n: budgetNote },
     { k: '已发生成本', v: C.COST_SUM, n: `含审批中 · 占目标 ${C.COST_PROGRESS.toFixed(1)}%` },
     { k: '已付款', v: paidOut, n: '银行已付净额（红字按净额）' },
     { k: '净现金流', v: C.NET_IN, n: '已到账 − 已付出' },
@@ -310,8 +314,10 @@ export default function CostSub({ C }: { C: PjCtx }) {
           <div className="nc-card-bd">
             <div className="nc-ledhd">
               成本相关变更 <b>2</b>
-              <span className="nc-cell-sub">已生效变更进执行额；审批中变更暂计入成本、不计现金</span>
-              <Btn size="sm" kind="primary" onClick={() => C.openM('change')}>＋ 发起变更</Btn>
+              <span className="nc-cell-sub">变更是合同单据（须签补充协议）→ 本表只读它对目标成本的影响；发起请回到合同「变更与签证」</span>
+              <span style={{ marginLeft: 'auto' }}>
+                <Op onClick={() => C.gotoContractChange()}>到合同发起变更 →</Op>
+              </span>
             </div>
             <table className="nc-tbl" style={{ minWidth: 820 }}>
               <thead><tr>
@@ -338,7 +344,7 @@ export default function CostSub({ C }: { C: PjCtx }) {
             </table>
             <div className="nc-gate-block" style={{ background: 'var(--c-primary-bg)', borderColor: 'var(--c-primary-border)' }}>
               <Ico n="help" size={14} />
-              变更生效后同步体现到「目标成本科目」的对应行，执行额随之增加；未生效前只作过程记录，不参与结算。
+              变更由合同侧发起（合同详情「变更与签证」→ ＋ 新增变更）；生效后同步体现到「目标成本科目」的对应行，执行额随之增加；未生效前只作过程记录，不参与结算。
             </div>
           </div>
         )}

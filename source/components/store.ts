@@ -3,8 +3,8 @@
 // 设计：模块级可变数组 + 订阅广播；各台账页用 useState(getXxx) 播种并 useEffect 订阅，
 //      保证 A 页写入后 B 页挂载 / 已挂载都能拿到最新数据（不引入第三方状态库）。
 // 说明：BIDS / QUOTES / INVOICES 等在下方「实体关系图」处二次导入，此处不重复声明。
-import { APPROVALS, BIDS, CONTRACTS, CUSTOMERS, INVOICES, ITEMS, OPP_STAGE_TPL, OPPS, PROJECTS, QUOTES, SIGN_CHAINS, TODAY, normContractStatus } from './data';
-import type { Item, OppStageTpl, Quote, SignConfig } from './data';
+import { APPROVALS, BIDS, CERT_OCCUPANCY, CERT_OCCUPANCY_SEED, CONTRACTS, CUSTOMERS, INVOICES, ITEMS, OPP_STAGE_TPL, OPPS, PROJECTS, QUOTES, SIGN_CHAINS, TODAY, normContractStatus, verNo } from './data';
+import type { Item, OppStageTpl, Quote, QuoteVersion, SignConfig } from './data';
 
 type C = (typeof CONTRACTS)[number];
 type P = (typeof PROJECTS)[number];
@@ -103,6 +103,30 @@ export function saveQuoteLines(id: string, lines: Quote['lines']) {
   emit();
 }
 
+/**
+ * 落一条版本快照（按当前 ver 幂等 upsert）。
+ * 报价每次「提交审批 / 升版」都留痕，详情页的「版本记录」与「版本对比」据此做真实差异回放；
+ * 此前对比表是写死 BJ000011 的静态行，换一张报价单看到的还是同一份昆明万达差异。
+ * amt 取该版明细基价合计（不含区域上浮），与详情页「明细基价合计」口径一致。
+ */
+export function snapshotQuoteVersion(id: string, note: string, by = '当前用户') {
+  quotes = quotes.map((q) => {
+    if (q.id !== id) return q;
+    const lines = JSON.parse(JSON.stringify(q.lines ?? [])) as NonNullable<Quote['lines']>;
+    const snap: QuoteVersion = {
+      ver: q.ver,
+      amt: Math.round(lines.reduce((a, l) => a + l.qty * l.price, 0)),
+      uplift: q.uplift ?? 0,
+      at: TODAY, by, note: note.trim() || '内容调整',
+      lines,
+    };
+    /* 同版重复提交视为覆盖该版快照，不做版本堆叠 */
+    const rest = (q.versions ?? []).filter((v) => v.ver !== q.ver);
+    return { ...q, versions: [...rest, snap].sort((a, b) => verNo(a.ver) - verNo(b.ver)) } as Quote;
+  });
+  emit();
+}
+
 let bids: B[] = BIDS.slice();
 
 export const getBids = () => bids;
@@ -129,6 +153,39 @@ export const getSignConfig = (id: string): SignConfig | null => signCfgs[id] ?? 
 /** 合同局部回写（signStatus / status / terminateType 等） */
 export function patchContract(id: string, patch: Partial<C>) {
   contracts = contracts.map((k) => (k.id === id ? ({ ...k, ...patch } as C) : k));
+  emit();
+}
+
+/* ============================ 证书占用改归属（规格 §4.3 / §4.4 BID-04） ============================
+ * 规格要求：中标转项目时把占用记录的 subjectType 由「投标」改为「项目」——**改归属留痕，不重建**；
+ * 未中标 / 放弃时才释放（BidPage.doAbandon 已处理释放侧）。
+ * 实现说明：CERT_OCCUPANCY 是模块级记录数组（由 CERTS.used + OCC_BID 派生一次），
+ * occCount() / occOfProject() 等既有读取方直接读它。此处就地改写元素字段而不重建数组，
+ * 让全部读取方零改写即可看到新归属；resetStore() 用 CERT_OCCUPANCY_SEED 还原。
+ * ⚠️ 已知缺口：新建投标时不生成占用记录（Bid 只有 certGot 计数、没有占用记录 id 列表），
+ *    故只有种子里的投标占用能被改归属；补全需给 Bid 增加 certList 并在做标书阶段写记录。
+ * ============================================================================================== */
+export function reassignCertsToProject(bidId: string, projectId: string, projectName: string): number {
+  let n = 0;
+  CERT_OCCUPANCY.forEach((o) => {
+    if (o.subjectType === '投标' && o.subjectId === bidId && o.status === '占用中') {
+      o.subjectType = '项目';
+      o.subjectId = projectId;
+      o.subjectName = projectName;
+      n += 1;
+    }
+  });
+  if (n) emit();
+  return n;
+}
+
+/**
+ * 项目局部回写。用途：补签合同后回写合同额并解除「无合同施工」标记 ——
+ * 规格 §6.1 定义 contractAmt = 关联销售合同汇总，无合同时为 0；挂接合同后必须同步，
+ * 否则项目中心的合同额、回款比例分母、亏损判定都停在立项时的空值上。
+ */
+export function patchProject(id: string, patch: Partial<P>) {
+  projects = projects.map((p) => (p.id === id ? ({ ...p, ...patch } as P) : p));
   emit();
 }
 
@@ -509,8 +566,25 @@ export function pushApproval(a: A) {
   emit();
 }
 
-/** 中标 → 转合同的待办交接：把中标标的暂存在 store，合同新建页读取预填 */
-let pendingContract: { bidId: string; customer: string; name: string; amt: number } | null = null;
+/**
+ * 审批单号：前缀 SP + 6 位流水（全局单号规范 · 唯一事实源）。
+ * 旧的「SP-年-月日-序号」日期制已作废；取现有最大流水 +1，
+ * 保证 resetStore 后不会与种子单号碰撞。
+ */
+export function nextApprovalNo(): string {
+  const max = approvals
+    .map((a) => /^SP(\d{6})$/.exec(a.id))
+    .reduce((mx, m) => (m ? Math.max(mx, Number(m[1])) : mx), 0);
+  return `SP${String(max + 1).padStart(6, '0')}`;
+}
+
+/* ============================ 转合同待办交接（双来源） ============================
+ * 两个来源共用一个通道，合同新建页按「有 bidId 则投标中标，有 oppId 则商机直签」判定来源标记：
+ *   投标中标 —— 投标详情「中标 → 生成合同」；
+ *   商机直签 —— 商机详情「转合同」（赢单后不经过报价 / 投标直接落合同草稿）。
+ * 合同新建页读后立即置 null，避免下次独立进入也误预填。
+ * ============================================================================== */
+let pendingContract: { bidId?: string; oppId?: string; customer: string; name: string; amt: number } | null = null;
 export const getPendingContract = () => pendingContract;
 export function setPendingContract(v: typeof pendingContract) {
   pendingContract = v;
@@ -535,6 +609,43 @@ export function consumePendingQuote() {
   return v;
 }
 
+/* ============================ 投标入口：商机 → 发起投标 ============================
+ * 场景：商机详情「关联投标」区点「＋ 发起投标」→ 跳投标管理并打开发起向导，
+ * 带上商机要素（名称 / 客户 / 预计金额 / opp 外键），使中标结果能回写商机漏斗。
+ * 修复前商机侧只提示「请前往投标管理新建投标」，用户需手抄一遍要素，且新单不带 opp 外键，
+ * 商机「关联投标」永远为空 —— 闭环断在最后一跳。
+ * 消费式读取：投标页读后立即清除，避免下次独立进入也误预填。
+ * ================================================================================ */
+let pendingBid: { oppId?: string; quoteId?: string; name?: string; customer?: string; amt?: number } | null = null;
+export const getPendingBid = () => pendingBid;
+export function setPendingBid(v: typeof pendingBid) {
+  pendingBid = v;
+  emit();
+}
+export function consumePendingBid() {
+  const v = pendingBid;
+  pendingBid = null;
+  return v;
+}
+
+/* ============================ 商机 → 转报价 ============================
+ * 场景：商机详情「转报价」→ 跳报价工作台并新建草稿，带上商机外键与客户 / 预计金额。
+ * 修复前该入口只 toast + go('quote-edit')，不带商机号，报价工作台的「关联商机」回落写死的 SJ000470，
+ * 导致任意商机转出来的报价都挂到同一个商机下，「商机 → 报价」这条边名存实亡。
+ * 消费式读取：报价工作台读后立即清除，避免下次新建报价也误预填。
+ * ==================================================================== */
+let pendingOppQuote: { oppId: string; name: string; customer: string; amt: number } | null = null;
+export const getPendingOppQuote = () => pendingOppQuote;
+export function setPendingOppQuote(v: typeof pendingOppQuote) {
+  pendingOppQuote = v;
+  emit();
+}
+export function consumePendingOppQuote() {
+  const v = pendingOppQuote;
+  pendingOppQuote = null;
+  return v;
+}
+
 /* ============================ 合同续签 ============================
  * 场景：合同台账 / 详情点「续签」→ 跳合同新建页，带上源合同。
  * 新建页据此预填（按源合同要素生成续签草稿）并在提交时落 parentId，
@@ -553,12 +664,20 @@ export function consumePendingRenew() {
   return v;
 }
 
-/* ============================ 立项入口 A：合同 → 创建项目 ============================
- * 场景：合同详情点「创建项目」→ 跳立项页，并带上来源合同。
- * 立项页据此切换为「入口 A」形态：预填合同要素 + 生成合同交底卡（确认阅读 = 交底留痕）。
+/* ============================ 立项待办交接（三来源） ============================
+ *   合同交底 —— 合同详情「创建项目」，立项页切「入口 A」形态：预填合同要素 + 合同交底卡；
+ *   投标中标 —— 投标详情「补建项目」，带投标要素并落 bidId，来源=投标中标；
+ *   商机直签 —— 商机详情「转项目」，应急抢修场景：无合同先干，落 oppId + noContract + 补签期限。
+ * 三者互斥（同时只会有一个），立项页按命中的外键决定来源与闸口形态。
  * 消费式读取：立项页读后立即清除，避免下次从列表进入也误判为入口 A。
- * ========================================================================== */
-let pendingProject: { contractId: string } | null = null;
+ * ============================================================================== */
+let pendingProject: {
+  contractId?: string; bidId?: string; oppId?: string;
+  /** 无合同立项（应急工程）时由商机 / 投标带入的要素，用于预填立项表单 */
+  name?: string; customer?: string; amt?: number;
+  /** 无合同先施工原因（应急工程必填，写入立项留痕供复盘审计） */
+  noContractReason?: string;
+} | null = null;
 export const getPendingProject = () => pendingProject;
 export function setPendingProject(v: typeof pendingProject) {
   pendingProject = v;
@@ -627,23 +746,28 @@ export function consumeFocusTab(page: string) {
 
 /** 演示重置（便于反复演示原型） */
 export function resetStore() {
-  contracts = CONTRACTS.slice();
+  /* 深拷贝：contracts / projects / quotes / bids 均含嵌套数组（installments / logs / lines / workItems），
+     浅拷贝会让切片元素与 data.ts 常量共享引用，就地改一次就污染了种子数据。 */
+  contracts = JSON.parse(JSON.stringify(CONTRACTS));
   signCfgs = JSON.parse(JSON.stringify(SIGN_CHAINS));
-  projects = PROJECTS.slice();
+  projects = JSON.parse(JSON.stringify(PROJECTS));
   approvals = APPROVALS.slice();
   opps = OPPS.slice();
   oppStages = OPP_STAGE_TPL.map((s) => ({ ...s }));
-  /* 深拷贝：quotes / bids / items 含嵌套数组（lines / workItems 等），浅拷贝会与常量共享引用 */
   quotes = JSON.parse(JSON.stringify(QUOTES));
   bids = JSON.parse(JSON.stringify(BIDS));
   items = ITEMS.map((i) => ({ ...i }));
+  /* 证书占用改归属是就地改写，按种子快照还原（保持数组引用不变，读取方零改写） */
+  CERT_OCCUPANCY.splice(0, CERT_OCCUPANCY.length, ...CERT_OCCUPANCY_SEED.map((o) => ({ ...o })));
   oppLogs = {};
   oppClose = {};
   bizStatus = {};
   pendingContract = null;
   pendingQuote = null;
+  pendingOppQuote = null;
   pendingRenew = null;
   pendingProject = null;
+  pendingBid = null;
   focus = {};
   focusTab = {};
   emit();

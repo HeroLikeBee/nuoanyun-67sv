@@ -90,8 +90,8 @@ const GUIDE_STEPS = [
 /* ============================ 底部快捷操作（随角色变化） ============================ */
 type Quick = [string, string, number];
 const QUICK: Record<string, Quick[]> = {
-  boss: [[' 去审批', 'primary', 3], [' 催收期次3', '', 3], [' 项目经营中心', '', 0], [' 待批配置', '', 0], [' 资金核心', 'finance', 0], [' 采购成本', 'purchase', 0]],
-  deputy: [[' 去审批', 'primary', 2], [' 项目经营中心', '', 0], [' 团队客户', '', 0], [' 团队漏斗', '', 0]],
+  boss: [[' 去审批', 'primary', 3], [' 催收期次3', '', 3], [' 项目详情', '', 0], [' 待批配置', '', 0], [' 资金核心', 'finance', 0], [' 采购成本', 'purchase', 0]],
+  deputy: [[' 去审批', 'primary', 2], [' 项目详情', '', 0], [' 团队客户', '', 0], [' 团队漏斗', '', 0]],
   sales: [[' 新建客户', 'primary', 0], [' 客户跟进', '', 2], [' 新建商机', '', 0], [' 生成报价', '', 1], [' 去投标看板', '', 0]],
   pm: [[' 现场报工', 'primary', 0], [' 上传照片', '', 0], [' 发起验收', '', 1], [' 整改反馈', '', 1]],
   finance: [[' 登记收款-期次3', 'primary', 1], [' 付款审批', '', 1], [' 红字冲销', '', 0], [' 归并提醒', '', 1], [' 成本台账', '', 0]],
@@ -433,12 +433,12 @@ export default function DashboardPage({ go, role, nav }: { go: (p: string) => vo
     return (
       <div className="nc-inline-ops" style={{ marginTop: 8 }}>
         <span className="nc-cell-sub">
-          <Ico n="warning" size={14} style={{ color: 'var(--c-warning-mid)' }} /> 最差项目 <EntityLink target="project-center" id={worst.id} go={go} title="下钻到项目经营中心">{worst.name} ↗</EntityLink>
+          <Ico n="warning" size={14} style={{ color: 'var(--c-warning-mid)' }} /> 最差项目 <EntityLink target="project-center" id={worst.id} go={go} title="下钻到项目详情">{worst.name} ↗</EntityLink>
           {' '}· 毛利率 <b className="num nc-v-red">{worst.profit}%</b>
           {' '}· 合同 {money ? fmtWan(worst.contractAmt) : '—'} / 成本 {money ? fmtWan(worst.cost) : '—'}
         </span>
         <span className="nc-cell-sub" style={{ marginLeft: 'auto' }}>
-          <Ico n="trophy" size={14} style={{ color: 'var(--c-warning-mid)' }} /> 最优项目 <EntityLink target="project-center" id={best.id} go={go} title="下钻到项目经营中心">{best.name} ↗</EntityLink>
+          <Ico n="trophy" size={14} style={{ color: 'var(--c-warning-mid)' }} /> 最优项目 <EntityLink target="project-center" id={best.id} go={go} title="下钻到项目详情">{best.name} ↗</EntityLink>
           {' '}· 毛利率 <b className="num nc-v-green">{best.profit}%</b>
         </span>
       </div>
@@ -607,7 +607,7 @@ export default function DashboardPage({ go, role, nav }: { go: (p: string) => vo
           {myProjects.map((p) => (
             <tr key={p.id}>
               <td>
-                <EntityLink target="project-center" id={p.id} go={go} title="下钻到项目经营中心">{p.id} {p.name}</EntityLink>
+                <EntityLink target="project-center" id={p.id} go={go} title="下钻到项目详情">{p.id} {p.name}</EntityLink>
                 <div className="nc-cell-sub">{(() => { const cid = (p as { customerId?: string }).customerId || CUSTOMERS.find((x) => x.name === p.customer)?.id; return cid ? <EntityLink target="customer" id={cid} go={go} title="下钻到客户档案">{p.customer}</EntityLink> : p.customer; })()}{p.risk && p.risk !== 'none' ? ` · ${p.risk === 'overcost' ? '成本超支' : p.risk === 'nocontract' ? '无合同在途' : '收款逾期'}` : ''}</div>
               </td>
               <td><Tag tone={p.milestone >= 100 ? 'green' : p.milestone >= 60 ? 'blue' : 'orange'}>{p.milestoneName}</Tag></td>
@@ -837,7 +837,7 @@ export default function DashboardPage({ go, role, nav }: { go: (p: string) => vo
           <div className="nc-dash-2">
             {blockAlert([
               { tone: 'orange', title: '2 个成员客户 > 30 天未跟进', sub: `${clientsToFollow.slice(0, 2).map((c) => `${c.name.slice(0, 6)} ${c.lastFollowDays}天`).join(' · ') || '广西×× 42 天 · 人民医院 35 天'}`, act: '查看名单', page: 'customer' },
-              { tone: 'orange', title: `${overCostCnt} 个项目成本率超 ${COST_REDLINE * 100}% 红线`, sub: topCostPj ? `${topCostPj.id} · 实际 ${money ? fmtWan(topCostPj.cost) : '—'} / 执行 ${money ? fmtWan(topCostPj.execAmt) : '—'} · 成本率 ${((topCostPj.cost / topCostPj.execAmt) * 100).toFixed(1)}%` : '当前无项目超成本红线', act: '项目经营中心', page: 'project-center' },
+              { tone: 'orange', title: `${overCostCnt} 个项目成本率超 ${COST_REDLINE * 100}% 红线`, sub: topCostPj ? `${topCostPj.id} · 实际 ${money ? fmtWan(topCostPj.cost) : '—'} / 执行 ${money ? fmtWan(topCostPj.execAmt) : '—'} · 成本率 ${((topCostPj.cost / topCostPj.execAmt) * 100).toFixed(1)}%` : '当前无项目超成本红线', act: '项目详情', page: 'project-center' },
               { tone: 'gray', title: '团队证书 60 天内到期 1 本', sub: `${CERTS.find((c) => c.warnDays > 30 && c.warnDays <= 60)?.name ?? '施工资质'} · 投标引用受影响`, act: '去看证书', page: 'cert' },
             ], ' 团队经营提醒')}
             {blockApproval(approvalTabs.slice(0, 2), 2)}

@@ -23,6 +23,12 @@ export type PjCtx = {
   pj: (sub: string) => void;
   /** 打开本页内的弹窗：key 由 ProjectCenterPage 的 MODAL 注册表解析 */
   openM: (k: string) => void;
+  /**
+   * 变更 / 签证转为变更单 —— 一律回落到合同侧（合同详情「变更与签证」Tab）。
+   * 变更是要签补充协议的合同单据，项目只是执行主体、消费结果，不在项目侧发起。
+   * 不传 contractId 时落到本项目第一份收款类合同。
+   */
+  gotoContractChange: (contractId?: string) => void;
   toast: (msg: string, tone?: 'ok' | 'err') => void;
   /** 全局「操作记录」抽屉 */
   openLog: () => void;
@@ -46,6 +52,10 @@ export type PjCtx = {
   WARRANTY: number;
   /** 目标成本（立项预算） */
   TARGET_COST: number;
+  /** 目标成本为「未录入 · 按执行额估算」而非立项实录 */
+  BUDGET_EST: boolean;
+  /** 目标成本来源：手工编制 / 从关联报价成本明细带入（未录入时为空） */
+  BUDGET_SRC?: 'manual' | 'quote';
   /** 实际成本（已发生） */
   COST_SUM: number;
   /** 目标成本合计（预算科目缩放后） */

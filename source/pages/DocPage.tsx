@@ -360,7 +360,7 @@ export default function DocPage({ go, role, nav }: { go: (p: string) => void; ro
           <div className="nc-cell-main">
             <div>
               {d.proj
-                ? <EntityLink target="project-center" id={d.proj} go={go} title="下钻到项目经营中心">{projOf(d.proj)?.name ?? d.proj}</EntityLink>
+                ? <EntityLink target="project-center" id={d.proj} go={go} title="下钻到项目详情">{projOf(d.proj)?.name ?? d.proj}</EntityLink>
                 : <span className="nc-cell-sub">公司级</span>}
               {!!ind && <Tag tone="gray">{ind}</Tag>}
               {amt > 0 && <span className="nc-cell-sub num"><Money v={amt} role={role} wan /></span>}
@@ -425,7 +425,7 @@ export default function DocPage({ go, role, nav }: { go: (p: string) => void; ro
             { k: '当前版本', v: <span className="num">{detail.ver}</span> },
             { k: '一级分类', v: <Tag tone={CAT_TONE[detail.cat] || 'gray'}>{detail.cat}</Tag> },
             { k: '二级类型', v: <Tag tone={SUB_TONE[detail.type] || 'gray'}>{detail.type}</Tag> },
-            { k: '归属项目', v: detail.proj ? <EntityLink target="project-center" id={detail.proj} go={go} title="下钻到项目经营中心">{projOf(detail.proj)?.name ?? detail.proj}</EntityLink> : '公司级（无项目归属）' },
+            { k: '归属项目', v: detail.proj ? <EntityLink target="project-center" id={detail.proj} go={go} title="下钻到项目详情">{projOf(detail.proj)?.name ?? detail.proj}</EntityLink> : '公司级（无项目归属）' },
             { k: '所属行业', v: industryOf(detail.proj) ? <Tag tone="gray">{industryOf(detail.proj)}</Tag> : '—' },
             { k: '项目类型', v: ptypeOf(detail.proj) || '—' },
             { k: '项目合同额', v: amtOf(detail.proj) > 0 ? <Money v={amtOf(detail.proj)} role={role} wan /> : '—' },
@@ -442,7 +442,7 @@ export default function DocPage({ go, role, nav }: { go: (p: string) => void; ro
           <div className="nc-sec-title">摘要</div>
           <div className="nc-warnbox is-info">{detail.summary}</div>
           <div className="nc-sec-title">同源链接</div>
-          <div className="nc-warnbox">与<b>项目经营中心 → 项目档案</b>、<b>合同详情 → 附件分类</b>双向同源：任一入口上传 / 删除均实时同步。</div>
+          <div className="nc-warnbox">与<b>项目详情 → 项目档案</b>、<b>合同详情 → 附件分类</b>双向同源：任一入口上传 / 删除均实时同步。</div>
         </>
       )}
       {dTab === 'ver' && (
@@ -476,7 +476,7 @@ export default function DocPage({ go, role, nav }: { go: (p: string) => void; ro
             <tbody>
               <tr>
                 <td>项目</td>
-                <td>{detail.proj ? <EntityLink target="project-center" id={detail.proj} go={go} title="下钻到项目经营中心">{projOf(detail.proj)?.name ?? detail.proj} <span className="nc-cell-sub">{detail.proj}</span></EntityLink> : <span className="nc-cell-sub">公司级文档，无项目归属</span>}</td>
+                <td>{detail.proj ? <EntityLink target="project-center" id={detail.proj} go={go} title="下钻到项目详情">{projOf(detail.proj)?.name ?? detail.proj} <span className="nc-cell-sub">{detail.proj}</span></EntityLink> : <span className="nc-cell-sub">公司级文档，无项目归属</span>}</td>
                 <td>{detail.proj && <Op onClick={() => { setDetail(null); setFocus('project-center', detail.proj!); go('project-center'); }}>打开</Op>}</td>
               </tr>
               <tr>
@@ -849,7 +849,7 @@ export default function DocPage({ go, role, nav }: { go: (p: string) => void; ro
         </div>
         {!!missList.length && <div className="nc-warnbox is-red"><div className="nc-warnbox-hd"><Ico n="ban" size={16} /> 校验未通过：缺少 {missList.join('、')}</div>请先补齐缺失的清单资料，或联系资料管理员。</div>}
         <div className="nc-sec-title">已自动归集（同源）</div>
-        <div className="nc-warnbox is-green"><Ico n="check" size={16} /> 上传后将自动出现在「项目经营中心 → 项目档案」与「合同详情 → 附件分类」，无需重复上传。</div>
+        <div className="nc-warnbox is-green"><Ico n="check" size={16} /> 上传后将自动出现在「项目详情 → 项目档案」与「合同详情 → 附件分类」，无需重复上传。</div>
       </Drawer>
 
       {/* ============ 上传新版本 ============ */}

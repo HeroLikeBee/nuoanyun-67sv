@@ -19,7 +19,7 @@ import {
   PROJECT_STATUS_TONE, PROJECT_TERMINAL, PROJ_TYPES, TODAY, canSeeMoney, fmt, fmtAmt, fmtPct,
   isServiceProject, normProjectStatus, riskOf,
 } from '../components/data';
-import { getProjects, setFocus, subscribeStore } from '../components/store';
+import { getContracts, getProjects, setFocus, subscribeStore } from '../components/store';
 import { Ico } from '../components/icons';
 
 /* 排序规则显式化（不用无标识的升降箭头） */
@@ -58,10 +58,15 @@ const buildRows = (list: ReturnType<typeof getProjects>): Row[] => list.map((p) 
   };
 });
 
-/** 上游合同：按 contractId / 项目外键反查真实单据号 */
+/**
+ * 上游合同：按项目外键反查真实单据号。
+ * 统一读 store（`getContracts()` / `getProjects()`）—— 修复前一处读 data.ts 的 `CONTRACTS` 常量、
+ * 一处读 store，本次会话新建的合同取不到，项目行「查看合同」会漏。
+ */
 const contractOf = (pid: string) =>
-  CONTRACTS.find((c) => c.project === pid)?.id
-  ?? ((getProjects().find((p) => p.id === pid) as { contractId?: string } | undefined)?.contractId || null);
+  getContracts().find((c) => c.project === pid)?.id
+  ?? getProjects().find((p) => p.id === pid)?.contractId
+  ?? null;
 
 export default function ProjectPage({ go, role, nav }: { go: (p: string) => void; role: string; nav?: number }) {
   const toast = useToast();
@@ -126,13 +131,13 @@ export default function ProjectPage({ go, role, nav }: { go: (p: string) => void
     setSortKey('updated'); setPage(1); toast('已重置筛选条件');
   };
 
-  /** 查看：进入项目经营中心 */
+  /** 查看：进入项目详情 */
   const openProject = (r: Row) => { setFocus('project-center', r.id); go('project-center'); };
 
   const cols = [
     {
       key: 'id', title: '编号', width: 132, sticky: 'left' as const,
-      render: (r: Row) => <IdCell onClick={() => openProject(r)} title="打开项目经营中心">{r.id}</IdCell>,
+      render: (r: Row) => <IdCell onClick={() => openProject(r)} title="打开项目详情">{r.id}</IdCell>,
     },
     {
       key: 'name', title: '项目名 · 客户', width: 214,
@@ -242,7 +247,7 @@ export default function ProjectPage({ go, role, nav }: { go: (p: string) => void
         ];
         return (
           <div className="nc-ops" onClick={(e) => e.stopPropagation()}>
-            <Op onClick={() => openProject(r)} title="打开项目经营中心">查看</Op>
+            <Op onClick={() => openProject(r)} title="打开项目详情">查看</Op>
             <OpMore items={more} />
           </div>
         );
@@ -347,7 +352,7 @@ export default function ProjectPage({ go, role, nav }: { go: (p: string) => void
         <TableFoot
           unit="个项目" total={ALL.length} filtered={rows.length} page={page} pageSize={pageSize}
           onPage={setPage} onPageSize={(n) => { setPageSize(n); setPage(1); }}
-          extra={<span className="nc-cell-sub"> ｜ 行点击进入项目经营中心 ｜ 来源：{PROJECT_SOURCES.join(' / ')}</span>}
+          extra={<span className="nc-cell-sub"> ｜ 行点击进入项目详情 ｜ 来源：{PROJECT_SOURCES.join(' / ')}</span>}
         />
       </Card>
 
@@ -359,7 +364,7 @@ export default function ProjectPage({ go, role, nav }: { go: (p: string) => void
       >
         {edit && (<>
           <div className="nc-ledhd">基础信息
-            <Tip w={330} text="编号与来源为系统生成，不可修改；状态、金额、成本等运行数据只在项目经营中心只读展示。" />
+            <Tip w={330} text="编号与来源为系统生成，不可修改；状态、金额、成本等运行数据只在项目详情只读展示。" />
           </div>
           <div className="nc-form-grid">
             <Field label="项目编号"><input className="nc-input" readOnly value={edit.id} /></Field>

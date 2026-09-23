@@ -11,9 +11,9 @@ import {
 import type { OpMoreItem } from '../components/ui';
 import {
   BIDS, BID_STAGES, BID_TERMINAL, BID_RESULT_TYPES, BID_ABANDON_REASONS, isBidClosed,
-  CERTS, fmt, fmtWan, TODAY, approveLevel,
+  CERTS, CUSTOMERS, DEPT_STAFF, OPPS, can, fmt, fmtWan, TODAY, approveLevel,
 } from '../components/data';
-import { consumeFocus, setFocus, setPendingContract } from '../components/store';
+import { addBid, consumeFocus, consumePendingBid, getBids, getQuotes, patchBid as storePatchBid, setFocus, setPendingContract, setPendingProject, subscribeStore } from '../components/store';
 import { Ico } from '../components/icons';
 
 const ST_TONE: Record<string, 'gray' | 'blue' | 'green' | 'red' | 'gold' | 'orange'> = {
@@ -119,6 +119,8 @@ export default function BidPage({ go, role, nav }: { go: (p: string) => void; ro
 
   const [wizOpen, setWizOpen] = useState(false);
   const [wizStep, setWizStep] = useState(0);
+  /** 非空 = 编辑模式：向导字段由该单回填，提交走局部回写而非新建（M7 编辑复用向导） */
+  const [wizEdit, setWizEdit] = useState<B | null>(null);
   const [riskOpen, setRiskOpen] = useState(false);
   const [riskAck, setRiskAck] = useState(false);
   const [resultOpen, setResultOpen] = useState<B | null>(null);
@@ -137,6 +139,23 @@ export default function BidPage({ go, role, nav }: { go: (p: string) => void; ro
   const [wAmt, setWAmt] = useState(860000);
   const [wOpen, setWOpen] = useState('2026-09-25');
   const [wCertLines, setWCertLines] = useState<CertLine[]>([{ t: 'ZZ', q: 1 }, { t: 'AQ', q: 1 }, { t: 'ZJ', q: 1 }, { t: 'DG', q: 2 }]);
+  /* 向导其余字段受控化：原为 defaultValue / 硬编码 option，无论怎么填都提交同一张单 */
+  const [wName, setWName] = useState('');
+  const [wCustomer, setWCustomer] = useState('');
+  const [wOpp, setWOpp] = useState('');
+  /** 来源报价单（规格 §4.4「投标单可从报价单一键生成」，带金额与明细） */
+  const [wQuote, setWQuote] = useState('');
+  const [wOwner, setWOwner] = useState('蓝峰');
+  const [wPm, setWPm] = useState('');
+  const [wDepOn, setWDepOn] = useState('涉及');
+  const [wDepAmt, setWDepAmt] = useState(50000);
+  const [wDepMethod, setWDepMethod] = useState('银行转账');
+  const [wDepPay, setWDepPay] = useState('');
+  const [wDepBack, setWDepBack] = useState('');
+  /** 向导内「已知悉废标风险」勾选：仅当证书预检存在硬缺口时要求勾选 */
+  const [wizRiskAck, setWizRiskAck] = useState(false);
+  /** 单据级写权限（M10）：以菜单「角色 × 模块」矩阵为准 */
+  const canWrite = can(role, 'bid');
   // 保证金：登记弹窗 / 台账
   const [depOpen, setDepOpen] = useState<B | null>(null);
   const [depMethod, setDepMethod] = useState('银行转账');
@@ -162,8 +181,10 @@ export default function BidPage({ go, role, nav }: { go: (p: string) => void; ro
   };
 
   /* G1：原 rows 派生自模块常量 BIDS，推进阶段 / 登记结果 / 保证金登记只 toast 不改数据，
-     看板阶段列与统计永远不动。改为可写 state。 */
-  const [bids, setBids] = useState(BIDS);
+     看板阶段列与统计永远不动。现改为读写共享 store —— 商机页「关联投标」、驾驶舱投标漏斗
+     与客户 360 都能看到本次会话新建 / 推进的投标单（此前只在本页 state 里自娱自乐）。 */
+  const [bids, setBids] = useState<B[]>(() => getBids());
+  useEffect(() => subscribeStore(() => setBids([...getBids()])), []);
 
   /**
    * 跨页穿透：从商机 / 客户等页面下钻进来时，自动打开目标投标详情。
@@ -172,16 +193,113 @@ export default function BidPage({ go, role, nav }: { go: (p: string) => void; ro
   useEffect(() => {
     const id = consumeFocus('bid');
     if (!id) return;
-    const hit = BIDS.find((b) => b.id === id);
+    const hit = getBids().find((b) => b.id === id);
     if (hit) { setDetail(hit as B); setTab('overview'); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nav]);
-  /** 投标单据回写 */
+  /** 投标单据回写：写共享 store（订阅回调会同步刷新本页 bids 与看板） */
   const patchBid = (id: string, patch: Partial<B>, msg: string) => {
-    setBids((bs) => bs.map((x) => (x.id === id ? ({ ...x, ...patch } as B) : x)));
+    storePatchBid(id, patch);
     setDetail((d) => (d && d.id === id ? ({ ...d, ...patch } as B) : d));
     toast(msg);
   };
+
+  /** 投标编号：TB + 6 位流水（与其它单据编号口径一致） */
+  const nextBidNo = () => {
+    const max = getBids()
+      .filter((b) => /^TB\d{6}$/.test(b.id))
+      .map((b) => Number(b.id.slice(2)))
+      .reduce((a, b) => Math.max(a, b), 0);
+    return `TB${String(max + 1).padStart(6, '0')}`;
+  };
+
+  /**
+   * 打开发起 / 编辑向导。传参 = 编辑模式（字段按该单回填，提交走局部回写，不动阶段与保证金流转），
+   * 不传参 = 新建（提交后落 store，商机页「关联投标」与驾驶舱漏斗即时可见）。
+   */
+  const openWizard = (b?: B) => {
+    setWizEdit(b ?? null);
+    setWizStep(0);
+    setWizRiskAck(false);
+    setWName(b?.name ?? '');
+    setWCustomer(b?.customer ?? '');
+    setWOpp(b?.opp ?? '');
+    setWQuote(b?.quoteId ?? '');
+    setWAmt(b?.amt ?? 860000);
+    setWTax('in9');
+    setWOwner(b?.owner ?? '蓝峰');
+    setWPm(b?.projMgr ?? '');
+    setWOpen(b?.openDate ?? TODAY);
+    setWDepOn(b && b.deposit <= 0 ? '不涉及' : '涉及');
+    setWDepAmt(b?.deposit ?? 50000);
+    setWDepMethod('银行转账');
+    setWDepPay(''); setWDepBack('');
+    setWCertLines(b ? [{ t: 'ZZ', q: b.certNeed }] : [{ t: 'ZZ', q: 1 }, { t: 'AQ', q: 1 }, { t: 'ZJ', q: 1 }, { t: 'DG', q: 2 }]);
+    setWizOpen(true);
+  };
+
+  /* 来源报价单：选中后带出客户 / 商机 / 报价金额，落库时记 quoteId 外键。
+     修复前投标向导没有这个选择器，addBid 从不写 quoteId —— 规格 §4.4 / §12 的
+     「报价 → 投标 → 中标 → 合同」双向链路断在报价到投标这一跳，
+     种子里的报价外键只被「报价作废阻断」单向读取。 */
+  const srcQuote = getQuotes().find((q) => q.id === wQuote);
+  /** 投标报价与来源报价的差额：投标常需压价，差额在合同变更台账里体现 */
+  const quoteDiff = srcQuote ? wAmt - srcQuote.total : 0;
+  const pickQuote = (qid: string) => {
+    setWQuote(qid);
+    const q = getQuotes().find((x) => x.id === qid);
+    if (!q) return;
+    setWCustomer(q.customer);
+    if (q.opp) setWOpp(q.opp);
+    setWAmt(q.total);
+    toast(`已带入报价单 ${q.id}：客户 ${q.customer} · 金额 ${fmt(q.total)} · 明细 ${q.lines?.length ?? 0} 行`);
+  };
+
+  /** 提交向导：新建 → addBid（报名阶段）；编辑 → 只回写基础信息与证书配额 */
+  const submitWizard = () => {
+    if (!wName.trim()) { toast('项目名称必填', 'err'); return; }
+    if (!(wAmt > 0)) { toast('预估金额必须大于 0', 'err'); return; }
+    if (!wOpen) { toast('开标时间必填', 'err'); return; }
+    if (wOpen < TODAY) { toast('开标时间不能早于今天', 'err'); return; }
+    const typed = wCertLines.filter((l) => l.t);
+    const certNeed = typed.reduce((a, l) => a + l.q, 0);
+    const certGot = typed.filter((l) => precheck(l, wOpen).lv === 'ok').reduce((a, l) => a + l.q, 0);
+    const bads = typed.filter((l) => precheck(l, wOpen).lv === 'bad').length;
+    if (bads > 0 && !wizRiskAck) { toast(`含 ${bads} 项证书硬缺口，请勾选「已知悉废标风险」后再提交`, 'err'); return; }
+    const risk = bads > 0 ? `证书缺口 ${certNeed - certGot} 本` : '';
+    const deposit = wDepOn === '涉及' ? wDepAmt : 0;
+    const custId = CUSTOMERS.find((c) => c.name === wCustomer)?.id;
+    if (wizEdit) {
+      patchBid(wizEdit.id, {
+        name: wName.trim(), customer: wCustomer, customerId: custId,
+        opp: wOpp || undefined, quoteId: wQuote || undefined, amt: wAmt, openDate: wOpen, owner: wOwner, projMgr: wPm,
+        deposit, certNeed, certGot, risk,
+      }, `${wizEdit.id} 已更新（阶段与保证金流转不受影响）`);
+    } else {
+      const no = nextBidNo();
+      addBid({
+        id: no, name: wName.trim(), customer: wCustomer, customerId: custId,
+        stage: '报名', amt: wAmt, deposit, depositSt: '未交', openDate: wOpen,
+        owner: wOwner, certNeed, certGot, projMgr: wPm, pmB: '有效', pmBusy: false,
+        risk, opp: wOpp || undefined, quoteId: wQuote || undefined,
+      });
+      toast(`投标单 ${no} 已创建（报名阶段）· 证书预检通过 ${certGot}/${certNeed}${deposit ? ` · 保证金 ${fmt(deposit)} 待缴纳` : ''}`);
+    }
+    setWizOpen(false); setWizEdit(null);
+  };
+
+  /* 商机 → 发起投标：消费式读取带过来的商机要素并直接打开发起向导（带 opp 外键） */
+  useEffect(() => {
+    const p = consumePendingBid();
+    if (!p) return;
+    openWizard();
+    if (p.name) setWName(p.name);
+    if (p.customer) setWCustomer(p.customer);
+    if (p.amt) setWAmt(p.amt);
+    if (p.oppId) setWOpp(p.oppId);
+    if (p.quoteId) pickQuote(p.quoteId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nav]);
 
   /**
    * 放弃投标（规格 BID-05）：任意非终态阶段可放弃 → 终态，原因必填。
@@ -271,18 +389,21 @@ export default function BidPage({ go, role, nav }: { go: (p: string) => void; ro
       key: 'op', title: '操作', width: 200, align: 'right' as const,
       render: (b: B) => {
         const flow: OpMoreItem[] = [];
-        if (!isBidClosed(b)) flow.push({ label: b.stage === '开标' ? '登记开标结果' : `推进阶段（${b.stage} → 下一步）`, onClick: () => advance(b) });
-        if (b.depositSt === '未交' || b.depositSt === '未退') flow.push({ label: b.depositSt === '未交' ? '登记保证金已交' : '解除 / 登记已退', onClick: () => { setDepAmt(b.deposit); setDepOpen(b); } });
+        /* M10 角色守卫：无写权限时只留只读动作 */
+        if (canWrite && !isBidClosed(b)) flow.push({ label: b.stage === '开标' ? '登记开标结果' : `推进阶段（${b.stage} → 下一步）`, onClick: () => advance(b) });
+        if (canWrite && (b.depositSt === '未交' || b.depositSt === '未退')) flow.push({ label: b.depositSt === '未交' ? '登记保证金已交' : '解除 / 登记已退', onClick: () => { setDepAmt(b.deposit); setDepOpen(b); } });
         flow.push({ label: '证书池选择', onClick: () => setPoolOpen(true) });
-        flow.push({ label: '编辑', onClick: () => toast('已打开编辑表单（字段与发起投标向导一致）') });
-        if (!isBidClosed(b)) flow.push({ label: '放弃投标', danger: true, onClick: () => { setAbandonOpen(b); setAbandonReason(''); } });
+        if (canWrite) flow.push({ label: '编辑', onClick: () => openWizard(b) });
+        if (canWrite && !isBidClosed(b)) flow.push({ label: '放弃投标', danger: true, onClick: () => { setAbandonOpen(b); setAbandonReason(''); } });
         return (
           <div className="nc-ops" onClick={(e) => e.stopPropagation()}>
-            {b.stage === '开标'
-              ? <Btn size="sm" kind="primary" onClick={() => { setResultOpen(b); setWinAmt(b.amt); }}>登记结果</Btn>
-              : isBidClosed(b)
-                ? <OpNone title={b.stage === '已放弃' ? '已放弃（终态），无待办操作' : '已登记结果（终态），无待办操作'} />
-                : <Op onClick={() => advance(b)}>推进</Op>}
+            {!canWrite
+              ? <OpNone title={`当前角色（${role}）无投标写权限，仅可查看`} />
+              : b.stage === '开标'
+                ? <Btn size="sm" kind="primary" onClick={() => { setResultOpen(b); setWinAmt(b.amt); }}>登记结果</Btn>
+                : isBidClosed(b)
+                  ? <OpNone title={b.stage === '已放弃' ? '已放弃（终态），无待办操作' : '已登记结果（终态），无待办操作'} />
+                  : <Op onClick={() => advance(b)}>推进</Op>}
             <Op onClick={() => { setDetail(b); setTab('overview'); }}>详情</Op>
             <OpMore items={flow} />
           </div>
@@ -311,9 +432,11 @@ export default function BidPage({ go, role, nav }: { go: (p: string) => void; ro
               <>
                 {aqExpired && <span style={{ color: '#cf1322', fontSize: 12, marginRight: 8 }}>⚠ 安许已过期，全部投标废标</span>}
                 {aqWarn && <span style={{ color: '#d46b08', fontSize: 12, marginRight: 8 }}>安许 {aq!.warnDays} 天内到期，请尽快续期</span>}
-                <Btn kind="primary" disabled={aqExpired} title={aqExpired ? '安许已过期，全部投标废标 · 请先续期安全生产许可证' : '发起投标'} onClick={() => {
+                <Btn kind="primary" disabled={aqExpired || !canWrite}
+                  title={!canWrite ? `当前角色（${role}）无投标写权限` : aqExpired ? '安许已过期，全部投标废标 · 请先续期安全生产许可证' : '发起投标'} onClick={() => {
+                  if (!canWrite) { toast('当前角色无投标写权限', 'err'); return; }
                   if (aqExpired) { toast('安许已过期，全部投标废标 · 请先续期安全生产许可证', 'err'); return; }
-                  setWizStep(0); setWizOpen(true);
+                  openWizard();
                 }}>＋ 发起投标</Btn>
               </>
             );
@@ -451,7 +574,12 @@ export default function BidPage({ go, role, nav }: { go: (p: string) => void; ro
                 setPendingContract({ bidId: detail.id, customer: detail.customer, name: detail.name, amt: detail.amt });
                 setDetail(null); go('contract-new');
               }}>中标 → 生成合同</Btn>
-              <Btn size="sm" onClick={() => { setDetail(null); go('project-new'); }}>补建项目（无合同场景）</Btn>
+              <Btn size="sm" onClick={() => {
+                /* 修复前只裸跳 go('project-new')：不带预填、不落 bidId，项目来源还得人工手选，
+                   「投标 → 项目」这条边在数据层是断的。 */
+                setPendingProject({ bidId: detail.id, name: detail.name, customer: detail.customer, amt: detail.amt });
+                setDetail(null); go('project-new');
+              }}>中标 → 补建项目</Btn>
             </>}
             {(detail.depositSt === '未交' || detail.depositSt === '未退') && (
               <Btn size="sm" onClick={() => { setDepAmt(detail.deposit); setDepOpen(detail); }}>
@@ -606,12 +734,13 @@ export default function BidPage({ go, role, nav }: { go: (p: string) => void; ro
       </Drawer>
 
       {/* ================= 发起投标向导 ================= */}
-      <Drawer open={wizOpen} onClose={() => setWizOpen(false)} width={840} title="发起投标"
+      <Drawer open={wizOpen} onClose={() => { setWizOpen(false); setWizEdit(null); }} width={840}
+        title={wizEdit ? `编辑投标 · ${wizEdit.id}` : '发起投标'}
         foot={<>
           {wizStep > 0 && <Btn onClick={() => setWizStep(wizStep - 1)}>上一步</Btn>}
           {wizStep < 2
             ? <Btn kind="primary" onClick={() => setWizStep(wizStep + 1)}>下一步</Btn>
-            : <Btn kind="primary" onClick={() => { toast('投标已创建（报名阶段）· 证书预检通过 3/4'); setWizOpen(false); }}>确认发起</Btn>}
+            : <Btn kind="primary" onClick={submitWizard}>{wizEdit ? '保存修改' : '确认发起'}</Btn>}
         </>}>
         <div className="nc-steps-wrap">
           <ChainBar nodes={[
@@ -620,13 +749,42 @@ export default function BidPage({ go, role, nav }: { go: (p: string) => void; ro
             { label: '③ 证书预检', sub: '缺口校验', state: wizStep === 2 ? 'cur' : 'todo' },
           ]} />
         </div>
+        {wizEdit && (
+          <Banner tone="info">
+            正在编辑 {wizEdit.id}（当前阶段「{wizEdit.stage}」）。此处只改基础信息与证书配额，
+            阶段推进、保证金登记、开标结果登记各有独立入口，不会因编辑被回退。
+          </Banner>
+        )}
         {wizStep === 0 && (
           <>
             <div className="nc-form-grid">
-              <Field label="项目名称" req span={2}><input className="nc-input" defaultValue="云南××中学消防改造" /></Field>
-              <Field label="客户" req><select className="nc-input"><option>××市教育局</option><option>昆明万达广场商业管理有限公司</option></select></Field>
-              <Field label="关联商机" note="建议从商机发起：中标结果自动回写商机漏斗"><select className="nc-input"><option>SJ000470 · 一院住院楼消防升级</option><option value="">暂不关联</option></select></Field>
-              <Field label="预估金额" req note="必须 &gt; 0">
+              <Field label="项目名称" req span={2}>
+                <input className="nc-input" value={wName} onChange={(e) => setWName(e.target.value)} placeholder="如 云南××中学消防改造" />
+              </Field>
+              <Field label="客户" req>
+                <select className="nc-input" value={wCustomer} onChange={(e) => setWCustomer(e.target.value)}>
+                  <option value="">请选择客户</option>
+                  {CUSTOMERS.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
+                </select>
+              </Field>
+              <Field label="关联商机" note="建议从商机发起：中标结果自动回写商机漏斗">
+                <select className="nc-input" value={wOpp} onChange={(e) => setWOpp(e.target.value)}>
+                  <option value="">暂不关联</option>
+                  {OPPS.filter((o) => o.status === '跟进中').map((o) => <option key={o.id} value={o.id}>{o.id} · {o.name}</option>)}
+                </select>
+              </Field>
+              <Field label="来源报价单" note="可空 · 从报价单一键生成（带客户、金额与明细）；选中后自动带入">
+                <select className="nc-input" value={wQuote} onChange={(e) => pickQuote(e.target.value)}>
+                  <option value="">不从报价单生成</option>
+                  {getQuotes().filter((q) => q.status === '已审批' || q.status === '已转化').map((q) => (
+                    <option key={q.id} value={q.id}>{q.id} · {q.name} · {fmt(q.total)}</option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="预估金额" req
+                note={srcQuote
+                  ? `来源报价 ${srcQuote.id} 为 ${fmt(srcQuote.total)}${quoteDiff === 0 ? '（与报价一致）' : quoteDiff < 0 ? ` · 本单压价 ${fmt(Math.abs(quoteDiff))}，差额进合同变更台账` : ` · 本单上浮 ${fmt(quoteDiff)}`}`
+                  : '必须 > 0'}>
                 <input className="nc-input" type="number" value={wAmt || ''} onChange={(e) => setWAmt(Number(e.target.value))} />
               </Field>
               <Field label="税率口径" req note="6 档 · 税额自动计算">
@@ -655,13 +813,27 @@ export default function BidPage({ go, role, nav }: { go: (p: string) => void; ro
         )}
         {wizStep === 1 && (
           <div className="nc-form-grid">
-            <Field label="是否涉及保证金" req><select className="nc-input"><option>涉及</option><option>不涉及</option></select></Field>
-            <Field label="保证金金额"><input className="nc-input" type="number" defaultValue={50000} /></Field>
-            <Field label="缴纳方式" req note="银行转账 / 银行保函 / 保证保险">
-              <select className="nc-input">{DEP_METHODS.map((m) => <option key={m}>{m}</option>)}</select>
+            <Field label="是否涉及保证金" req>
+              <select className="nc-input" value={wDepOn} onChange={(e) => setWDepOn(e.target.value)}>
+                <option>涉及</option>
+                <option>不涉及</option>
+              </select>
             </Field>
-            <Field label="计划缴纳日" req note="须早于开标日"><input className="nc-input" type="date" defaultValue="2026-09-20" /></Field>
-            <Field label="预计退还日" span={2}><input className="nc-input" type="date" defaultValue="2026-10-25" /></Field>
+            <Field label="保证金金额" note={wDepOn === '不涉及' ? '不涉及保证金时不登记金额' : '不超过招标控制价的 2%'}>
+              <input className="nc-input" type="number" value={wDepAmt || ''} disabled={wDepOn === '不涉及'}
+                onChange={(e) => setWDepAmt(Number(e.target.value) || 0)} />
+            </Field>
+            <Field label="缴纳方式" req note="银行转账 / 银行保函 / 保证保险">
+              <select className="nc-input" value={wDepMethod} onChange={(e) => setWDepMethod(e.target.value)}>
+                {DEP_METHODS.map((m) => <option key={m}>{m}</option>)}
+              </select>
+            </Field>
+            <Field label="计划缴纳日" req note="须早于开标日">
+              <input className="nc-input" type="date" value={wDepPay} onChange={(e) => setWDepPay(e.target.value)} />
+            </Field>
+            <Field label="预计退还日" span={2}>
+              <input className="nc-input" type="date" value={wDepBack} onChange={(e) => setWDepBack(e.target.value)} />
+            </Field>
           </div>
         )}
         {wizStep === 2 && (
@@ -710,6 +882,9 @@ export default function BidPage({ go, role, nav }: { go: (p: string) => void; ro
                 ? <div className="nc-warnbox is-red" style={{ marginTop: 12 }}>
                   <b><Ico n="ban" size={16} /> 含 {bads.length} 项证书硬缺口，开标资格审查将废标</b>
                   <div>{bads.map((l) => CERT_LINE_TYPES.find((c) => c.v === l.t)?.n).join('、')} —— 请补配、换人或走提额流程。</div>
+                  <div style={{ marginTop: 8 }}>
+                    <Check checked={wizRiskAck} onChange={setWizRiskAck} label="已知悉废标风险，仍要求提交（缺口将登记到风险列）" />
+                  </div>
                 </div>
                 : <div className="nc-warnbox is-gold" style={{ marginTop: 12 }}>
                   <Ico n="check" size={14} style={{ color: 'var(--c-success-deep)' }} /> 预检通过 {wCertLines.filter((l) => l.t && precheck(l, wOpen).lv === 'ok').length} / {wCertLines.filter((l) => l.t).length}

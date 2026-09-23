@@ -1,4 +1,4 @@
-/* 项目详情（项目经营中心）· 分层详情外壳 —— 概览页 + 5 个业务域子页
+/* 项目详情（项目详情）· 分层详情外壳 —— 概览页 + 5 个业务域子页
  *
  * 重构要点（对齐用户 2026-09-23 评审）：
  *   1. 形态：由「单页 6 卡 + 长 Tab」改为「概览页 + 独立子页」。子页是兄弟视图，不是弹窗 / 抽屉。
@@ -20,7 +20,8 @@
  *   质保金 = 合同额 × 3%（法定上限）
  *
  * 硬规则：成本更正不可物理删除（负数追加）· 验收→结项须资料完整度 ·
- *        节点确认须准入资料齐备（缺件硬拦截）· 签证未生成变更单不计执行额、不可收款
+ *        节点确认须准入资料齐备（缺件硬拦截）· 签证未生成变更单不计执行额、不可收款 ·
+ *        变更 / 签证转变更单在合同侧发起（要签补充协议），项目侧只承接结果
  *
  * ⚠️ vite.config.ts 为 jsxRuntime: 'classic'，JSX 编译为 React.createElement，
  *    本文件与全部子页必须保留 `import React from 'react'`（删掉会在运行时报 React is not defined）。
@@ -34,9 +35,11 @@ import { Ico } from '../components/icons';
 import {
   ATT_WORKERS, CUSTOMERS, EQUIPMENTS, MATERIALS,
   PROJECT_STATUS_TONE, PROJECT_TERMINAL, TODAY,
-  attCost, attDays, fmt, fmtAmt, fmtPct, isServiceProject, laborRate, teamOfProject, occOfProject, CERTS,
+  attCost, attDays, fmt, fmtAmt, fmtPct, fmtWan, isContractClosed, isServiceProject, laborRate, normContractStatus,
+  teamOfProject, occOfProject, CERTS,
 } from '../components/data';
-import { applyChangeDelta, consumeFocusTab, getContracts, getFocus, getOpps, getProjects, moveProject, relOfProject, setFocus, subscribeStore } from '../components/store';
+import type { Installment } from '../components/data';
+import { consumeFocusTab, getContracts, getFocus, getOpps, getProjects, moveProject, patchContract, patchProject, relOfProject, setFocus, setFocusTab, subscribeStore } from '../components/store';
 import OverviewSub from '../components/project-center/OverviewSub';
 import ExecSub from '../components/project-center/ExecSub';
 import QualitySub from '../components/project-center/QualitySub';
@@ -145,6 +148,16 @@ const APPROVALS = [
 const CT_TONE = (s: string): 'blue' | 'orange' | 'green' =>
   s === '履约中' ? 'blue' : (s === '已签约' || s === '已续签') ? 'green' : 'orange';
 
+/**
+ * 收款期次状态（由「实收 / 应收 / 开票 / 计划日」派生，不占合同状态枚举）：
+ * 已到账 / 部分到账 / 已开票·待到账 / 逾期未收 / 未到期。
+ */
+const instSt = (i: Installment): string =>
+  i.got >= i.amt ? '已到账'
+    : i.got > 0 ? '部分到账'
+      : i.inv === '已开票' ? '已开票·待到账'
+        : (i.plan && i.plan < TODAY) ? '逾期未收' : '未到期';
+
 /** 我方缴纳、尚未退回的保证金台账（质保金是客户扣留的应收义务，单独派生不混算） */
 const DEPOSITS = [
   { id: 'BZ000003', type: '履约保证金', dir: 'in', party: '云南××消防设备有限公司（CG000003）', amt: 12000, pay: '2026-09-01', due: '2026-09-15', st: '未退' },
@@ -218,7 +231,7 @@ const OPS = [
   { t: '2026-09-19 18:00', w: '蓝峰', tag: '手动', d: 'PF000004 归并 → CG000005（原行保留并置灰）' },
   { t: '2026-09-16 10:18', w: '财务 · 王会计', tag: '手动', d: '红字冲销 PF000007 → HC000001' },
   { t: '2026-09-15 15:03', w: '财务 · 王会计', tag: '手动', d: '红字冲销 PF000006 → HC000047' },
-  { t: '2026-09-12 11:05', w: '蓝峰', tag: '手动', d: `发起变更 BG000009（+${fmtAmt(80000)}）` },
+  { t: '2026-09-12 11:05', w: '蓝峰', tag: '手动', d: `合同侧发起变更 BG000009（+${fmtAmt(80000)}）· 商务审批中` },
 ];
 
 /** 出处与去向链（项目全景抽屉用）：每个数字都能指回它的来源单据 */
@@ -331,6 +344,8 @@ export default function ProjectCenterPage({ go, role, nav }: { go: (p: string) =
   const [payFilter, setPayFilter] = useState('全部');
   const [drill, setDrill] = useState<string | null>(null);
   const [m, setM] = useState<string | null>(null);
+  /** 关联合同弹窗选中项（挂接后双向落库：合同记 project，项目回写合同额并解除无合同标记） */
+  const [linkCt, setLinkCt] = useState('');
   const [logOpen, setLogOpen] = useState(false);
   const [panoOpen, setPanoOpen] = useState(false);
   const [flushId, setFlushId] = useState('');
@@ -338,9 +353,6 @@ export default function ProjectCenterPage({ go, role, nav }: { go: (p: string) =
   const [delFile, setDelFile] = useState<AttFile | null>(null);
   const [rejA, setRejA] = useState<(typeof APPROVALS)[number] | null>(null);
   const [progEdit, setProgEdit] = useState<number>(P.progressActual ?? 0);
-  const [chgAmt, setChgAmt] = useState('');
-  const [chgReason, setChgReason] = useState('');
-  const [chgMode, setChgMode] = useState<'increment' | 'total'>('increment');
 
   /* ---------- 经营口径（唯一事实源 · 由子页共享，不在子页重算） ---------- */
   const REV = P.contractAmt;
@@ -351,9 +363,17 @@ export default function ProjectCenterPage({ go, role, nav }: { go: (p: string) =
   const PAY_PROGRESS = EXEC_AMT > 0 ? (CASH_IN / EXEC_AMT) * 100 : 0;
   const WARRANTY = Math.round(CONTRACT_NOW * 0.03);
 
-  const TARGET_COST = P.budget ?? 1300000;
-  const planScale = TARGET_COST / PLAN_BASE;
-  const costScale = P.cost > 0 ? P.cost / COST_BASE : 1;
+  /**
+   * 目标成本（立项预算）＝ 立项时录入的 `budget`，仅作「目标 vs 实际」的对比基线。
+   * 未录入（历史存量 / 作废单）时按「执行额 × 目标成本率」估算，并置 BUDGET_EST 让子页标注来源，
+   * 避免所有项目都显示同一个写死的 130 万（假数据）。
+   */
+  const BUDGET_RATE = 0.72;
+  const BUDGET_EST = !P.budget && P.execAmt > 0;
+  const TARGET_COST = P.budget ?? (BUDGET_EST ? Math.round(P.execAmt * BUDGET_RATE) : 0);
+  const planScale = PLAN_BASE > 0 ? TARGET_COST / PLAN_BASE : 0;
+  /* 实际成本为 0 时不再回落到模板基数（否则作废 / 未开工项目会凭空显示 241 万成本） */
+  const costScale = P.cost > 0 ? P.cost / COST_BASE : 0;
   const planRows = useMemo(() => PLAN_ROWS.map((r) => ({ ...r, amt: Math.round(r.amt * planScale) })), [planScale]);
   const costRows = useMemo(() => COST_ROWS.map((r) => ({ ...r, amt: Math.round(r.amt * costScale) })), [costScale]);
   const groupedPlan = useMemo(() => {
@@ -430,8 +450,7 @@ export default function ProjectCenterPage({ go, role, nav }: { go: (p: string) =
      都看到同一棵万达合同树 —— 项目 A 的页面显示项目 B 的合同。
      现在按 store 中 project === P.id 的合同分组：收款类 = 销售 / 维护保养；
      付款类 = 采购 / 分包；补充协议按 parentId 挂到主合同下。
-     注：合同模型只有聚合口径（amt / execAmt / recv / nodes 文本），没有到「期次级」明细，
-     故合同树不再展示收款期次表；期次明细待数据模型补 installments[] 后恢复。 */
+     收款期次读合同自带的 Contract.installments（2026-09-23 补入模型），期次状态由「实收 / 应收 / 开票」派生。 */
   const projContracts = useMemo(
     () => getContracts().filter((c) => c.project === P.id),
     [P.id, tick],
@@ -447,6 +466,9 @@ export default function ProjectCenterPage({ go, role, nav }: { go: (p: string) =
           code: c.id, name: c.name, st: c.status, tone: CT_TONE(c.status), amt: c.amt,
           role: c.contractRole,
           badge: `合同额 ${fmtAmt(c.amt)} · 执行额 ${fmtAmt(c.execAmt)}${delta ? `（含已生效变更 ${delta > 0 ? '+' : ''}${fmtAmt(delta)}）` : ''}`,
+          payplan: c.installments?.length
+            ? c.installments.map((i) => ({ ...i, st: instSt(i), note: i.note ?? '' }))
+            : undefined,
           children: kids.length
             ? kids.map((k) => ({
               code: k.id, name: k.name, amt: k.amt,
@@ -478,11 +500,20 @@ export default function ProjectCenterPage({ go, role, nav }: { go: (p: string) =
   const C: PjCtx = {
     P, role, go, pj: setSub,
     openM: (k) => setM(k),
+    /* 变更是要签补充协议的合同单据 —— 项目侧只读结果，发起统一回落到合同的「变更与签证」Tab */
+    gotoContractChange: (cid) => {
+      const id = cid || saleCt[0]?.code || '';
+      if (!id) { toast('本项目尚未关联收款类合同，无法发起变更', 'err'); return; }
+      setFocus('contract-detail', id);
+      setFocusTab('contract-detail', 'change');
+      go('contract-detail');
+    },
     toast,
     openLog: () => setLogOpen(true),
     openPanorama: () => setPanoOpen(true),
     CONTRACT_NOW, EXEC_AMT, CASH_IN, NET_IN, UNRECV, PAY_PROGRESS, WARRANTY,
     TARGET_COST, COST_SUM, PLAN_SUM, dev, devPct, COST_PROGRESS, planProfit, actProfit,
+    BUDGET_EST, BUDGET_SRC: P.budgetSrc,
     progActual, progPlan, progDev, progLevel, progTag,
     overdue, overdueAmt, CHG_EFFECTIVE, CHG_PENDING,
     depIn: depIn.map((d) => ({ id: d.id, type: d.type, amt: d.amt, due: d.due })),
@@ -527,7 +558,7 @@ export default function ProjectCenterPage({ go, role, nav }: { go: (p: string) =
           本项目
         </span>}
         actions={<>
-          <Btn onClick={() => setM('change')}><Ico n="swap" size={16} /> 发起变更</Btn>
+          {/* 变更属合同单据（须签补充协议），不在项目侧发起 —— 入口见「商务合同」子页 → 对应合同 */}
           <Btn
             kind="primary" disabled={!curMile || curMiss.length > 0} onClick={() => setM('mile')}
             title={!curMile ? '当前无待确认节点' : curMiss.length > 0 ? `缺 ${curMiss.join('、')}，补齐后方可确认` : `确认 ${curMile.name}`}
@@ -601,36 +632,7 @@ export default function ProjectCenterPage({ go, role, nav }: { go: (p: string) =
       </div>
 
       {/* ================= 弹窗（编辑 / 登记类短表单） ================= */}
-      <Modal
-        open={m === 'change'} width={480} title="发起合同变更"
-        onClose={closeM}
-        foot={<><Btn onClick={closeM}>取消</Btn><Btn kind="primary" disabled={!chgAmt} onClick={() => {
-          const amt = Number(chgAmt) || 0;
-          if (amt > 0) { applyChangeDelta(P.id, amt); toast(`变更单已发起（+${fmtAmt(amt)}），进入 PM 审核`); }
-          setChgAmt(''); setChgReason(''); closeM();
-        }}>提交审批</Btn></>}
-      >
-        <div className="nc-form-grid">
-          <label className="nc-field nc-field-4"><span>变更方式</span>
-            <div className="nc-subtabs" style={{ margin: 0 }}>
-              <button className={`nc-subtab${chgMode === 'increment' ? ' is-on' : ''}`} onClick={() => setChgMode('increment')}>增量式</button>
-              <button className={`nc-subtab${chgMode === 'total' ? ' is-on' : ''}`} onClick={() => setChgMode('total')}>总额式</button>
-            </div>
-          </label>
-          <label className="nc-field nc-field-4"><span>{chgMode === 'increment' ? '变更增量（元）' : '变更后总额（元）'}</span>
-            <input className="nc-input" value={chgAmt} onChange={(e) => setChgAmt(e.target.value.replace(/[^\d]/g, ''))} placeholder="请输入金额" />
-          </label>
-          <label className="nc-field nc-field-4"><span>变更事由</span>
-            <input className="nc-input" value={chgReason} onChange={(e) => setChgReason(e.target.value)} placeholder="如：机房气体灭火系统增补" />
-          </label>
-          <div className="nc-field nc-field-4">
-            <div className="nc-cell-sub">
-              金额确认后进入 <b>PM 审核 → 商务审批 → 客户确认 → 生效</b>；生效前只作过程记录，不计入执行额、不可据此收款。
-              {chgMode === 'increment' && chgAmt && <>　本次增量 <b className="num">+{Number(chgAmt).toLocaleString()} 元</b></>}
-            </div>
-          </div>
-        </div>
-      </Modal>
+      {/* 变更弹窗不在此处 —— 变更属合同单据，入口在合同详情「变更与签证」Tab */}
 
       <Modal
         open={m === 'mile'} width={480} title={`确认里程碑节点${curMile ? `：${curMile.name}` : ''}`}
@@ -678,9 +680,46 @@ export default function ProjectCenterPage({ go, role, nav }: { go: (p: string) =
         <div className="nc-cell-sub">作废用于「建错项目」，终态不可恢复，仅保留痕迹。若只是中止施工请使用「暂停」。</div>
       </Modal>
 
-      <Modal open={m === 'link'} width={480} title="关联合同" onClose={closeM}
-        foot={<><Btn onClick={closeM}>取消</Btn><Btn kind="primary" onClick={() => { toast('已关联合同并从合同详情同步基础信息'); closeM(); }}>确认关联</Btn></>}>
-        <label className="nc-field nc-field-4"><span>合同编号</span><input className="nc-input" placeholder="如 HT000009" /></label>
+      <Modal open={m === 'link'} width={520} title="关联合同" onClose={closeM}
+        foot={<><Btn onClick={closeM}>取消</Btn>
+          <Btn kind="primary" disabled={!linkCt} title={linkCt ? undefined : '请选择要挂接的合同'} onClick={() => {
+            const ct = getContracts().find((c) => c.id === linkCt);
+            if (!ct) { toast('合同不存在，请重新选择', 'err'); return; }
+            const cs = normContractStatus(ct.status);
+            if (isContractClosed(ct) || !['已签约', '履约中'].includes(cs)) {
+              toast(`合同 ${ct.id} 当前状态为「${cs}」，仅「已签约 / 履约中」的合同可挂接`, 'err');
+              return;
+            }
+            if (ct.project && ct.project !== P.id) {
+              toast(`合同 ${ct.id} 已挂接项目 ${ct.project}，不可重复挂接`, 'err');
+              return;
+            }
+            /* 双向落库：合同侧记 project（合同详情「关联项目」可反查），
+               项目侧回写合同额并按真实合同额刷新执行额、解除「无合同施工」标记。
+               修复前此处只 toast，关联动作完全不落库 —— 项目永远停在「无合同」状态，
+               风险榜也不会出榜。 */
+            patchContract(ct.id, { project: P.id });
+            patchProject(P.id, {
+              contractId: ct.id,
+              contractAmt: ct.amt,
+              execAmt: ct.amt,
+              noContract: false,
+              backfillBy: undefined,
+              risk: P.risk === 'nocontract' ? 'none' : P.risk,
+            });
+            toast(`已挂接合同 ${ct.id} · 合同额回写 ${fmtWan(ct.amt)} · 「无合同施工」标记已解除`);
+            setLinkCt(''); closeM();
+          }}>确认关联</Btn></>}>
+        <div className="nc-cell-sub">挂接后合同侧同步记录项目编号；项目侧按合同额回写合同额与执行额，「无合同施工」风险标记自动解除。仅列同客户、未挂其它项目、且已签约 / 履约中的合同。</div>
+        <label className="nc-field nc-field-4"><span>合同编号</span>
+          <select className="nc-input" value={linkCt} onChange={(e) => setLinkCt(e.target.value)}>
+            <option value="">请选择合同</option>
+            {getContracts()
+              .filter((c) => (!c.project || c.project === P.id) && !isContractClosed(c)
+                && ['已签约', '履约中'].includes(normContractStatus(c.status)))
+              .map((c) => <option key={c.id} value={c.id}>{c.id} · {c.name} · {fmtWan(c.amt)}</option>)}
+          </select>
+        </label>
         <label className="nc-field nc-field-4"><span>关联方向</span>
           <select className="nc-input"><option>收款类（销售 / 维保合同）</option><option>付款类（采购 / 分包合同）</option></select>
         </label>

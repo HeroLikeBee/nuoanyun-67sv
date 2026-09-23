@@ -479,7 +479,7 @@ export default function CustomerPage({ go, role, nav }: { go: (p: string) => voi
                 <div className="nc-req-row" key={x.id}>
                   <span className="nc-rr-main" style={{ flex: 1 }}>
                     <EntityLink target="contract" id={x.id} go={go} strong>{x.id}</EntityLink> · {x.name}
-                    <span className="nc-cell-sub">签约 {x.sign} · 总额 {money ? fmtWan(x.amt || x.execAmt) : '—'} · 已收 {money ? fmtWan(x.recv) : '—'}（{p}%）{x.project ? <> · 项目 <EntityLink target="project-center" id={x.project} go={go} title="下钻到项目经营中心">{x.project}</EntityLink></> : null}</span>
+                    <span className="nc-cell-sub">签约 {x.sign} · 总额 {money ? fmtWan(x.amt || x.execAmt) : '—'} · 已收 {money ? fmtWan(x.recv) : '—'}（{p}%）{x.project ? <> · 项目 <EntityLink target="project-center" id={x.project} go={go} title="下钻到项目详情">{x.project}</EntityLink></> : null}</span>
                   </span>
                   <div style={{ flex: 1, maxWidth: 160 }}><Progress value={p} tone={p >= 100 ? 'green' : undefined} /></div>
                   {bal > 0

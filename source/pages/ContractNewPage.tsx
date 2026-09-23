@@ -250,6 +250,7 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
          保证「合同 → 上游」可反查 --- */
   const [srcQuote, setSrcQuote] = useState<string | null>(null);
   const [srcBid, setSrcBid] = useState<string | null>(null);
+  const [srcOpp, setSrcOpp] = useState<string | null>(null);
   const [srcRenew, setSrcRenew] = useState<string | null>(null);
 
   /* --- 向导状态 --- */
@@ -277,17 +278,22 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
      生成同一份万达合同草稿，报价→合同、投标→合同两条支线在数据上完全无法区分。 */
   const [f, setF] = useState(EMPTY_FORM);
   /**
-   * 投标中标 → 转合同：从投标页携带中标标的跳转过来时，预填合同关键字段，并记录 bidId 外键。
-   * 原链路「中标 → 直接建项目」跳过合同环节，与「合同 → 项目」主线矛盾，此处补齐。
+   * 转合同（双来源，共用 pendingContract 通道）：
+   *   投标中标 —— 带中标标的与 bidId 外键；原链路「中标 → 直接建项目」跳过合同环节，与「合同 → 项目」主线矛盾，此处补齐；
+   *   商机直签 —— 带商机要素与 oppId 外键；维保 / 检测 / 小改造这类金额明确的单子不经过报价与投标，
+   *     赢单后直接落合同草稿（规格 §2.2 SJ-01③ 的「或转合同草稿」）。
    */
   useEffect(() => {
     const p = getPendingContract();
     if (!p) return;
     setF((prev) => ({ ...prev, name: `${p.name} 合同`, party: partyOptOf(p.customer), amt: p.amt || prev.amt, pjname: p.name }));
-    setSrcBid(p.bidId);
+    setSrcBid(p.bidId ?? null);
+    setSrcOpp(p.oppId ?? null);
     setPmode('draft');
     setDtl([{ t: '消防工程', s: TODAY, e: '', a: p.amt || 0, r: p.name }]);
-    toast(`已带入中标标的「${p.name}」· 中标金额 ¥${(p.amt || 0).toLocaleString('en-US')}；合同签署后可在项目台账生成项目`);
+    toast(p.oppId
+      ? `已带入商机「${p.name}」· 预计金额 ¥${(p.amt || 0).toLocaleString('en-US')}；本合同为商机直签（未过报价 / 投标），签署后可在项目台账生成项目`
+      : `已带入中标标的「${p.name}」· 中标金额 ¥${(p.amt || 0).toLocaleString('en-US')}；合同签署后可在项目台账生成项目`);
     setPendingContract(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nav]);
@@ -431,6 +437,7 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
   if (src && src !== 'manual') issues.push(['name', `名称 / 相对方 / 金额等已由「${SRC_META[src].n}」带出，请确认`]);
   if (srcQuote) issues.push(['name', `本单由报价单 ${srcQuote} 转入，提交后将回写该报价单状态`]);
   if (srcBid) issues.push(['name', `本单由中标投标单 ${srcBid} 转入，中标依据将随合同存档`]);
+  if (srcOpp) issues.push(['name', `本单由商机 ${srcOpp} 直签转入（未经过报价 / 投标），预计金额以商机为准`]);
   if (srcRenew) issues.push(['name', `本单为 ${srcRenew} 的续签合同，提交后原合同将标记「续签 → 新合同号」`]);
 
   const moreFilled = [
@@ -685,7 +692,7 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
       ),
       cb: () => {
         /* G1 跨页 Q17：原仅本地 setOkInfo，合同台账永远查不到新建合同。写入共享 store。
-           同时落 quoteId / bidId 两个上游外键：合同详情与项目中心据此反查报价单 / 中标投标单，
+           同时落 quoteId / bidId 两个上游外键：合同详情与项目详情据此反查报价单 / 中标投标单，
            修复前这两个字段被读后丢弃，合同→上游的溯源链在数据层是断的。 */
         const newContract: Contract = {
           id: no, name: f.name.trim(), type: f.type, party: f.party,
@@ -694,8 +701,22 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
           owner: '当前用户', sign: f.sign, start: f.p1 || f.sign, end: f.p2 || f.sign,
           nodes: plan.map((r) => r.node).join(' · ') || '按明细收款计划',
           overdue: false, overpay: false,
+          /* 收款计划落成期次级明细（Contract.installments）：合同详情的「收款计划」表与
+             项目详情合同树的收款期次都读它，新签合同不再只有一句 nodes 文本。 */
+          installments: plan.length
+            ? plan.map((r, i) => ({
+              n: `收款期次 ${i + 1} · ${r.node}`,
+              amt: r.amt,
+              plan: r.date || f.sign,
+              got: 0,
+              gotDate: '—',
+              inv: '未开票',
+              note: r.qual ? '质保金节点 · 质保期满无质量问题后无息退还' : '按合同约定节点收款',
+            }))
+            : undefined,
           ...(srcQuote ? { quoteId: srcQuote } : {}),
           ...(srcBid ? { bidId: srcBid } : {}),
+          ...(srcOpp ? { oppId: srcOpp } : {}),
           ...(srcRenew ? { parentId: srcRenew } : {}),
         };
         addContract(newContract);
@@ -723,7 +744,7 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
     setCopySel(''); setPmode('exist'); setCal('inc'); setMore(false); setForce(false);
     setChk(SIX_CLAUSES.slice(0, 5));
     setF(EMPTY_FORM); setTags([]); setDtl([]); setPlan([]); setFiles([]);
-    setSrcQuote(null); setSrcBid(null); setSrcRenew(null); setOkInfo(null);
+    setSrcQuote(null); setSrcBid(null); setSrcOpp(null); setSrcRenew(null); setOkInfo(null);
     toast('向导已重置');
   };
   const askReset = () => {

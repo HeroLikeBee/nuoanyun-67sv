@@ -246,13 +246,14 @@ export default function CertPage({ go, role, nav }: { go: (p: string) => void; r
          其余操作（用完收回 / 外借 / 收回外借）收进「更多 ⋯」。 */
       render: (c: C) => (
         <div className="nc-ops" onClick={(e) => e.stopPropagation()}>
-          <Op onClick={() => setDetail(c)}>详情</Op><OpSep />
-          {canLend(c)
-            ? <Op gold title={lendWhy(c) || '借走后仅该项目可用'} onClick={() => { setLendOpen(c); setLendProj(firstProj); setLendNote(''); setLendErr(''); setLendPurpose(PURPOSES[0]); }}>借给项目</Op>
-            : <OpNone title={lendWhy(c) || '该证书不支持借给项目'} />}<OpSep />
-          {c.mode === 'log'
-            ? <Op onClick={() => { setUseOpen(c); setUsePerson(''); }}>登记使用</Op>
-            : <OpNone title="非按次登记类证书，无需登记使用" />}<OpSep />
+          <Op onClick={() => setDetail(c)}>详情</Op>
+          {canLend(c) && (
+            <><OpSep /><Op gold title={lendWhy(c) || '借走后仅该项目可用'} onClick={() => { setLendOpen(c); setLendProj(firstProj); setLendNote(''); setLendErr(''); setLendPurpose(PURPOSES[0]); }}>借给项目</Op></>
+          )}
+          {c.mode === 'log' && (
+            <><OpSep /><Op onClick={() => { setUseOpen(c); setUsePerson(''); }}>登记使用</Op></>
+          )}
+          <OpSep />
           <OpMore items={[
             {
               label: '用完收回', disabled: !c.used.length,
@@ -474,7 +475,7 @@ export default function CertPage({ go, role, nav }: { go: (p: string) => void; r
                 const equipRate = Math.min(100, (cs.length / quota) * 100);
                 return (
                   <tr key={pid}>
-                    <td><b>{proj?.name ?? pid}</b><div className="nc-cell-sub"><EntityLink target="project-center" id={pid} go={go} title="下钻到项目经营中心"><Code>{pid}</Code></EntityLink></div></td>
+                    <td><b>{proj?.name ?? pid}</b><div className="nc-cell-sub"><EntityLink target="project-center" id={pid} go={go} title="下钻到项目详情"><Code>{pid}</Code></EntityLink></div></td>
                     <td>{cs.map((c) => <div key={c.id} className="nc-cell-sub">{c.name} · {c.holder}</div>)}</td>
                     <td><Progress value={equipRate} tone={gap ? 'red' : 'green'} /><span className="nc-cell-sub num">{cs.length}/{quota}</span></td>
                     <td>{gap ? <Tag tone="red">缺口 {gap}</Tag> : <Tag tone="green">已齐备</Tag>}</td>
@@ -558,7 +559,7 @@ export default function CertPage({ go, role, nav }: { go: (p: string) => void; r
                   <tbody>
                     {detail.used.map((u) => (
                       <tr key={u}>
-                        <td>{u.startsWith('XM') ? <EntityLink target="project-center" id={u} go={go} title="下钻到项目经营中心">{PROJECTS.find((p) => p.id === u)?.name ?? u}</EntityLink> : <EntityLink target="bid" id={u} go={go} title="下钻到投标详情">{u}</EntityLink>} <Code>{u}</Code></td>
+                        <td>{u.startsWith('XM') ? <EntityLink target="project-center" id={u} go={go} title="下钻到项目详情">{PROJECTS.find((p) => p.id === u)?.name ?? u}</EntityLink> : <EntityLink target="bid" id={u} go={go} title="下钻到投标详情">{u}</EntityLink>} <Code>{u}</Code></td>
                         <td><Tag tone={u.startsWith('XM') ? 'green' : 'blue'}>{u.startsWith('XM') ? '项目' : '投标'}</Tag></td>
                         <td className="nc-cell-sub">2026-09-01</td>
                         <td><Op danger onClick={() => setFreeOpen(u)}>释放</Op></td>

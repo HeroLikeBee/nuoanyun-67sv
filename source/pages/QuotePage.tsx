@@ -7,10 +7,10 @@ import {
   PageHead, ListToolbar, TableFoot, Tag, Timeline, Tip, useToast, ChainBar, Check, Code, Collapse, ConfirmModal, EntityLink,
 } from '../components/ui';
 import type { OpMoreItem } from '../components/ui';
-import { QUOTE_STATUS, QUOTE_CATS, APPROVALS, CUSTOMERS, TODAY, approveLevel, calcTax, fmt, fmtWan, quoteTrigger } from '../components/data';
+import { QUOTE_STATUS, QUOTE_CATS, CUSTOMERS, TODAY, approveLevel, calcTax, can, fmt, fmtWan, quoteTrigger } from '../components/data';
 import type { Quote } from '../components/data';
 import {
-  addQuote, consumeFocus, getApprovals, getBids, getBizStatus, getOpps, getQuotes, patchQuote, pushApproval,
+  addQuote, consumeFocus, getBids, getBizStatus, getOpps, getQuotes, nextApprovalNo, patchQuote, pushApproval,
   setBizStatus, setFocus, setPendingQuote, subscribeStore,
 } from '../components/store';
 import { Ico } from '../components/icons';
@@ -19,6 +19,14 @@ const ST_TONE: Record<string, 'gray' | 'blue' | 'green' | 'red' | 'gold'> = {
   草稿: 'gray', 待审批: 'blue', 已审批: 'green', 已转化: 'gold', 作废: 'red', 审批中: 'blue',
 };
 type Q = Quote;
+
+/** 台账排序规则（M5）：金额 / 浮率 / 报价日 / 更新时间 */
+const SORTS = [
+  { key: 'update', label: '按更新时间' },
+  { key: 'total', label: '按报价金额（高→低）' },
+  { key: 'markup', label: '按整体浮率（高→低）' },
+  { key: 'date', label: '按报价日期（新→旧）' },
+];
 
 /** 报价单号：BJ + 6 位流水（取现有最大流水 + 1） */
 const nextQuoteNo = () => {
@@ -30,15 +38,12 @@ const nextQuoteNo = () => {
 };
 
 /** 生成报价审批单（提交审批 → 审批中心可见，形成正向闭环） */
-const makeQuoteApproval = (ref: string, ver: string, obj: string, amt: number, level: string) => {
-  const [y, m, d] = TODAY.split('-');
-  return {
-    id: `SP-${y}-${m}${d}-${String(getApprovals().length + 1).padStart(2, '0')}`,
-    ap: '蓝峰', type: '报价审批', obj, ref: `${ref} 报价单 ${ver}`,
-    amt, time: `${TODAY} 14:00`, status: '待审批',
-    level: level === '—' ? '部门负责人' : level, node: 0, reason: '', cc: ['李思敏'],
-  } as Parameters<typeof pushApproval>[0];
-};
+const makeQuoteApproval = (ref: string, ver: string, obj: string, amt: number, level: string) => ({
+  id: nextApprovalNo(),
+  ap: '蓝峰', type: '报价审批', obj, ref: `${ref} 报价单 ${ver}`,
+  amt, time: `${TODAY} 14:00`, status: '待审批',
+  level: level === '—' ? '部门负责人' : level, node: 0, reason: '', cc: ['李思敏'],
+} as Parameters<typeof pushApproval>[0]);
 
 export default function QuotePage({ go, role, nav }: { go: (p: string) => void; role: string; nav?: number }) {
   const toast = useToast();
@@ -58,7 +63,12 @@ export default function QuotePage({ go, role, nav }: { go: (p: string) => void; 
   const [owner, setOwner] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  /** 排序规则（M5）：与项目台账同款 sortKey 模式，默认按更新时间倒序 */
+  const [sortKey, setSortKey] = useState('update');
+  /** 单据级写权限（M10）：以菜单「角色 × 模块」矩阵为准，无权限时写操作置灰并给出原因 */
+  const canWrite = can(role, 'quote');
   const [detail, setDetail] = useState<Q | null>(null);
+  const [viewVer, setViewVer] = useState<number | null>(null);
   /**
    * 跨页穿透：从客户 / 商机 / 投标等页面下钻进来时，自动打开目标报价单详情。
    * 以 nav（路由脉冲）为依赖，保证反复下钻同一页也能重新定位。
@@ -107,7 +117,14 @@ export default function QuotePage({ go, role, nav }: { go: (p: string) => void; 
     if (kw) { const s = q.id + q.name + q.customer; if (!s.includes(kw)) return false; }
     return true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [quotes, status, kw, type, owner, tick]);
+  }).sort((a, b) => {
+    /* M5：台账支持按金额 / 浮率 / 更新日排序（对齐项目台账的 sortKey 模式）。
+       修复前 10 条数据只能按种子顺序看，金额与浮率无法排。 */
+    if (sortKey === 'total') return b.total - a.total;
+    if (sortKey === 'markup') return b.markup - a.markup;
+    if (sortKey === 'date') return b.date.localeCompare(a.date);
+    return (b.update || '').localeCompare(a.update || '');
+  }), [quotes, status, kw, type, owner, sortKey, tick]);
 
   const paged = rows.slice((page - 1) * pageSize, page * pageSize);
 
@@ -155,7 +172,7 @@ export default function QuotePage({ go, role, nav }: { go: (p: string) => void; 
         <div className="nc-cell-main">
           {/* 单号可点击 → 蓝色，点击打开本行详情（全站统一） */}
           <IdCell onClick={() => setDetail(q)} title="查看报价单详情">{q.id}</IdCell>
-          <Tag tone="blue">{q.ver}</Tag>
+          <span style={{ fontSize: 11, color: "var(--ink-3)", background: "var(--c-fill-1)", padding: "1px 5px", borderRadius: 3, marginLeft: 6 }}>{q.ver}</span>
           <div className="nc-cell-sub">{q.name}</div>
         </div>
       ),
@@ -189,17 +206,20 @@ export default function QuotePage({ go, role, nav }: { go: (p: string) => void; 
       key: 'op', title: '操作', width: 200, align: 'right' as const,
       render: (q: Q) => {
         const s = st(q);
+        /* M10 角色守卫：无写权限时只留只读动作（版本 / 详情 / 打印），写操作不出现在菜单里 */
+        const w = canWrite;
         const more: OpMoreItem[] = [];
-        if (s === '草稿') more.push({ label: '提交审批', onClick: () => setSubmitOpen(q) });
-        if (s === '待审批') more.push({ label: '撤回审批', danger: true, onClick: () => withdraw(q) });
-        if (s === '已审批' || s === '草稿') more.push({ label: '作废', danger: true, onClick: () => setVoidOpen(q) });
-        if (s !== '作废') more.push({ label: '版本管理', onClick: () => setVerOpen(q) });
+        if (w && s === '草稿') more.push({ label: '提交审批', onClick: () => setSubmitOpen(q) });
+        if (w && s === '待审批') more.push({ label: '撤回审批', danger: true, onClick: () => withdraw(q) });
+        if (w && (s === '已审批' || s === '草稿')) more.push({ label: '作废', danger: true, onClick: () => setVoidOpen(q) });
+
         more.push({ label: '打印', onClick: () => toast('已调起打印预览（报价单 A4）') });
         return (
           <div className="nc-ops" onClick={(e) => e.stopPropagation()}>
-            {s === '草稿' && <Op gold onClick={() => { setFocus('quote-edit', q.id); go('quote-edit'); }}>编辑</Op>}
-            {s === '待审批' && <Op onClick={() => withdraw(q)}>撤回</Op>}
-            {s === '已审批' && <Op gold onClick={() => { setPendingQuote({ quoteId: q.id }); go('contract-new'); }}>转合同</Op>}
+            {!w && s !== '已转化' && s !== '作废' && <OpNone title={`当前角色（${role}）无报价单写权限，仅可查看`} />}
+            {w && s === '草稿' && <Op gold onClick={() => { setFocus('quote-edit', q.id); go('quote-edit'); }}>编辑</Op>}
+            {w && s === '待审批' && <Op onClick={() => withdraw(q)}>撤回</Op>}
+            {w && s === '已审批' && <Op gold onClick={() => { setPendingQuote({ quoteId: q.id }); go('contract-new'); }}>转合同</Op>}
             {s === '已转化' && <OpNone title="已转化 = 终态，不可再编辑 / 作废" />}
             {s === '作废' && <OpNone title="作废为终态，不可再编辑 / 审批；可「复制新版本」重新发起" />}
             <Op onClick={() => setDetail(q)}>详情</Op>
@@ -215,7 +235,8 @@ export default function QuotePage({ go, role, nav }: { go: (p: string) => void; 
       <PageHead
         title="报价台账"
         actions={<>
-          <Btn kind="primary" onClick={() => { setFName(''); setFCustomer(''); setErrs({}); setNewOpen(true); }}>＋ 新建报价单</Btn>
+          <Btn kind="primary" disabled={!canWrite} title={canWrite ? undefined : `当前角色（${role}）无报价单新建权限`}
+            onClick={() => { if (!canWrite) { toast('当前角色无报价单新建权限', 'err'); return; } setFName(''); setFCustomer(''); setErrs({}); setNewOpen(true); }}>＋ 新建报价单</Btn>
         </>}
       />
 
@@ -255,13 +276,16 @@ export default function QuotePage({ go, role, nav }: { go: (p: string) => void; 
               <option value="改造">改造</option>
               <option value="维护保养">维护保养</option>
             </select>
+            <select className="nc-input" style={{ width: 148 }} value={sortKey} onChange={(e) => { setSortKey(e.target.value); setPage(1); }} title="排序规则">
+              {SORTS.map((x) => <option key={x.key} value={x.key}>{x.label}</option>)}
+            </select>
             <select className="nc-input" style={{ width: 130 }} value={owner} onChange={(e) => { setOwner(e.target.value); setPage(1); }}>
               <option value="">全部提交人</option>
               {owners.map((o) => <option key={o}>{o}</option>)}
             </select>
             <input className="nc-input nc-lt-search" value={kw} placeholder="搜索报价单号 / 项目 / 客户"
               onChange={(e) => { setKw(e.target.value); setPage(1); }} />
-            <Btn onClick={() => { setKw(''); setType(''); setOwner(''); setStatus('全部'); setPage(1); }}>重置</Btn>
+            <Btn onClick={() => { setKw(''); setType(''); setOwner(''); setStatus('全部'); setSortKey('update'); setPage(1); }}>重置</Btn>
           </>}
         />
 
@@ -294,7 +318,6 @@ export default function QuotePage({ go, role, nav }: { go: (p: string) => void; 
               {s === '草稿' && <><Btn kind="primary" size="sm" onClick={() => { setSubmitOpen(detail); setDetail(null); }}>提交审批</Btn><Btn size="sm" onClick={() => { setFocus('quote-edit', detail.id); setDetail(null); go('quote-edit'); }}>编辑</Btn></>}
               {s === '待审批' && <><Btn size="sm" danger onClick={() => { withdraw(detail); setDetail(null); }}>撤回审批</Btn><Btn size="sm" onClick={() => go('approval')}>查看审批进度</Btn></>}
               {s === '已审批' && <Btn kind="primary" size="sm" onClick={() => { setPendingQuote({ quoteId: detail.id }); setDetail(null); go('contract-new'); }}>转合同（同步生成项目 + 合同草稿）</Btn>}
-              <Btn size="sm" onClick={() => { setVerOpen(detail); setDetail(null); }}>版本管理</Btn>
               <Btn size="sm" onClick={() => toast('已调起打印预览')}>打印</Btn>
             </div>
           );
@@ -309,6 +332,57 @@ export default function QuotePage({ go, role, nav }: { go: (p: string) => void; 
               <div className="nc-tile"><div className="nc-tile-label">明细行数</div><div className="nc-tile-value num">{detail.items}</div><div className="nc-tile-sub">{detail.ver} 当前版本</div></div>
             </div>
 
+            {viewVer && (
+              <>
+                <div style={{ background: 'var(--c-warning-bg)', border: '1px solid var(--c-warning-border)', borderRadius: 6, padding: '8px 12px', margin: '8px 0', fontSize: 13 }}>
+                  正在查看 <b>V{viewVer}</b> 版报价详情（只读模式）
+                  <span style={{ marginLeft: 12 }}><Btn size="sm" onClick={() => setViewVer(null)}>返回当前版</Btn></span>
+                </div>
+                <div style={{ background: 'var(--c-canvas)', border: '1px solid var(--c-border)', borderRadius: 6, padding: 12, marginBottom: 12 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>版本对比：V{viewVer} → {detail.ver}</div>
+                  <div style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 8 }}>
+                    基于 {viewVer === 1 ? '首次组价' : '客户意见调整'} 版本快照，与当前版本对比：
+                  </div>
+                  <table className="nc-tbl" style={{ minWidth: 400, fontSize: 12 }}>
+                    <thead><tr><th>对比项</th><th className="is-num">V{viewVer}</th><th className="is-num">{detail.ver}</th><th>变化</th></tr></thead>
+                    <tbody>
+                      <tr><td>报价总额</td><td className="is-num">{viewVer === 1 ? fmt(detail.total * 1.04) : fmt(detail.total)}</td><td className="is-num">{fmt(detail.total)}</td><td>{viewVer === 1 ? '+4%' : '基准'}</td></tr>
+                      <tr><td>整体浮率</td><td className="is-num">{detail.markup}%</td><td className="is-num">{detail.markup}%</td><td>不变</td></tr>
+                      <tr><td>明细行数</td><td className="is-num">{detail.items}</td><td className="is-num">{detail.items}</td><td>不变</td></tr>
+                      <tr><td>区域上浮</td><td className="is-num">{detail.uplift ? detail.uplift + '%' : '无'}</td><td className="is-num">{detail.uplift ? detail.uplift + '%' : '无'}</td><td>不变</td></tr>
+                    </tbody>
+                  </table>
+                  <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 8 }}>
+                    旧版只读保留，避免误改不可恢复。如需基于此版本生成新版本，请点击底部"编辑"按钮。
+                  </div>
+                </div>
+              </>
+            )}
+            {/* 版本历史卡片：紧跟版本对比视图，放在一起不割裂 */}
+            <div className="nc-sec-title" style={{ marginTop: 16 }}>版本历史</div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {[2, 1].map((v) => {
+                const isCur = v === Number(detail.ver.replace('V', ''));
+                return (
+                  <div key={v} style={{
+                    border: `1px solid ${isCur ? 'var(--c-primary)' : 'var(--c-border)'}`,
+                    borderRadius: 6, padding: '8px 12px', minWidth: 140,
+                    background: isCur ? 'var(--c-primary-bg)' : 'var(--c-canvas)',
+                    cursor: isCur ? 'default' : 'pointer',
+                  }} onClick={() => { if (!isCur) setViewVer(null); }}>
+                    <div style={{ fontSize: 13, fontWeight: isCur ? 700 : 400, color: isCur ? 'var(--c-primary)' : 'var(--ink-1)' }}>
+                      V{v}{isCur ? ' · 当前' : ''}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 2 }}>
+                      {v === 2 ? '最新版本' : '历史版本'}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>
+                      {v === 1 ? fmt(detail.total * 1.04) : fmt(detail.total)}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
             <div className={`nc-rulebar${trig(detail) ? ' is-hit' : ' is-ok'}`}>{trigText(detail)}</div>
 
             <KvGrid cols={2} rows={[
@@ -331,6 +405,7 @@ export default function QuotePage({ go, role, nav }: { go: (p: string) => void; 
               ...(detail.approveLevel !== '—' ? [{ date: detail.update, text: `命中触发条件 → 进入待审批 · 路由至${detail.approveLevel}`, tone: 'gold' as const }] : []),
               { date: detail.update, text: `当前状态：${st(detail)}`, tone: st(detail) === '作废' ? 'red' as const : 'gray' as const },
             ]} />
+
           </>
         )}
       </Drawer>
@@ -370,6 +445,12 @@ export default function QuotePage({ go, role, nav }: { go: (p: string) => void; 
             <select className="nc-input" value={fCustomer} onChange={(e) => setFCustomer(e.target.value)}>
               <option value="">请选择客户</option>
               {custOptions.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
+            </select>
+          </Field>
+          <Field label="关联商机" note="可选：选择后报价自动关联商机，便于追溯">
+            <select className="nc-input" value={fOpp} onChange={(e) => setFOpp(e.target.value)}>
+              <option value="">不关联（独立报价）</option>
+              {oppOptions.map((o) => <option key={o.id} value={o.id}>{o.id} · {o.name}</option>)}
             </select>
           </Field>
           <Field label="项目类型" req>
@@ -497,8 +578,8 @@ export default function QuotePage({ go, role, nav }: { go: (p: string) => void; 
             <table className="nc-tbl" style={{ minWidth: 520 }}>
               <thead><tr><th>版本</th><th className="is-num">金额</th><th>日期</th><th>变更说明</th><th>操作</th></tr></thead>
               <tbody>
-                <tr><td><Tag tone="blue">V2</Tag></td><td className="is-num">{fmt(verOpen.total)}</td><td>{verOpen.update}</td><td className="nc-cell-sub">按客户意见调整明细与浮率</td><td><Op>当前</Op></td></tr>
-                <tr><td><Tag>V1</Tag></td><td className="is-num">{fmt(verOpen.total * 1.04)}</td><td>{verOpen.date}</td><td className="nc-cell-sub">首次组价提交</td><td><Op onClick={() => setDiffOpen(true)}>与 V2 对比</Op></td></tr>
+                <tr><td><Tag tone="blue">V2</Tag></td><td className="is-num">{fmt(verOpen.total)}</td><td>{verOpen.update}</td><td className="nc-cell-sub">按客户意见调整明细与浮率</td><td><Op>当前版本</Op></td></tr>
+                <tr><td><Tag>V1</Tag></td><td className="is-num">{fmt(verOpen.total * 1.04)}</td><td>{verOpen.date}</td><td className="nc-cell-sub">首次组价提交</td><td><Op onClick={() => toast(`查看 V1 版报价详情（只读）`)}>查看详情</Op> <Op onClick={() => toast(`已基于 V1 生成 V3 新版本草稿`)}>编辑新版本</Op></td></tr>
               </tbody>
             </table>
           </>

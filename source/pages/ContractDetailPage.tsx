@@ -14,7 +14,7 @@ import {
   CONTRACTS, CONTRACT_STATUS_TONE, CONTRACT_TERMINATE_TYPES, CUSTOMERS, PROJECTS,
   SIGN_LOCATE_MODES, SIGN_ORDERS, SIGN_SEAL_TYPES, canSeeMoney, fmt, fmtWan, normContractStatus, signStatusOf, TODAY,
 } from '../components/data';
-import type { SignConfig, SignParty } from '../components/data';
+import type { Installment, SignConfig, SignParty } from '../components/data';
 import {
   getSignConfig, patchContract, saveSignConfig, setBizStatus, setPendingProject,
   signOneParty, startSign, subscribeStore, withdrawSign,
@@ -189,8 +189,21 @@ const PLAN_TPL: [string, number][] = [
   ['尾款（竣工验收合格）', 27],
   ['质保金（质保期满结清）', 3],
 ];
-/** 收款计划：计划额按 30/40/27/3（末期兜底差额，质保金封顶法定 3%）；实收按已收总额逐期填充 → 出现「部分收款」态 */
-function buildPlans(total: number, recv: number, sign: string, end: string): PlanRow[] {
+/**
+ * 收款计划：**优先用合同自带的收款期次**（`Contract.installments`，来自签约时约定的收款节点）。
+ * 无期次数据（如框架协议、子合同按工作量拆分）时才按 30/40/27/3 模板套算：
+ * 计划额末期兜底差额、质保金封顶法定 3%；实收按已收总额逐期填充 → 出现「部分收款」态。
+ */
+function buildPlans(total: number, recv: number, sign: string, end: string, inst?: Installment[]): PlanRow[] {
+  if (inst && inst.length) {
+    return inst.map((it, i) => {
+      const stype: PlanRow['stype'] = it.got === 0 ? 'pending' : it.got < it.amt ? 'part' : 'done';
+      return {
+        no: i + 1, node: it.n, plan: it.amt, actual: it.got, stype,
+        date: it.plan, status: stype === 'done' ? '已收款' : stype === 'part' ? '部分收款' : '待收款',
+      };
+    });
+  }
   const dues = [addDays(sign, 7), addDays(end, -90), end, addMonths(end, 12)];
   const plans = PLAN_TPL.map(([, pct]) => Math.round(total * pct / 100));
   plans[3] = total - plans[0] - plans[1] - plans[2];
@@ -258,7 +271,7 @@ function buildMain(c: C, role: string): CView {
     owner: c.owner, contact: '王芳', phone: '138-0000-8888',
     industry: guessIndustry(c), region: guessRegion(c),
     details: buildDetails(c.execAmt, period),
-    plans: buildPlans(c.execAmt, c.recv, c.sign, c.end),
+    plans: buildPlans(c.execAmt, c.recv, c.sign, c.end, c.installments),
     files: buildFiles(c),
     projects: c.project ? [{ code: c.project, name: proj ? proj.name : c.project, owner: c.owner, status: '进行中', stype: 'processing' }] : [],
     logs: [
@@ -576,8 +589,10 @@ export default function ContractDetailPage({ go, role, nav }: { go: (p: string) 
 
   /* ---- 问题条（点击跳转到对应 Tab） ---- */
   const issues: { tone: string; text: string; tab: string }[] = [];
+  /* 逾期指向「首个未收齐的期次」而非写死 plans[1]：期次数随合同而异（单期合同只有 1 行） */
+  const firstOpen = cur.plans.find((p) => p.stype !== 'done');
   if (c.overpay) issues.push({ tone: 'is-red', text: ' 超付预警：累计已付已接近执行金额上限，继续付款将被硬拦截', tab: 'pay' });
-  if (c.overdue) issues.push({ tone: 'is-red', text: `期2 已收 ${moneyTxt(cur.plans[1].actual, role, true)} / 应收 ${moneyTxt(cur.plans[1].plan, role, true)}，差额 ${moneyTxt(cur.plans[1].plan - cur.plans[1].actual, role, true)} · 逾期风险`, tab: 'money' });
+  if (c.overdue && firstOpen) issues.push({ tone: 'is-red', text: `${firstOpen.node} 已收 ${moneyTxt(firstOpen.actual, role, true)} / 应收 ${moneyTxt(firstOpen.plan, role, true)}，差额 ${moneyTxt(firstOpen.plan - firstOpen.actual, role, true)} · 逾期风险`, tab: 'money' });
   if (cSt === '待审批') issues.push({ tone: 'is-orange', text: ' 待我审批：该合同尚未完成审批流转，请在本页页脚「同意 / 驳回」处理', tab: 'appr' });
   if (signSt === '签署中') issues.push({ tone: 'is-orange', text: ' 电子签进行中：尚有签署方未完成签署，全部完成后合同方可转「已签约」', tab: 'sign' });
   if (signSt === '已签' && cSt === '待审批') issues.push({ tone: 'is-gold', text: ' 电子签已完成：合同可转「已签约」（在「电子签」页签确认）', tab: 'sign' });
@@ -710,7 +725,7 @@ export default function ContractDetailPage({ go, role, nav }: { go: (p: string) 
             {/* 上游来源单据（投标 → 合同 / 报价 → 合同）：按外键反查，修复前这两个字段落了库却没有出口 */}
             {c.bidId && <span>中标依据 {go ? <EntityLink target="bid" id={c.bidId} go={go} title="下钻到中标投标单">{c.bidId}</EntityLink> : c.bidId}</span>}
             {c.quoteId && <span>来源报价 {go ? <EntityLink target="quote-detail" id={c.quoteId} go={go} title="下钻到来源报价单">{c.quoteId}</EntityLink> : c.quoteId}</span>}
-            {c.project && <span>关联项目 {go ? <EntityLink target="project-center" id={c.project} go={go} title="下钻到项目经营中心">{c.project}</EntityLink> : c.project}</span>}
+            {c.project && <span>关联项目 {go ? <EntityLink target="project-center" id={c.project} go={go} title="下钻到项目详情">{c.project}</EntityLink> : c.project}</span>}
             <span>工期 {cur.start} → {cur.end}</span>
             <span>签约 {cur.sign}</span>
           </div>
@@ -1117,7 +1132,7 @@ export default function ContractDetailPage({ go, role, nav }: { go: (p: string) 
                   </td>
                 </tr></tfoot>
               </table>
-              {c.overdue && <div className="nc-warnbox is-red"><Ico n="ban" size={16} /> 期2 应收 <Money v={cur.plans[1].plan} role={role} />，已收 <Money v={cur.plans[1].actual} role={role} />，差额 <b><Money v={cur.plans[1].plan - cur.plans[1].actual} role={role} /></b>；驾驶舱「逾期应收」已联动。</div>}
+              {c.overdue && firstOpen && <div className="nc-warnbox is-red"><Ico n="ban" size={16} /> {firstOpen.node} 应收 <Money v={firstOpen.plan} role={role} />，已收 <Money v={firstOpen.actual} role={role} />，差额 <b><Money v={firstOpen.plan - firstOpen.actual} role={role} /></b>；驾驶舱「逾期应收」已联动。</div>}
             </>
           )}
 
@@ -1239,7 +1254,7 @@ export default function ContractDetailPage({ go, role, nav }: { go: (p: string) 
                     <tbody>
                       {cur.projects.map((p) => (
                         <tr key={p.code}>
-                          <td>{go ? <EntityLink target="project-center" id={p.code} go={go} strong title="下钻到项目经营中心">{p.code}</EntityLink> : <span className="num">{p.code}</span>}</td>
+                          <td>{go ? <EntityLink target="project-center" id={p.code} go={go} strong title="下钻到项目详情">{p.code}</EntityLink> : <span className="num">{p.code}</span>}</td>
                           <td>{p.name}</td>
                           <td>{p.owner}</td>
                           <td><Tag tone={STYPE_TONE[p.stype] ?? 'gray'}>{p.status}</Tag></td>

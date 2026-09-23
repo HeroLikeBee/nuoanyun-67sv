@@ -1,9 +1,10 @@
 // 项目详情 · 商务合同子页
 //
 // 回答「合同怎么签的、钱怎么收的、支出怎么走的、变更签证怎么算的」。
-// 口径：合同树按收款 / 付款方向分组；收款期次展开看实收与开票；变更与签证是执行额的来源。
+// 口径：合同树按收款 / 付款方向分组；收款期次展开看实收与开票。
+// 变更与签证是合同单据（要签补充协议）—— 本项目页只承接结果，发起入口回落到合同详情「变更与签证」。
 import React, { useState } from 'react';
-import { Btn, Card, Code, EntityLink, IdCell, Money, Steps, Tag, Tip } from '../ui';
+import { Btn, Card, Code, EntityLink, IdCell, Money, Op, Steps, Tag, Tip } from '../ui';
 import { Ico } from '../icons';
 import { PjSection } from './PjSection';
 import type { PjCtx, PjSaleContract } from './ctx';
@@ -27,6 +28,11 @@ const CHANGES = [
 ];
 const FLOW = ['发起', 'PM 审核', '商务审批', '客户确认', '生效'];
 const PAY_FILTERS = ['全部', '收入', '采购付款', '无合同付款', '红字冲销单'];
+
+/** 收款期次状态 → 徽标色（与全站语义色一致：绿=已走完 / 金=部分 / 蓝=进行中 / 红=逾期 / 灰=未到期） */
+const INST_TONE: Record<string, 'green' | 'gold' | 'blue' | 'red' | 'gray'> = {
+  已到账: 'green', 部分到账: 'gold', '已开票·待到账': 'blue', 逾期未收: 'red', 未到期: 'gray',
+};
 
 /** 合同树：收款类（销售 / 维保 / 补充协议）+ 付款类（采购 / 分包） */
 function ContractTree({ C }: { C: PjCtx }) {
@@ -115,24 +121,26 @@ function ContractTree({ C }: { C: PjCtx }) {
             </span>
             <span style={{ marginLeft: 'auto' }}><Btn size="sm" onClick={() => toggle(c.code)}>收起 ▲</Btn></span>
           </div>
-          <table className="nc-tbl" style={{ minWidth: 900 }}>
+          <table className="nc-tbl" style={{ minWidth: 1010 }}>
             <thead><tr>
               <th style={{ width: 150 }}>收款期次</th>
               <th style={{ width: 110 }} className="is-num">应收金额</th>
               <th style={{ width: 160 }}>实收情况</th>
               <th style={{ width: 110 }}>实收日期</th>
               <th style={{ width: 100 }}>开票状态</th>
+              <th style={{ width: 100 }}>状态</th>
               <th style={{ width: 110 }}>计划日期</th>
               <th>备注</th>
             </tr></thead>
             <tbody>
               {c.payplan!.map((p) => (
-                <tr key={p.n} className={p.st === '已开票·待到账' ? 'is-warn-row' : ''}>
+                <tr key={p.n} className={p.st === '已开票·待到账' || p.st === '逾期未收' ? 'is-warn-row' : ''}>
                   <td>{p.n}</td>
                   <td className="is-num num">{p.amt.toLocaleString()}</td>
                   <td className="num">{p.got > 0 ? p.got.toLocaleString() : '—'} <span className="nc-cell-sub">/ {p.amt.toLocaleString()}</span></td>
                   <td className="num">{p.gotDate}</td>
                   <td><Tag tone={p.inv === '已开票' ? 'blue' : 'gray'}>{p.inv}</Tag></td>
+                  <td><Tag tone={INST_TONE[p.st] ?? 'gray'}>{p.st}</Tag></td>
                   <td className="num">{p.plan}</td>
                   <td className="nc-cell-sub">{p.note}</td>
                 </tr>
@@ -194,18 +202,19 @@ function PayFlow({ C }: { C: PjCtx }) {
   );
 }
 
-/** 变更与签证：执行额的来源；签证未走完变更审批不计入执行额、不可据此收款 */
+/** 变更与签证：变更是合同单据（要签补充协议），项目侧只读结果，发起入口回落到合同 */
 function ChangeVisa({ C }: { C: PjCtx }) {
   return (
     <PjSection
       title={<><Ico n="swap" size={16} /> 变更与签证</>}
       extra={<>
         <span className="nc-cell-sub">执行额 = 合同额 + 已生效变更 {C.CHG_EFFECTIVE.toLocaleString()}{C.CHG_PENDING > 0 ? ` · 审批中 +${C.CHG_PENDING.toLocaleString()}` : ''}</span>
-        <Btn size="sm" kind="primary" onClick={() => C.openM('change')}>＋ 发起变更</Btn>
+        <Tip w={400} text="变更属合同单据（生效后要签补充协议），因此只能由合同发起：项目侧展示它落到本项目的结果，发起请回到对应合同的「变更与签证」。" />
+        <Btn size="sm" kind="primary" onClick={() => C.gotoContractChange()}>到合同发起变更 →</Btn>
       </>}
     >
       <div className="nc-ledhd">合同变更 <b>{CHANGES.length}</b>
-        <Tip w={380} text="变更流程：发起 → PM 审核 → 商务审批 → 客户确认 → 生效。已生效变更进执行额；审批中暂计入展示口径，不计现金。" />
+        <Tip w={380} text="变更流程：发起 → PM 审核 → 商务审批 → 客户确认 → 生效。已生效变更进执行额；审批中暂计入展示口径，不计现金。变更单由对应合同发起并归档。" />
       </div>
       {CHANGES.map((c) => (
         <div key={c.id} className="nc-ctcard">
@@ -214,7 +223,11 @@ function ChangeVisa({ C }: { C: PjCtx }) {
             <Tag tone={c.st === '已生效' ? 'green' : 'blue'}>{c.st}</Tag>
             <span className="nc-ctcard-amt">+{c.amt.toLocaleString()}</span>
           </div>
-          <div className="nc-cell-sub">{c.cat} · 关联 {c.contract} · {c.by} · {c.date}</div>
+          <div className="nc-cell-sub">
+            {c.cat} · 归属合同{' '}
+            <Op onClick={() => C.gotoContractChange(c.contract)} title={`打开合同 ${c.contract} 的「变更与签证」`}>{c.contract}</Op>
+            {' '}· {c.by} · {c.date}
+          </div>
           <Steps items={FLOW.map((f) => ({ label: f }))} cur={c.st === '已生效' ? FLOW.length : (c.flowIdx ?? 0) + 1} />
         </div>
       ))}
@@ -241,7 +254,7 @@ function ChangeVisa({ C }: { C: PjCtx }) {
               <td>{v.chg === '—' ? <span className="nc-cell-sub">未生成</span> : <Code>{v.chg}</Code>}</td>
               <td>
                 {v.chgSt === '未生成变更单'
-                  ? <Btn size="sm" onClick={() => C.openM('change')}>生成变更单</Btn>
+                  ? <Btn size="sm" onClick={() => C.gotoContractChange()} title="到对应合同「变更与签证」把该签证转为变更单">去合同生成</Btn>
                   : <Tag tone="blue">{v.chgSt}</Tag>}
               </td>
             </tr>
@@ -250,7 +263,7 @@ function ChangeVisa({ C }: { C: PjCtx }) {
       </table>
       <div className="nc-gate-block" style={{ background: 'var(--c-warning-bg)', borderColor: 'var(--c-warning-border)' }}>
         <Ico n="warning" size={14} />
-        存在 1 笔未生成变更单的签证（QZ000006 · 23,500 元）—— 在生成变更单并生效前，该金额不计入执行额、不可据此向甲方收款。
+        存在 1 笔未生成变更单的签证（QZ000006 · 23,500 元）—— 变更单须在合同侧生成（入口：合同详情「变更与签证」→ ＋ 新增变更）；生效并签补充协议前，该金额不计入执行额、不可据此向甲方收款。
       </div>
     </PjSection>
   );

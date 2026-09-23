@@ -399,7 +399,12 @@ h1, h2, h3, h4 { margin: 0; font-weight: 600; }
   color: rgba(0, 0, 0, .25); border-color: var(--c-hairline);
   cursor: not-allowed; background: var(--c-surface-soft);
 }
-.nc-btn:disabled:hover { color: rgba(0, 0, 0, .25); border-color: var(--c-hairline); }
+/* ⚠️ 必须补 background：`.nc-btn:disabled` 与 `.nc-btn-primary:hover` / `.nc-btn-danger:hover`
+   特异性同为 (0,2,0)，后者位置在后会胜出 —— 漏掉 background 会让「已禁用的主按钮」
+   在鼠标悬停时复活成蓝色 #40a9ff，看起来可点、点了没反应。本规则 (0,3,0) 兜住。 */
+.nc-btn:disabled:hover, .nc-btn.is-disabled:hover {
+  color: rgba(0, 0, 0, .25); border-color: var(--c-hairline); background: var(--c-surface-soft);
+}
 .nc-btn-primary { background: var(--c-primary); border-color: var(--c-primary); color: var(--c-canvas); }
 .nc-btn-primary:hover { background: var(--c-primary-hover); border-color: var(--c-primary-hover); color: var(--c-canvas); }
 .nc-btn-danger { color: var(--c-danger); border-color: var(--c-danger-border); background: var(--c-canvas); }
@@ -685,7 +690,7 @@ h1, h2, h3, h4 { margin: 0; font-weight: 600; }
   color: var(--c-primary); font-size: 13px; padding: 2px 4px; white-space: nowrap;
   background: none; border: 0; cursor: pointer; transition: opacity .15s;
 }
-.nc-op:hover { opacity: .7; }
+.nc-op:hover:not(:disabled):not([disabled]) { opacity: .7; }
 .nc-op.is-danger { color: var(--c-danger); }
 .nc-op.is-gold { color: var(--c-warning-deep); }
 .nc-op-sep { color: var(--c-hairline-strong); margin: 0 2px; font-size: 12px; }
@@ -1363,6 +1368,8 @@ textarea.nc-input { height: auto; padding: 7px 10px; line-height: 20px; resize: 
 .nc-cell-in.is-red, .is-red { color: var(--c-danger) !important; }
 .nc-cell-in.is-orange, .is-orange { color: var(--c-warning) !important; }
 .nc-tbl tr.is-miss td { background: var(--c-danger-bg); }
+/* 报价明细：材料名称为空时，把提示精确落到「名称」这一格（与行级 is-miss 叠加） */
+.nc-tbl td.cell-miss { background: var(--c-danger-bg); box-shadow: inset 0 0 0 1px var(--c-danger-border); }
 .nc-tbl-group td {
   background: var(--c-fill-1) !important; padding: 6px 10px !important;
   border-top: 1px solid var(--c-border);
@@ -1374,6 +1381,8 @@ textarea.nc-input { height: auto; padding: 7px 10px; line-height: 20px; resize: 
   padding: 1px 4px; cursor: pointer; white-space: nowrap;
 }
 .nc-refbtn:hover { background: var(--c-gold-2); }
+.nc-cost-cell { display: flex; align-items: center; gap: 2px; }
+.nc-cost-cell .nc-cell-in { flex: 1; width: auto; min-width: 0; }
 .nc-tbl-sum td { background: var(--c-fill-1) !important; font-weight: 600; }
 .nc-tbl tfoot .nc-tbl-sum { border-top: 2px solid var(--c-border); }
 .nc-tbl tr.is-muted td, tr.is-muted td { color: var(--ink-3); background: var(--c-surface-soft); }
@@ -3369,7 +3378,7 @@ tr.is-warn-row td, tr.is-danger-row td, tr.trig-hit td,
 .nc-batchbar-ops { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; }
 
 /* 第 6 条 · 操作列主操作（详情）链接化：hover 下划线，与「···」保持主次区分 */
-.nc-ops .nc-op:hover { text-decoration: underline; }
+.nc-ops .nc-op:hover:not(:disabled):not([disabled]) { text-decoration: underline; }
 
 /* ==================================================================
  * 立项向导（新增项目）· 改造清单 第 10–41 条

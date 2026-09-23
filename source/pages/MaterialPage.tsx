@@ -20,7 +20,7 @@ import {
   RFQ_ROWS as RFQ_SEED, RFQ_TONE, SUPPLIERS, TODAY, UNITS, UNIT_DESC, WAREHOUSES as WH, WH_STOCK_SEED,
   catOptions, catPath, catSubtreeIds, catVersion, daysLeft, fmt, fmtWan, inheritsMand, isStocked, itemBatches,
   laborRate, matPriceTrend, matSupQuotes, opNo, poNo, priceHistory, recipeCost, serviceCost, suggestSale,
-  subscribeCats,
+  can, subscribeCats,
   FLOW_ROWS as FLOW_SEED, FLOW_TONE,
   type CertRow, type ConsumableLine, type FlowRow, type Item, type ItemKind, type LaborLine, type MatAuditRow,
   type RecipeLine, type RfqRow,
@@ -47,12 +47,12 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
   useSyncExternalStore(subscribeCats, catVersion, catVersion);
 
   /**
-   * 主数据写入权限（与页面上「权限说明」同源，不再是空话）：
-   * 主数据 / 配方 / 调价属于口径与成本动作，仅 总经理 / 分管副总 / 项目经理 / 超级管理员 可写。
-   * 无权时不静默失效，而是明确告知缺少哪个角色 —— 原型可切换角色演示。
+   * 主数据写入权限（M10）：统一走 `can(role, 'material')` —— 与左侧菜单「角色 × 模块」矩阵同源，
+   * 不再本页自留一份角色白名单（两套口径迟早打架：本页原先只放 4 个角色，而菜单对「物料与服务」
+   * 还开放了财务，改一处忘一处就会出现「菜单进得来、按钮点不动」或反之）。
+   * 无权时不静默失效，而是明确告知当前角色无权限 —— 原型可切换角色演示。
    */
-  const WRITE_ROLES = ['boss', 'deputy', 'pm', 'sysadmin'];
-  const canWrite = WRITE_ROLES.includes(role);
+  const canWrite = can(role, 'material');
   const guardWrite = (fn: () => void) => () => {
     if (canWrite) { fn(); return; }
     toast(`当前角色（${role}）无主数据写入权限 · 需 项目经理 / 分管副总 / 总经理 / 超级管理员`, 'err');
@@ -549,7 +549,8 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
           <Btn onClick={() => { setDomain('cmp'); setTab('audit'); setPage(1); }} title="操作日志（关键操作审计）"><Ico n="clipboard" size={16} /> 日志</Btn>
           <Btn onClick={() => go('settings')} title="分类 / 单位 / 认证标记 / 人工工种单价等公共基线维护"><Ico n="gear" size={16} /> 系统设置</Btn>
           <Btn onClick={() => setImportOpen(true)}>批量导入</Btn>
-          <Btn kind="primary" onClick={() => { setNewErr(''); setNewOpen(true); }}>＋ 新增主数据</Btn>
+          <Btn kind="primary" disabled={!canWrite} title={canWrite ? undefined : `当前角色（${role}）无主数据维护权限`}
+            onClick={() => { if (!canWrite) { toast('当前角色无主数据维护权限', 'err'); return; } setNewErr(''); setNewOpen(true); }}>＋ 新增主数据</Btn>
         </>}
       />
 
@@ -626,7 +627,7 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
               <DataTable cols={cols} rows={paged} rowKey={(m) => m.id} minWidth={1400}
                 onRowClick={(m) => (!isStocked(m.ty) ? openRecipe(m.code) : setDetail(m))}
                 empty="没有符合筛选条件的条目；材料 / 设备需库存，服务 / 套件需配方，均可在此新建"
-                emptyCta={<Btn size="sm" kind="primary" onClick={() => setNewOpen(true)}>＋ 新增主数据</Btn>}
+                emptyCta={<Btn size="sm" kind="primary" disabled={!canWrite} onClick={() => { if (!canWrite) { toast('当前角色无主数据维护权限', 'err'); return; } setNewOpen(true); }}>＋ 新增主数据</Btn>}
                 foot={<TableFoot total={base.length} filtered={filtered.length} page={page} pageSize={pageSize} onPage={setPage} onPageSize={(n) => { setPageSize(n); setPage(1); }} />} />
               </Card>
             </div>
@@ -916,7 +917,7 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
             toast(`${detail.code} 已${detail.status === '启用' ? '停用' : '启用'}`);
             setDetail(null);
           }} danger>{detail?.status === '启用' ? '停用' : '启用'}</Btn>
-          {detail && !isStocked(detail.ty) && <Btn onClick={() => { const c = detail.code; setDetail(null); openRecipe(c); }} kind="primary">编辑配方 / 成本构成</Btn>}
+          {detail && !isStocked(detail.ty) && canWrite && <Btn onClick={() => { const c = detail.code; setDetail(null); openRecipe(c); }} kind="primary">编辑配方 / 成本构成</Btn>}
           <Btn onClick={() => setDetail(null)}>关闭</Btn>
         </>}>
         {detail && <>
@@ -1057,7 +1058,7 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
           {recipeFor && byCode(recipeFor)?.ty === '套件' && draftCost && draftCost.gross < 20 && (
             <Btn onClick={() => { setPriceOpen(recipeFor); setPriceVal(String(suggestSale(draftCost.total))); }}>调价</Btn>
           )}
-          <Btn kind="primary" onClick={saveRecipe}>保存配方</Btn>
+          <Btn kind="primary" disabled={!canWrite} onClick={saveRecipe}>保存配方</Btn>
         </>}>
         {recipeFor && (
           <>

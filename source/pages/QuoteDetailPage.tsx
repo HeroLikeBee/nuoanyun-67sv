@@ -5,14 +5,15 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   Btn, Banner, Card, EntityLink, KvGrid, Modal, Money, PageHead, Tag, Timeline, useToast, Code,
 } from '../components/ui';
-import { fmt, TODAY } from '../components/data';
-import { getBizStatus, getFocus, getProjects, getQuotes, subscribeStore } from '../components/store';
+import { RECIPES, fmt, verNo } from '../components/data';
+import type { QuoteVersion } from '../components/data';
+import { getApprovals, getBizStatus, getFocus, setFocus, getProjects, getQuotes, subscribeStore } from '../components/store';
 import { Ico } from '../components/icons';
 
 /* G3：原 const Q = QUOTES[0] 硬编码索引 0 —— 从任何入口进入都只看 BJ000011。
    改为组件内读取聚焦 ID（上游页面跳转前写入 store），并以 nav 为依赖重新解析，
    保证「客户 → 报价 → 客户 → 另一张报价」这类反复下钻都能正确定位。
-   项目面积 / 设备行下标也改为按当前报价单明细派生（见组件内 AREA / DEVICE_IDX），
+   项目面积 / 设备行金额也改为按当前报价单明细派生（见组件内 AREA / devSum），
    不再用模块级常量 —— 那两个常量只对 BJ000011 成立。 */
 
 /**
@@ -44,16 +45,62 @@ const REF = [
   { name: '楚雄州中医医院 · 消防升级项目', date: '2026-02', amt: 3890000, area: 31000, up: 125.5 },
 ];
 
-/** V1 → V2 变更对比（含「不变 / 已删除 / 新增」性质列） */
-const DIFF_ROWS: [string, string, string, string, 'warn' | 'gray' | 'danger' | 'info' | 'sum'][] = [
-  ['火灾自动报警系统（元/㎡）', '74', '72', '单价 -2', 'warn'],
-  ['消火栓及喷淋改造（元/㎡）', '56', '56', '不变', 'gray'],
-  ['消防主机及联动调试', '¥1,352,000', '¥1,332,194', '-¥19,806', 'warn'],
-  ['应急照明系统改造', '¥130,000', '—', '已删除（院方预算）', 'danger'],
-  ['区域上浮', '0%', '3%', '新增云南区域上浮', 'info'],
-  ['总额', '¥4,862,000', '¥4,800,000', '-¥62,000', 'sum'],
-];
+/**
+ * 版本差异派生（替代原写死的 DIFF_ROWS）。
+ * 原来那 6 行只描述 BJ000011 的 V1→V2，打开任何一张报价单看到的都是「昆明万达的差异」，
+ * 属典型的假数据；现在改为按两版快照的明细行做真实差异回放。
+ * 行对齐键：优先物料编码 matId，无 matId 的手输行 / 安装工程费包干行按「目录 + 名称」对齐。
+ */
+type DiffRow = { name: string; v1: string; v2: string; chg: string; tone: 'warn' | 'gray' | 'danger' | 'info' | 'sum' };
 const DIFF_TONE: Record<string, string> = { warn: 'var(--c-warning-deep)', gray: 'var(--ink-3)', danger: 'var(--c-danger-deep)', info: 'var(--c-primary)', sum: 'var(--c-warning-deep)' };
+
+const dKey = (l: { matId?: string; cat?: string; name: string }) => l.matId || `${l.cat ?? ''}|${l.name}`;
+const dAmt = (l: { qty: number; price: number }) => Math.round(l.qty * l.price);
+
+/**
+ * 该物料所属套件的「当前」配方版本（M8）。
+ * 明细行只记了「按 V1.2 计价」，要提示「当前 V1.3」需反查套件配方；
+ * 两者不一致即说明配方在上游升过版，本单成本口径需复核。
+ */
+const kitCurVer = (code: string): string | undefined => {
+  for (const key of Object.keys(RECIPES)) {
+    const R = RECIPES[key];
+    const cur = R.versions.find((v) => v.v === R.cur);
+    if (cur?.lines.some((l) => l.code === code)) return R.cur;
+  }
+  return undefined;
+};
+
+/** 对比两版快照明细：逐行给出 不变 / 改价 / 已删除 / 新增，末尾补「区域上浮」与「明细基价合计」 */
+function buildDiff(prev: QuoteVersion, cur: QuoteVersion): DiffRow[] {
+  const rows: DiffRow[] = [];
+  const curMap = new Map(cur.lines.map((l) => [dKey(l), l]));
+  const hit = new Set<string>();
+  for (const l of prev.lines) {
+    const k = dKey(l);
+    const a = dAmt(l);
+    const c = curMap.get(k);
+    if (!c) { rows.push({ name: l.name, v1: fmt(a), v2: '—', chg: '已删除', tone: 'danger' }); continue; }
+    hit.add(k);
+    const b = dAmt(c);
+    rows.push(a === b
+      ? { name: l.name, v1: fmt(a), v2: fmt(b), chg: '不变', tone: 'gray' }
+      : { name: l.name, v1: fmt(a), v2: fmt(b), chg: `${b > a ? '+' : '−'}${fmt(Math.abs(b - a))}`, tone: 'warn' });
+  }
+  for (const l of cur.lines) {
+    if (hit.has(dKey(l))) continue;
+    rows.push({ name: l.name, v1: '—', v2: fmt(dAmt(l)), chg: '新增', tone: 'info' });
+  }
+  if (prev.uplift !== cur.uplift) {
+    rows.push({ name: '区域上浮', v1: `${prev.uplift}%`, v2: `${cur.uplift}%`, chg: cur.uplift > prev.uplift ? '上浮上调' : '上浮下调', tone: 'info' });
+  }
+  const curSum = cur.lines.reduce((a, l) => a + dAmt(l), 0);
+  rows.push({
+    name: '明细基价合计', v1: fmt(prev.amt), v2: fmt(curSum),
+    chg: `${curSum >= prev.amt ? '+' : '−'}${fmt(Math.abs(curSum - prev.amt))}`, tone: 'sum',
+  });
+  return rows;
+}
 
 export default function QuoteDetailPage({ go, role, nav }: { go: (p: string) => void; role: string; nav?: number }) {
   const toast = useToast();
@@ -83,31 +130,62 @@ export default function QuoteDetailPage({ go, role, nav }: { go: (p: string) => 
 
   /** 明细：优先用 data.ts 存储的明细行（引用物料ID），无存储行时回退模板按总额分摊 */
   const LINES = useMemo(() => {
-    const stored = (Q as any).lines as { matId?: string; name: string; spec?: string; unit: string; qty: number; price: number }[] | undefined;
+    const stored = (Q as any).lines as { matId?: string; name: string; spec?: string; unit: string; qty: number; price: number; recipeVer?: string }[] | undefined;
     if (stored && stored.length) {
       return stored.map((l) => ({
         bt: l.matId ? '材料/设备（从物料库选择）' : '安装工程',
         name: l.spec ? `${l.name}（${l.spec}）` : l.name,
         unit: l.unit, qty: l.qty, price: l.price, w: 0,
+        /** 配方版本快照（M8）：该行来自套件配方时记下当时的版本号 */
+        recipeVer: l.recipeVer,
+        /** 该物料所属套件的当前配方版本（用于提示「按 V1.2 计价 · 当前 V1.3」） */
+        curVer: l.matId ? kitCurVer(l.matId) : undefined,
       }));
     }
-    return linesOf(Q.total);
+    return linesOf(Q.total).map((l) => ({ ...l, recipeVer: undefined as string | undefined, curVer: undefined as string | undefined }));
   }, [Q]);
   const preTotal = LINES.reduce((a, l) => a + linkAmt(l), 0);
   const total = LINES.reduce((a, l) => a + lineUp(l, uplift), 0);
 
   /**
-   * 项目面积：取明细中「㎡」计量行的数量（按当前报价单明细派生，无 ㎡ 行时回落到原型常量）。
+   * 项目面积：优先取报价单自身的 `area`（报价工作台录入 / 落库），
+   * 无值时回落到明细中「㎡」计量行的数量，仍无则用原型常量。
    * 设备 / 平台接入行（「项」计量）在计算「工程费单方」时剔除。
    * 修复前两者是模块级常量 26000 / 2，只对 BJ000011 成立，别的报价单单方造价全错。
    */
-  const AREA = LINES.find((l) => l.unit === '㎡')?.qty || 26000;
-  const DEVICE_IDX = LINES.findIndex((l) => l.unit === '项');
+  const AREA = Q.area || LINES.find((l) => l.unit === '㎡')?.qty || 26000;
+  /** 设备 / 平台接入 / 服务费行（单位「项」）不参与单方造价，按整行剔除（不止首行） */
+  const devSum = LINES.filter((l) => l.unit === '项').reduce((a, l) => a + lineUp(l, uplift), 0);
 
-  /** 初版基价锚点：明细未含区域上浮的合计（数据模型无版本历史，故以「未上浮基价」为 V1 参照，
-      不再写死 4862000 —— 那个数字只对 BJ000011 成立）。 */
-  const V1_AMT = preTotal;
-  const v1Diff = total - V1_AMT;
+  /**
+   * 版本历史：按 ver 升序。curSnap = 当前版快照（无快照则退化为「实时明细」），
+   * prevSnap = 上一版快照 —— 版本对比就是这两版的差异，不再拿写死的静态行冒充。
+   */
+  const verList = useMemo(() => (Q.versions ?? []).slice().sort((a, b) => verNo(a.ver) - verNo(b.ver)), [Q]);
+  const curSnap = verList.find((v) => v.ver === Q.ver) ?? verList[verList.length - 1];
+  const prevSnap = curSnap ? verList.filter((v) => verNo(v.ver) < verNo(curSnap.ver)).pop() : undefined;
+  const diffRows = useMemo(() => (prevSnap && curSnap ? buildDiff(prevSnap, curSnap) : []), [prevSnap, curSnap]);
+  /** 下一版版本号（V2 → V3）：升版按钮与弹窗标题共用，不再各处写死「V3」 */
+  const nextVer = `V${verNo(Q.ver) + 1}`;
+
+  /**
+   * 流转记录：按审批单 ref 命中本报价单派生（ref 形如「BJ000011 报价单 V2」）。
+   * 修复前是 5 行写死的昆明万达流转文案，打开任何报价单都长一样。
+   */
+  const flows = useMemo(() => {
+    const rows: { date: string; text: string; tone: 'ok' | 'red' | 'gold' }[] = [];
+    rows.push({ date: Q.date, text: `创建 ${Q.ver} 并提交审批（负责人 ${Q.owner}）`, tone: 'ok' });
+    getApprovals()
+      .filter((a) => a.ref.includes(Q.id))
+      .slice()
+      .sort((a, b) => a.time.localeCompare(b.time))
+      .forEach((a) => {
+        const tone = a.status === '已退回' ? 'red' : a.status === '已通过' ? 'ok' : 'gold';
+        const tail = a.status === '已退回' ? `驳回：${a.reason || '未填写原因'}` : a.status === '已通过' ? `${a.level} · 审批通过` : `${a.level} · ${a.status}`;
+        rows.push({ date: a.time.slice(0, 10), text: `${a.ap} · ${tail}`, tone });
+      });
+    return rows;
+  }, [Q.id, Q.ver, Q.date, Q.owner, tick]);
 
   /** 税率口径：含税 → 税额 = 总额×税率÷(100+税率)；不含税 → 税额 = 总额×税率÷100 */
   const taxInfo = () => {
@@ -121,7 +199,7 @@ export default function QuoteDetailPage({ go, role, nav }: { go: (p: string) => 
     return { mode: '不含税', rate, tax, net: total, gross: total + tax };
   };
   const t = taxInfo();
-  const eng = total - (DEVICE_IDX >= 0 ? lineUp(LINES[DEVICE_IDX], uplift) : 0);
+  const eng = total - devSum;
   const unit = AREA > 0 ? eng / AREA : 0;
 
   const mean = REF.reduce((a, r) => a + r.up, 0) / REF.length;
@@ -151,9 +229,7 @@ export default function QuoteDetailPage({ go, role, nav }: { go: (p: string) => 
         sub={`${Q.name} · ${Q.customer} · 负责人 ${Q.owner}`}
         actions={<>
           <Btn onClick={() => go('quote')}>← 返回台账</Btn>
-          <Btn kind="primary" onClick={() => setV3Open(true)}>生成 V3（按意见调整）</Btn>
-          <Btn onClick={() => go('approval')}>查看审批进度</Btn>
-          <Btn danger onClick={() => setRecallOpen(true)}>撤回审批</Btn>
+          <Btn kind="primary" onClick={() => { setFocus('quote-edit', Q.id); go('quote-edit'); }}>编辑报价</Btn>
         </>}
       />
 
@@ -177,8 +253,10 @@ export default function QuoteDetailPage({ go, role, nav }: { go: (p: string) => 
         </div>
       </div>
 
+      <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
       {/* 基本信息 */}
-      <Card hd="基本信息" extra={<span className="nc-cell-sub">关联项目 {relProj ? <EntityLink target="project-center" id={relProj.id} go={go} title="下钻到项目经营中心">{relProj.id} →</EntityLink> : '—'}</span>}>
+      <Card hd="基本信息" extra={<span className="nc-cell-sub">关联项目 {relProj ? <EntityLink target="project-center" id={relProj.id} go={go} title="下钻到项目详情">{relProj.id} →</EntityLink> : '—'}</span>}>
         <div className="nc-rv-grid">
           <KvGrid cols={2} rows={[
             { k: '客户', v: <EntityLink target="customer" id={Q.customerId} go={go} title="下钻到客户档案">{Q.customer}</EntityLink> },
@@ -239,10 +317,21 @@ export default function QuoteDetailPage({ go, role, nav }: { go: (p: string) => 
               </tr>
             </thead>
             <tbody>
-              {LINES.map((l) => (
-                <tr key={l.name}>
+              {LINES.map((l, i) => (
+                /* key 用「行下标 + 名称」：同名不同规格的行（如两行「镀锌钢管」DN100 / DN150）用纯名称会冲突，
+                   导致 React 复用错行、上浮重算时行序错乱。 */
+                <tr key={`${i}-${l.name}`}>
                   <td><Tag tone="gray">{l.bt}</Tag></td>
-                  <td>{l.name}</td>
+                  <td>
+                    {l.name}
+                    {/* M8：配方版本快照 —— 上游配方升版后此处给出「当前 Vx」提示，提醒复核成本口径 */}
+                    {l.recipeVer && (
+                      <div className="nc-cell-sub">
+                        按 {l.recipeVer} 配方计价
+                        {l.curVer && l.curVer !== l.recipeVer ? ` · 套件当前 ${l.curVer}，成本口径需复核` : ''}
+                      </div>
+                    )}
+                  </td>
                   <td className="is-num">{l.qty.toLocaleString('en-US')} {l.unit}</td>
                   <td className="is-num"><Money v={l.price} role={role} /></td>
                   <td className="is-num" style={{ color: 'var(--ink-2)' }}><Money v={linkAmt(l)} role={role} /></td>
@@ -286,42 +375,61 @@ export default function QuoteDetailPage({ go, role, nav }: { go: (p: string) => 
         </div>
       </Card>
 
-      {/* 版本记录 */}
-      <Card hd="版本记录" extra={<span className="nc-cell-sub">多轮报价逐版留痕，可对比追溯</span>}>
-        <div className="nc-vercard is-cur">
-          <Tag tone="blue">{Q.ver} · 当前</Tag>
-          <b className="num">较初版基价 {v1Diff >= 0 ? '+' : '−'}{fmt(Math.abs(v1Diff))}</b>
-          <span className="nc-cell-sub" style={{ marginTop: 0 }}>{Q.update} · 当前版本（含区域上浮 {uplift}%）</span>
-          <span className="nc-vercard-ops"><Btn size="sm" onClick={() => setDiffOpen(true)}>与初版对比</Btn></span>
-        </div>
-        <div className="nc-vercard">
-          <Tag>初版</Tag>
-          <span className="num">{fmt(V1_AMT)}</span>
-          <span className="nc-cell-sub" style={{ marginTop: 0 }}>{Q.date} · 明细基价合计（未含区域上浮）</span>
-        </div>
+      </div>
+      <div style={{ width: 280, flexShrink: 0 }}>
+      {/* 版本历史（右侧栏） */}
+      <Card hd="版本历史" extra={<span className="nc-cell-sub">点击版本号查看当时明细</span>}>
+        {verList.length ? [...verList].reverse().map((v) => {
+          const isCur = v.ver === curSnap?.ver;
+          return (
+            <div key={v.ver} className={`nc-vercard${isCur ? ' is-cur' : ''}`} style={{ cursor: isCur ? 'default' : 'pointer' }} onClick={() => { if (!isCur) toast(`查看 ${v.ver} 版报价详情（只读）`); }}>
+              <Tag tone={isCur ? 'blue' : 'gray'}>{v.ver}{isCur ? ' · 当前' : ''}</Tag>
+              <b className="num">{fmt(v.amt)}</b>
+              <span className="nc-cell-sub" style={{ marginTop: 0 }}>
+                {v.at} · {v.by} · {v.note}{v.uplift ? ` · 区域上浮 ${v.uplift}%` : ''} · 明细基价合计（未含区域上浮）
+              </span>
+              {isCur && (
+                <span className="nc-vercard-ops">
+                  <Btn size="sm" disabled={!prevSnap} title={prevSnap ? undefined : '本单暂无更早的版本快照'}
+                    onClick={() => setDiffOpen(true)}>
+                    {prevSnap ? `与 ${prevSnap.ver} 对比` : '无历史版本'}
+                  </Btn>
+                  <Btn size="sm" kind="primary" onClick={() => setV3Open(true)}>生成 {nextVer}</Btn>
+                </span>
+              )}
+            </div>
+          );
+        }) : (
+          <div className="nc-vercard is-cur">
+            <Tag tone="blue">{Q.ver} · 当前</Tag>
+            <b className="num">{fmt(Q.total)}</b>
+            <span className="nc-cell-sub" style={{ marginTop: 0 }}>{Q.update} · 该单未留存版本快照，暂无法对比追溯</span>
+          </div>
+        )}
+      </Card>
+      </div>
+      </div>
+
+      {/* 流转记录：按审批单 ref 命中本单派生（不再写死昆明万达的 5 行文案） */}
+      <Card hd="流转记录" extra={
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+          <span className="nc-cell-sub">按审批单留痕自动汇总</span>
+          {['待审批', '审批中'].includes(Q_ST) && <Btn size="sm" danger onClick={() => setRecallOpen(true)}>撤回审批</Btn>}
+        </span>
+      }>
+        <Timeline items={flows} />
       </Card>
 
-      {/* 流转记录 */}
-      <Card hd="流转记录">
-        <Timeline items={[
-          { date: '2026-09-12', text: '创建 V1 并提交部门负责人', tone: 'ok' },
-          { date: '2026-09-14', text: '部门负责人退回：金额偏高，建议对齐院方预算', tone: 'red' },
-          { date: '2026-09-20', text: '生成 V2（删减应急照明，应用区域上浮 3%）并重新提交', tone: 'ok' },
-          { date: '2026-09-20', text: `部门负责人李强 · 审批通过`, tone: 'gold' },
-          { date: TODAY, text: `分管副总（${role}）· 审批通过，待总经理审批`, tone: 'gold' },
-        ]} />
-      </Card>
-
-      {/* 生成 V3（必填变更原因） */}
+      {/* 生成下一版（必填变更原因）—— 版本号按当前 ver +1 推导，不再固定写「V3」 */}
       <Modal
-        open={v3Open} onClose={() => setV3Open(false)} width={480} title="生成 V3"
+        open={v3Open} onClose={() => setV3Open(false)} width={480} title={`生成 ${nextVer}`}
         foot={<><Btn onClick={() => setV3Open(false)}>取消</Btn><Btn kind="primary" onClick={() => {
           if (!v3Note.trim()) { toast(' 请填写变更原因'); return; }
-          toast(`V3 草稿已生成：${v3Note.trim()}`);
+          toast(`${nextVer} 草稿已生成：${v3Note.trim()}`);
           setV3Note(''); setV3Open(false);
-        }}>生成 V3</Btn></>}>
+        }}>生成 {nextVer}</Btn></>}>
         <div style={{ fontSize: 13, marginBottom: 12 }}>
-          基于 {Q.ver} 复制为 V3 草稿，请填写<b>变更原因</b>（必填，用于版本追溯）：
+          基于 {Q.ver} 复制为 {nextVer} 草稿，请填写<b>变更原因</b>（必填，用于版本追溯）：
         </div>
         <input className="nc-input" value={v3Note} onChange={(e) => setV3Note(e.target.value)} placeholder="如：按审批意见下调报警单价 2 元/㎡" />
       </Modal>
@@ -333,23 +441,33 @@ export default function QuoteDetailPage({ go, role, nav }: { go: (p: string) => 
         <div style={{ fontSize: 13 }}>确认撤回本单审批？撤回后回到草稿状态，可修改后重新提交。</div>
       </Modal>
 
-      {/* 版本差异回放（含性质列） */}
-      <Modal open={diffOpen} onClose={() => setDiffOpen(false)} width={840} title="V1 → V2 变更对比"
+      {/* 版本差异回放（按真实快照派生，含性质列） */}
+      <Modal open={diffOpen} onClose={() => setDiffOpen(false)} width={840}
+        title={prevSnap && curSnap ? `${prevSnap.ver} → ${curSnap.ver} 变更对比` : '版本变更对比'}
         foot={<Btn kind="primary" onClick={() => setDiffOpen(false)}>关闭</Btn>}>
         <Banner tone="info">差异回放（只读）：旧版只读保留，避免误改不可恢复。</Banner>
-        <table className="nc-tbl" style={{ minWidth: 700 }}>
-          <thead><tr><th>明细项</th><th style={{ width: 130 }} className="is-num">V1</th><th style={{ width: 130 }} className="is-num">V2</th><th style={{ width: 170 }}>变更</th></tr></thead>
-          <tbody>
-            {DIFF_ROWS.map(([name, v1, v2, chg, tone]) => (
-              <tr key={name}>
-                <td>{name}</td>
-                <td className="is-num">{v1}</td>
-                <td className="is-num"><b className="num">{v2}</b></td>
-                <td style={{ color: DIFF_TONE[tone], fontWeight: tone === 'sum' ? 600 : 400 }}>{chg}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        {prevSnap && curSnap ? (
+          <>
+            <div className="nc-cell-sub" style={{ margin: '4px 0 10px' }}>
+              {prevSnap.ver} {prevSnap.at} · {prevSnap.by} · {prevSnap.note} → {curSnap.ver} {curSnap.at} · {curSnap.by} · {curSnap.note}
+            </div>
+            <table className="nc-tbl" style={{ minWidth: 700 }}>
+              <thead><tr><th>明细项</th><th style={{ width: 130 }} className="is-num">{prevSnap.ver}</th><th style={{ width: 130 }} className="is-num">{curSnap.ver}</th><th style={{ width: 170 }}>变更</th></tr></thead>
+              <tbody>
+                {diffRows.map((r, i) => (
+                  <tr key={`${r.name}-${i}`}>
+                    <td>{r.name}</td>
+                    <td className="is-num">{r.v1}</td>
+                    <td className="is-num"><b className="num">{r.v2}</b></td>
+                    <td style={{ color: DIFF_TONE[r.tone], fontWeight: r.tone === 'sum' ? 600 : 400 }}>{r.chg}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
+        ) : (
+          <div className="nc-cell-sub">该报价单未留存两个及以上版本快照，暂无可对比的差异。</div>
+        )}
       </Modal>
     </>
   );

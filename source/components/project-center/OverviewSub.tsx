@@ -33,12 +33,11 @@ function CardProfile({ C }: { C: PjCtx }) {
   return (
     <Card
       hd={<span><Ico n="building" size={16} /> 基本信息</span>}
-      extra={<>
+      extra={
         <span className="nc-cell-sub">
           立项来源 {(BIZ_CN[P.biz] ?? P.biz)} · 最近更新 {P.updatedAt ?? P.start}
         </span>
-        <Btn size="sm" onClick={C.openLog}>变更留痕</Btn>
-      </>}
+      }
     >
       <KvGrid cols={2} rows={[
         { k: '项目类型', v: P.type },
@@ -144,7 +143,7 @@ function CardReceipt({ C }: { C: PjCtx }) {
   return (
     <Card
       hd={<span><Ico n="card" size={16} /> 合同与回款</span>}
-      extra={<Btn size="sm" onClick={() => C.pj('biz')}>进入商务合同 →</Btn>}
+      extra={<Btn kind="link" onClick={() => C.pj('biz')}>进入商务合同 →</Btn>}
     >
       {C.saleCt.map((c) => (
         <div key={c.code} className="nc-ctcard">
@@ -152,7 +151,7 @@ function CardReceipt({ C }: { C: PjCtx }) {
             <EntityLink target="contract" id={c.code} go={C.go} title="下钻到合同详情"><Code>{c.code}</Code></EntityLink>
             <b>{c.name}</b>
             <Tag tone={c.tone}>{c.st}</Tag>
-            <span className="nc-ctcard-amt">{c.payplan ? (c.amt / 10000).toFixed(0) : (c.amt / 10000).toFixed(0)} 万</span>
+            <span className="nc-ctcard-amt">{(c.amt / 10000).toFixed(0)} 万</span>
           </div>
           {c.children?.map((ch) => (
             <div key={ch.code} className="nc-cell-sub" style={{ margin: '4px 0 0 12px' }}>
@@ -196,7 +195,7 @@ function CardCost({ C }: { C: PjCtx }) {
   return (
     <Card
       hd={<span><Ico n="chart" size={16} /> 成本与利润</span>}
-      extra={<Btn size="sm" onClick={() => C.pj('cost')}>进入成本台账 →</Btn>}
+      extra={<Btn kind="link" onClick={() => C.pj('cost')}>进入成本台账 →</Btn>}
     >
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 14 }}>
         <div>
@@ -290,7 +289,6 @@ function CardRisk({ C }: { C: PjCtx }) {
   return (
     <Card
       hd={<span><Ico n="warning" size={16} /> 风险与待办 <b className="nc-v-orange">{rows.length}</b></span>}
-      extra={<Btn size="sm" onClick={C.openLog}>操作记录</Btn>}
     >
       {rows.length === 0 && <div className="nc-empty-mini">当前无待处置事项</div>}
       {rows.map((r) => (
@@ -365,11 +363,11 @@ function Lineage({ C }: { C: PjCtx }) {
     },
     { k: '报价', v: '已转化', st: '报价单转合同草稿', onClick: () => C.go('quote') },
     {
-      k: '合同', v: C.saleCt[0]?.code ?? '—', st: C.saleCt[0] ? `${C.saleCt[0].st} · ${(C.saleCt[0].amt / 10000).toFixed(0)} 万` : '无销售合同',
+      k: '合同', v: C.saleCt[0]?.name ?? '无销售合同', st: C.saleCt[0] ? `${C.saleCt[0].st} · ${(C.saleCt[0].amt / 10000).toFixed(0)} 万` : '待关联',
       void: !C.saleCt[0],
       onClick: C.saleCt[0] ? () => C.go('contract-detail') : undefined,
     },
-    { k: '项目', v: P.id, st: `${P.status} · ${P.milestoneName}`, cur: true },
+    { k: '项目', v: P.name, st: `${P.status} · ${P.milestoneName}`, cur: true },
     {
       k: '当前节点', v: C.curMile?.name ?? '全部完成', st: C.curMile?.date ?? '—',
       onClick: () => C.pj('track'),

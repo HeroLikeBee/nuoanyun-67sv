@@ -6,7 +6,13 @@
 // 状态（与阶段正交）：跟进中 / 赢单 / 输单 —— 终态由 status 承载，输单必填原因（价格 / 关系 / 资质 / 其他）
 // 投标只作商机进度标记：关联投标数由 BIDS[].opp 派生，投标单据本身归 BidPage 管理，不重复建单
 // 复刻「商机管理.html」补齐：勘察记录（含工程量清单 · 生成报价后锁定只读）· 关联报价 / 投标 / 阶段历史
-// · 转化为合同·项目（同步生成）· 赢单 / 输单 · 重开（管理员 · 已转化不可重开）· 阶段可跳选可回退
+// · 赢单 / 输单 · 重开（管理员）· 阶段可跳选可回退
+// 转化出口（2026-09-23 统一口径）：三条**互相独立**的路径，各落各的单，互不捆绑 ——
+//   ① 转报价 —— 工程类单子先出报价单，审批通过后由报价转合同（规格 §3.3 QUO-06）；
+//   ② 转合同 —— 维保 / 检测 / 金额明确的单子，不经过报价与投标，直接落合同草稿（规格 §2.2 SJ-01③「或转合同草稿」）；
+//   ③ 转项目 —— 例外路径（应急抢修）：无合同先施工，落 oppId + 无合同标记 + 30 日补签期限，并进驾驶舱风险榜。
+// 「一个商机仅可转化一次」的旧约束已删 —— 规格 §2.2④ 写的是「关联报价 / 投标 / 合同列表」，
+// 分标段分别投标、分批成交是消防工程常态，故允许多次转化，已产出数量由下游外键派生。
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Banner, Btn, Card, ChainBar, DataTable, Drawer, EntityLink, Field, KvGrid, ListToolbar, Modal,
@@ -17,7 +23,9 @@ import {
 import {
   consumeFocus, setFocus, subscribeStore, getOpps, getOppLogs, getOppClose,
   getOppStages, getOppStageIdx, getOppGateIdx, getOppStageWeight, getOppBids,
-  moveOpp, closeOpp, reopenOpp,
+  moveOpp, closeOpp, reopenOpp, setPendingBid,
+  getQuotes, getContracts, getProjects,
+  setPendingContract, setPendingProject, setPendingOppQuote,
 } from '../components/store';
 import { Ico } from '../components/icons';
 
@@ -28,6 +36,26 @@ const SYS_TYPES = ['火灾自动报警系统', '自动喷淋灭火系统', '防�
 const OPP_SRC = ['转介绍', '招投标', '自拓', '老客户复购', '其他'];
 const SORT_OPTS = ['最近推进倒序', '金额从高到低', '金额从低到高', '预计签约日最近'];
 type O = ReturnType<typeof getOpps>[number];
+
+/* 商机已产出的下游单据：全部由外键派生，不再用本地「已转化」标记。
+   规格 §2.2④ 写的是「关联报价 / 投标 / 合同列表」—— 一个商机可关联多份；
+   分标段分别投标、分批成交是消防工程常态，故不设「仅可转化一次」约束。 */
+const outputsOf = (id: string) => ({
+  quotes: getQuotes().filter((q) => q.opp === id),
+  bids: getOppBids(id),
+  contracts: getContracts().filter((c) => c.oppId === id),
+  projects: getProjects().filter((p) => p.oppId === id),
+});
+/** 是否已成交：存在下游合同或项目（只有报价 / 投标只代表在谈，不算成交） */
+const isWonDeal = (id: string) => {
+  const o = outputsOf(id);
+  return o.contracts.length > 0 || o.projects.length > 0;
+};
+/** 已产出摘要文案 */
+const outText = (id: string) => {
+  const o = outputsOf(id);
+  return `报价 ${o.quotes.length} · 投标 ${o.bids.length} · 合同 ${o.contracts.length} · 项目 ${o.projects.length}`;
+};
 
 /* ============================ 勘察记录 ============================ */
 type QtyRow = { n: string; u: string; q: string; r: string };
@@ -67,7 +95,10 @@ export default function OppPage({ go, role, nav }: { go: (p: string) => void; ro
   const [opps, setOpps] = useState<O[]>(getOpps);
   /* 阶段模板本体（含权重 / gate）与阶段名数组分开：模板可配，阶段名供筛选 / 看板 / 下拉直接使用 */
   const [tpl, setTpl] = useState(getOppStages);
-  useEffect(() => subscribeStore(() => { setOpps(getOpps()); setTpl(getOppStages()); }), []);
+  /* 订阅同时维护 tick：只 setOpps(getOpps()) 在数组引用未变时会被 React 跳过重渲染，
+     下游新签的合同 / 项目（已产出计数）就读不到。 */
+  const [tick, setTick] = useState(0);
+  useEffect(() => subscribeStore(() => { setOpps(getOpps()); setTpl(getOppStages()); setTick((n) => n + 1); }), []);
   const stages = useMemo(() => tpl.map((s) => s.name), [tpl]);
   /** gate 序号：金额必填分界线（与 store.getOppGateIdx 同源，避免两处派生逻辑漂移） */
   const gateIdx = useMemo(() => getOppGateIdx(), [tpl]);
@@ -95,11 +126,12 @@ export default function OppPage({ go, role, nav }: { go: (p: string) => void; ro
   const [advStage, setAdvStage] = useState('');
   const [advNote, setAdvNote] = useState('');
   const [reopenOpen, setReopenOpen] = useState<O | null>(null);
-  const [cvtOpen, setCvtOpen] = useState<O | null>(null);
   const [svyOpen, setSvyOpen] = useState<{ o: O; s: Svy | null } | null>(null);
   const [svyForm, setSvyForm] = useState<Svy>({ id: '', at: TODAY, persons: [], sys: '', desc: '', photos: 0, rows: [] });
   const [svyMap, setSvyMap] = useState<Record<string, Svy[]>>({});
-  const [converted, setConverted] = useState<Record<string, { xm: string; ht: string }>>({});
+  const [cvtHtOpen, setCvtHtOpen] = useState<O | null>(null);
+  const [cvtXmOpen, setCvtXmOpen] = useState<O | null>(null);
+  const [noContractReason, setNoContractReason] = useState('');
 
   /* ---- 新增：更多筛选（金额区间 / 创建区间 / 排序） ---- */
   const [more, setMore] = useState(false);
@@ -331,7 +363,7 @@ export default function OppPage({ go, role, nav }: { go: (p: string) => void; ro
               minWidth={1600}
               cols={[
                 { key: 'id', title: '商机编号', width: 104, render: (o) => <IdCell onClick={() => { setDetail(o); setDTab('overview'); }} title="查看商机详情">{o.id}</IdCell> },
-                { key: 'name', title: '商机名称', width: 220, render: (o) => (<div><div className="nc-td-main">{o.name}{converted[o.id] && <Tag tone="green">已转化</Tag>}</div><div className="nc-td-sub">{BIZ_NAME[o.biz]} · {o.type} · 报价 {o.quotes} 版</div></div>) },
+                { key: 'name', title: '商机名称', width: 220, render: (o) => (<div><div className="nc-td-main">{o.name}{isWonDeal(o.id) && <Tag tone="green">已成交</Tag>}</div><div className="nc-td-sub">{BIZ_NAME[o.biz]} · {o.type} · 报价 {o.quotes} 版</div></div>) },
                 { key: 'customer', title: '客户', width: 165, render: (o) => <span>{o.customer}</span> },
                 { key: 'stage', title: '阶段', width: 82, render: (o) => <Tag tone={oppStageTone(idxOf(o.stage))}>{o.stage}</Tag> },
                 { key: 'status', title: '状态', width: 78, render: (o) => <Tag tone={STATUS_TONE[o.status]}>{o.status}</Tag> },
@@ -345,13 +377,13 @@ export default function OppPage({ go, role, nav }: { go: (p: string) => void; ro
                 {
                   key: 'ops', title: '操作', width: 200, render: (o) => (
                     <span className="nc-ops" onClick={(e) => e.stopPropagation()}>
-                      <Op onClick={() => { setDetail(o); setDTab('overview'); }}>详情</Op><OpSep />
-                      {/* 生成报价不再受阶段限制（转化由赢单动作触发），只排除已终态的商机。
-                          不可用时用 OpNone 占住槽位，保证操作列跨行对齐（与投标页同约定）。 */}
-                      {!isOppClosed(o)
-                        ? <Op gold onClick={() => setQuoteOpen(o)}>去报价</Op>
-                        : <OpNone title="商机已结束，不可生成报价" />}
-                      <Op onClick={() => openAdv(o)}>推进</Op>
+                      <Op onClick={() => { setDetail(o); setDTab('overview'); }}>详情</Op>
+                      {o.status !== '输单' && <><OpSep /><Op gold onClick={() => setQuoteOpen(o)}>转报价</Op></>}
+
+
+
+
+                      <OpSep /><Op onClick={() => openAdv(o)}>推进</Op>
                       {!isOppClosed(o) && <><OpSep /><Op danger onClick={() => { setLoseOpen(o); setLoseStatus('输单'); setLoseReason(''); setLoseCompetitor(''); }}>标记结果</Op></>}
                     </span>
                   ),
@@ -412,13 +444,15 @@ export default function OppPage({ go, role, nav }: { go: (p: string) => void; ro
               ? <Btn onClick={() => { setReopenOpen(detail); setDetail(null); }}>重开</Btn>
               : <Btn disabled title="仅管理员可重开；已转化不可重开">重开</Btn>
           )}
-          {/* 生成报价 / 转化均不再受阶段限制（转化由赢单动作触发）；终态只剩「重开」。
-              「一个商机仅可转化一次」由 !converted 承载，与阶段无关，必须保留。 */}
-          {detail && !isOppClosed(detail) && (
-            <Btn onClick={() => { setQuoteOpen(detail); setDetail(null); }}>去报价</Btn>
-          )}
-          {detail && !converted[detail.id] && !isOppClosed(detail) && (
-            <Btn kind="primary" onClick={() => { setCvtOpen(detail); setDetail(null); }}>转化为合同·项目</Btn>
+          {/* 三条转化出口互相独立、各落各的单，互不捆绑；不受阶段限制，输单后不可转化。
+              旧版把「项目 + 合同」捆成一个动作同时生成，且不落库 —— 既偏离规格 §2.2 的「或」，
+              又让用户看到假成功，已拆开。 */}
+          {detail && detail.status !== '输单' && (
+            <>
+              <Btn onClick={() => { setQuoteOpen(detail); setDetail(null); }}>转报价</Btn>
+              <Btn onClick={() => { setCvtHtOpen(detail); setDetail(null); }}>转合同</Btn>
+              <Btn onClick={() => { setCvtXmOpen(detail); setDetail(null); }}>转项目</Btn>
+            </>
           )}
           {detail && !isOppClosed(detail) && (
             <Btn kind="primary" onClick={() => { openAdv(detail); setDetail(null); }}>推进 / 回退阶段</Btn>
@@ -457,7 +491,7 @@ export default function OppPage({ go, role, nav }: { go: (p: string) => void; ro
                   { k: '行业', v: detail.industry },
                   { k: '归属人', v: detail.owner },
                   { k: '最近跟进', v: <span className="num" style={{ color: detail.lastDays > 14 ? 'var(--c-danger)' : undefined }}>{detail.last}（{detail.lastDays} 天前）{detail.lastDays > 14 ? <> <Ico n="warning" size={12} style={{ color: 'var(--c-warning-mid)' }} /></> : null}</span> },
-                  { k: '转化记录', v: converted[detail.id] ? <span>项目 <EntityLink target="project-center" id={converted[detail.id].xm} go={go} title="下钻到项目经营中心">{converted[detail.id].xm}</EntityLink> · 合同 <EntityLink target="contract" id={converted[detail.id].ht} go={go} title="下钻到合同详情">{converted[detail.id].ht}</EntityLink></span> : <span style={{ color: 'var(--ink-3)' }}>未转化</span> },
+                  { k: '已产出单据', v: <span className="num">{outText(detail.id)}{isWonDeal(detail.id) ? <> · <Tag tone="green">已成交</Tag></> : null}</span> },
                   { k: '输单复盘', v: detail.status === '输单' ? <span>原因：{detail.loseReason || '—'}{detail.loseCompetitor ? ` · 对手：${detail.loseCompetitor}` : ''}</span> : <span style={{ color: 'var(--ink-3)' }}>—</span> },
                 ]} />
                 <div className="nc-sec-title" style={{ margin: '14px 0 10px' }}>竞争与策略（在谈项目档案）</div>
@@ -525,7 +559,17 @@ export default function OppPage({ go, role, nav }: { go: (p: string) => void; ro
                       ))}</tbody>
                     </table>
                   )}
-                <div className="nc-sec-title" style={{ margin: '16px 0 8px' }}>关联投标<span className="nc-muted nc-tiny" style={{ marginLeft: 8 }}>投标不进商机阶段，由独立投标模块承载；此处只挂关联</span></div>
+                <div className="nc-sec-title" style={{ margin: '16px 0 8px' }}>
+                  关联投标
+                  <span className="nc-muted nc-tiny" style={{ marginLeft: 8 }}>投标不进商机阶段，由独立投标模块承载；此处只挂关联</span>
+                  <span style={{ float: 'right' }}>
+                    <Btn size="sm" kind="primary" onClick={() => {
+                      /* 带上商机要素跳投标管理：名称 / 客户 / 预计金额预填，opp 外键使中标结果能回写本商机漏斗 */
+                      setPendingBid({ oppId: detail.id, name: detail.name, customer: detail.customer, amt: detail.amt });
+                      go('bid');
+                    }}>＋ 发起投标</Btn>
+                  </span>
+                </div>
                 {relBids(detail).length === 0
                   ? <div className="nc-empty-mini">暂无关联投标：投标单的 opp 字段指向本商机时自动出现在此处，商机侧只统计数量</div>
                   : (
@@ -744,49 +788,77 @@ export default function OppPage({ go, role, nav }: { go: (p: string) => void; ro
         foot={<><Btn onClick={() => setReopenOpen(null)}>取消</Btn>
           <Btn kind="primary" onClick={() => {
             if (!reopenOpen) return;
+            if (isWonDeal(reopenOpen.id)) { toast('该商机下游已生成合同 / 项目，重开会造成来源冲突，不可重开', 'err'); return; }
             reopenOpp(reopenOpen.id);
             setReopenOpen(null);
             toast(`商机已重开至「${reopenOpen.stage}」· 重开记录已留痕`);
           }}>确认重开</Btn></>}>
-        {reopenOpen && converted[reopenOpen.id]
-          ? <div className="nc-warnbox is-red"><Ico n="ban" size={16} /> 该商机已转化（项目 / 合同已生成），不可重开。</div>
+        {reopenOpen && isWonDeal(reopenOpen.id)
+          ? <div className="nc-warnbox is-red"><Ico n="ban" size={16} /> 该商机下游已生成合同 / 项目，重开会造成来源冲突，不可重开。</div>
           : <div className="nc-warnbox is-orange">重开后商机状态恢复为「跟进中」（阶段保持当前所处阶段），恢复跟进提醒并重新计入加权金额；重开记录写入阶段历史。</div>}
       </Modal>
 
-      {/* ============ 转化为合同·项目（同步生成） ============ */}
-      <Modal open={!!cvtOpen} width={480} title={`转化为合同·项目 · ${cvtOpen?.id || ''}`} onClose={() => setCvtOpen(null)}
-        foot={<><Btn onClick={() => setCvtOpen(null)}>取消</Btn>
+      {/* ============ 转合同（商机直签 · 不经过报价 / 投标） ============ */}
+      <Modal open={!!cvtHtOpen} width={480} title={`转合同 · ${cvtHtOpen?.id || ''}`} onClose={() => setCvtHtOpen(null)}
+        foot={<><Btn onClick={() => setCvtHtOpen(null)}>取消</Btn>
           <Btn kind="primary" onClick={() => {
-            const o = cvtOpen;
+            const o = cvtHtOpen;
             if (!o) return;
-            setConverted((m) => ({ ...m, [o.id]: { xm: `XM0001${String(30 + o.id.length).slice(-2)}`, ht: `HT${TODAY.replace(/-/g, '')}-00${12 + o.id.length}` } }));
-            closeOpp(o.id, '赢单', { by: o.owner });
-            setCvtOpen(null);
-            toast('转化成功：已创建项目（待启动）+ 销售合同草稿已生成（同步完成 · 商机置「赢单」）');
-            go('project');
-          }}>确认转化</Btn></>}>
-        {cvtOpen && (
+            if (!isOppClosed(o)) closeOpp(o.id, '赢单', { by: o.owner });
+            setPendingContract({ oppId: o.id, customer: o.customer, name: o.name, amt: o.amt || 0 });
+            setCvtHtOpen(null);
+            go('contract-new');
+          }}>去补全合同草稿</Btn></>}>
+        {cvtHtOpen && (
           <>
-            <Banner tone="gold">转化不受阶段限制，任意在谈阶段均可转化；同时生成<b>项目（待启动 · 商机直签）</b>与<b>销售合同草稿（报价转化）</b>；任一步不成功则整单不生效，不留半截数据；成功后商机自动置「赢单」，且此后不可重开。</Banner>
+            <Banner tone="info">适用于<b>金额明确、不需要单独出报价</b>的单子（维保 / 检测 / 小改造）。合同要素由商机带入，编号自动生成；签署后可在合同详情创建项目。</Banner>
             <div className="nc-form-grid">
-              <Field label="项目档案" note="编号自动生成 XM + 6 位流水">
+              <Field label="合同要素" span={2} note="由商机带入，进入合同新建页后可修改">
                 <div className="nc-ctx-grid">
-                  <div className="nc-ctx"><span>项目名称</span><b>{cvtOpen.name}</b></div>
-                  <div className="nc-ctx"><span>项目状态</span><b>待启动（商机直签）</b></div>
-                  <div className="nc-ctx"><span>负责人</span><b>{cvtOpen.owner}</b></div>
-                  <div className="nc-ctx"><span>客户</span><b>{cvtOpen.customer}</b></div>
+                  <div className="nc-ctx"><span>合同名称</span><b>{cvtHtOpen.name} 合同</b></div>
+                  <div className="nc-ctx"><span>客户</span><b>{cvtHtOpen.customer}</b></div>
+                  <div className="nc-ctx"><span>合同金额</span><b className="num">{money ? fmtWan(cvtHtOpen.amt || 0) : '—'}</b></div>
+                  <div className="nc-ctx"><span>来源标记</span><b>商机直签（{cvtHtOpen.id}）</b></div>
                 </div>
               </Field>
-              <Field label="销售合同草稿" note="编号自动生成 HT + 日期 + 4 位流水">
+              <Field label="该商机已产出" span={2} note="同一商机可多次转化：分标段分别投标、分批成交都归到同一个商机下">
+                <div className="nc-cell-sub num">{outText(cvtHtOpen.id)}</div>
+              </Field>
+            </div>
+          </>
+        )}
+      </Modal>
+
+      {/* ============ 转项目（例外路径 · 应急抢修无合同先干） ============ */}
+      <Modal open={!!cvtXmOpen} width={520} title={`转项目 · ${cvtXmOpen?.id || ''}`} onClose={() => setCvtXmOpen(null)}
+        foot={<><Btn onClick={() => setCvtXmOpen(null)}>取消</Btn>
+          <Btn kind="primary" onClick={() => {
+            const o = cvtXmOpen;
+            if (!o) return;
+            if (!noContractReason.trim()) { toast('请填写「无合同先施工」的原因，将写入立项留痕', 'err'); return; }
+            if (!isOppClosed(o)) closeOpp(o.id, '赢单', { by: o.owner });
+            setPendingProject({ oppId: o.id, name: o.name, customer: o.customer, amt: o.amt || 0, noContractReason: noContractReason.trim() });
+            setCvtXmOpen(null);
+            setNoContractReason('');
+            go('project-new');
+          }}>去补全立项信息</Btn></>}>
+        {cvtXmOpen && (
+          <>
+            <Banner tone="warn">这是<b>例外路径</b>：项目将以「无合同先施工」建立，合同额记 <b>0</b>，须在 <b>30 日内补签</b>合同并挂接；期间会一直出现在驾驶舱「无合同施工」风险榜，补签后自动出榜。</Banner>
+            <div className="nc-form-grid">
+              <Field label="项目要素" span={2} note="由商机带入，进入立项页后可修改">
                 <div className="nc-ctx-grid">
-                  <div className="nc-ctx"><span>合同名称</span><b>{cvtOpen.name}</b></div>
-                  <div className="nc-ctx"><span>合同金额</span><b className="num">{money ? fmtWan(cvtOpen.amt || 0) : '—'}</b></div>
-                  <div className="nc-ctx"><span>金额来源</span><b>报价转化（与报价差额进变更台账）</b></div>
-                  <div className="nc-ctx"><span>关联项目</span><b>自动生成</b></div>
+                  <div className="nc-ctx"><span>项目名称</span><b>{cvtXmOpen.name}</b></div>
+                  <div className="nc-ctx"><span>客户</span><b>{cvtXmOpen.customer}</b></div>
+                  <div className="nc-ctx"><span>预计合同额</span><b className="num">{money ? fmtWan(cvtXmOpen.amt || 0) : '—'}</b></div>
+                  <div className="nc-ctx"><span>项目来源</span><b>应急工程</b></div>
                 </div>
               </Field>
-              <Field label="唯一约束" span={2} note="一个商机仅可转化一次">
-                <div className="nc-cell-sub">{converted[cvtOpen.id] ? ' 该商机已转化，不可重复转化' : ' 未转化，可执行' }</div>
+              <Field label="无合同先施工原因" req span={2} note="写入立项留痕，供后续复盘与审计">
+                <textarea className="nc-input" rows={3} value={noContractReason} onChange={(e) => setNoContractReason(e.target.value)} placeholder="如：客户设备故障停业抢修，要求当日进场，合同走内部审批后补签…" />
+              </Field>
+              <Field label="项目经理" span={2} note="进入立项页后必填并做资格校验">
+                <div className="nc-cell-sub">工程施工类须「建造师证有效 + B 证有效 + 无在建」三要素齐备，否则系统拦截</div>
               </Field>
             </div>
           </>
@@ -797,9 +869,15 @@ export default function OppPage({ go, role, nav }: { go: (p: string) => void; ro
       <Modal open={!!quoteOpen} width={480} title={`创建报价 · ${quoteOpen?.name || ''}`} onClose={() => setQuoteOpen(null)}
         foot={<>
           <Btn onClick={() => setQuoteOpen(null)}>取消</Btn>
-          <Btn kind="primary" onClick={() => { setQuoteOpen(null); toast('已创建报价草稿，已载入报价工作台'); go('quote-edit'); }}>创建并编辑</Btn>
+          <Btn kind="primary" onClick={() => {
+            const o = quoteOpen;
+            if (!o) return;
+            setPendingOppQuote({ oppId: o.id, name: o.name, customer: o.customer, amt: o.amt || 0 });
+            setQuoteOpen(null);
+            go('quote-edit');
+          }}>去补全报价明细</Btn>
         </>}>
-        <Banner tone="info">创建报价将预填客户与商机信息，自动生成 <Code>BJ</Code> + 日期 + 4 位流水编号，初始状态「草稿」。也可在「勘察记录」中由工程量清单一键生成。</Banner>
+        <Banner tone="info">创建报价将预填客户与商机信息，编号自动生成（<Code>BJ</Code> + 6 位流水），初始状态「草稿」。也可在「勘察记录」中由工程量清单一键生成。</Banner>
         <div className="nc-form-grid" style={{ gridTemplateColumns: 'repeat(2,1fr)', marginTop: 12 }}>
           <Field label="报价名称" req span={2}><input className="nc-input" defaultValue={quoteOpen ? `${quoteOpen.name}报价` : ''} /></Field>
           <Field label="税率口径" req note="含税 9%（建筑业）/ 13% / 6%（服务）">

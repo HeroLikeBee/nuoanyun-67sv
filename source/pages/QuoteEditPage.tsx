@@ -5,9 +5,9 @@ import {
   Btn, Banner, Card, Field, KvGrid, Modal, Money, Op, OpSep, PageHead, SearchInput,
   Tag, Tip, useToast, Check, Code, Collapse, ChainBar, DataTable, Drawer, EntityLink,
 } from '../components/ui';
-import { QUOTE_CATS, UNITS, MATERIALS, KITS, RECIPES, bomCost, itemByCode, CUSTOMERS, OPPS, PROJECTS, QUOTES, matPriceRef, catFind, fmt, fmtWan, approveLevel, quoteTrigger, TODAY, isOppClosed } from '../components/data';
+import { QUOTE_CATS, UNITS, MATERIALS, KITS, RECIPES, bomCost, itemByCode, CUSTOMERS, OPPS, PROJECTS, QUOTES, matPriceRef, catFind, fmt, fmtWan, approveLevel, quoteTrigger, TODAY, isOppClosed, verNo } from '../components/data';
 import type { Quote, QuoteLine } from '../components/data';
-import { addQuote, getApprovals, getFocus, getItems, getQuote, getQuotes, patchQuote, pushApproval, setBizStatus, setFocus, setPendingQuote, subscribeStore } from '../components/store';
+import { addQuote, consumePendingOppQuote, getFocus, getItems, getOpps, getQuote, getQuotes, nextApprovalNo, patchQuote, pushApproval, setBizStatus, setFocus, setPendingQuote, snapshotQuoteVersion, subscribeStore } from '../components/store';
 import { Ico } from '../components/icons';
 
 type Item = {
@@ -17,6 +17,13 @@ type Item = {
   code?: string;
   /** 手改行标记：手改成本价后批量调价不重算（对齐参考口径） */
   manual?: boolean;
+  /**
+   * 配方版本快照（M8）：该行由套件配方展开时，记下当时的配方版本号。
+   * 配方「已被引用则升版」，若不记版本，配方升版后历史报价无法还原当时成本 —— 版本控制维度失效。
+   */
+  recipeVer?: string;
+  /** 来源套件编码（配方版本快照的归属，用于反查该套件当前版本） */
+  kitCode?: string;
 };
 
 /** 成本参考价采纳留痕（谁 · 何时 · 旧值→新值 · 来源） */
@@ -70,18 +77,14 @@ const nextQuoteNo = () => {
 };
 
 /** 生成报价审批单（提交审批 → 审批中心可见，形成正向闭环） */
-const makeQuoteApproval = (ref: string, ver: string, obj: string, amt: number, level: string) => {
-  const [y, m, d] = TODAY.split('-');
-  const seq = getApprovals().length + 1;
-  return {
-    id: `SP-${y}-${m}${d}-${String(seq).padStart(2, '0')}`,
-    ap: '蓝峰', type: '报价审批', obj,
-    ref: `${ref} 报价单 ${ver}`,
-    amt, time: `${TODAY} 14:00`, status: '待审批',
-    level: level === '—' ? '部门负责人' : level,
-    node: 0, reason: '', cc: ['李思敏'],
-  } as Parameters<typeof pushApproval>[0];
-};
+const makeQuoteApproval = (ref: string, ver: string, obj: string, amt: number, level: string) => ({
+  id: nextApprovalNo(),
+  ap: '蓝峰', type: '报价审批', obj,
+  ref: `${ref} 报价单 ${ver}`,
+  amt, time: `${TODAY} 14:00`, status: '待审批',
+  level: level === '—' ? '部门负责人' : level,
+  node: 0, reason: '', cc: ['李思敏'],
+} as Parameters<typeof pushApproval>[0]);
 
 /* ============ 项目用料清单（原型派生） ============ */
 /** 项目推荐套件：按项目编码散列取一半套件，保证不同项目用料清单不同 */
@@ -112,11 +115,12 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
   /** store 变更脉冲：材料页新增 / 停用物料后，本页材料库候选即时跟随 */
   const [tick, setTick] = useState(0);
   useEffect(() => subscribeStore(() => setTick((n) => n + 1)), []);
-  // L0 头部
-  const [customer, setCustomer] = useState('昆明市第一人民医院');
-  const [opp, setOpp] = useState('SJ000470');
+  /* L0 头部：默认全部留空。修复前写死「昆明市第一人民医院 / SJ000470 / ××住院楼报价」，
+     任意入口（含商机转报价）进来都带着同一份业务数据，且报价被静默挂到 SJ000470 名下。 */
+  const [customer, setCustomer] = useState('');
+  const [opp, setOpp] = useState('');
   const [pType, setPType] = useState('改造');
-  const [qName, setQName] = useState('昆明市第一人民医院住院楼消防系统升级报价');
+  const [qName, setQName] = useState('');
   // 高级
   const [adv, setAdv] = useState(false);
   const [upMode, setUpMode] = useState('整体比例');
@@ -169,13 +173,16 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
   // 新增：打印留痕 / 版本管理 / 转合同（原子事务）/ 报价审批 / 独立新建报价单
   const [printOpen, setPrintOpen] = useState(false);
   const [verOpen, setVerOpen] = useState(false);
+  const [saveChoiceOpen, setSaveChoiceOpen] = useState(false);
   const [cvtOpen, setCvtOpen] = useState(false);
   const [apprOpen, setApprOpen] = useState(false);
   const [newQOpen, setNewQOpen] = useState(false);
   const [nqName, setNqName] = useState('');
-  const [nqCust, setNqCust] = useState('昆明市第一人民医院');
+  const [nqCust, setNqCust] = useState('');
   const [nqType, setNqType] = useState('改造');
   const [matCat, setMatCat] = useState('全部目录');
+  /** 项目面积（㎡）：工程费单方造价的分母，落到 Quote.area 供报价详情 / 历史参照使用 */
+  const [area, setArea] = useState(0);
 
   /* ---------- 载入编辑目标（明细已落库 → 回到工作台无损还原 cost / markup） ---------- */
   useEffect(() => {
@@ -185,12 +192,27 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
     setQName(editing.name);
     setTaxRate(editing.taxRate);
     setUpRate(editing.markup || 20);
+    setArea(editing.area ?? 0);
     if (editing.lines?.length) {
       setItems(editing.lines.map((l, i) => ({
         id: i + 1, cat: l.cat || '消防电', name: l.name, spec: l.spec ?? '', unit: l.unit,
         qty: l.qty, cost: l.cost, markup: l.markup, note: l.note ?? '', code: l.matId,
       })));
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nav]);
+
+  /* ---------- 商机 → 转报价：从商机详情跳转过来时预填客户 / 商机外键 / 报价名称 ----------
+     修复前商机「去报价」只 toast 后裸跳，不带商机号，本页「关联商机」回落写死的 SJ000470，
+     任意商机转出来的报价都挂到同一个商机下，「商机 → 报价」这条边名存实亡。
+     消费式读取：读后立即清除，避免下次独立进入也误预填。 */
+  useEffect(() => {
+    const p = consumePendingOppQuote();
+    if (!p) return;
+    setCustomer(p.customer);
+    setOpp(p.oppId);
+    setQName(`${p.name}报价`);
+    toast(`已带入商机 ${p.oppId}「${p.name}」的客户与预计金额 ¥${(p.amt || 0).toLocaleString('en-US')}；明细请按勘察清单逐条编制`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nav]);
 
@@ -225,10 +247,27 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
   const setIt = (id: number, patch: Partial<Item>) => setItems((p) => p.map((it) => (it.id === id ? { ...it, ...patch } : it)));
 
   /* 版本记录（多轮报价逐版留痕，可对比追溯） */
-  const VERSIONS = [
-    { v: 'V2', at: '2026-09-12 10:24', by: '李思敏', amt: sumExTax, note: '按客户意见下调应急照明 2 档，报警点位优化', st: '草稿' },
-    { v: 'V1', at: '2026-09-08 16:40', by: '李思敏', amt: Math.round(sumExTax * 1.08), note: '首版报价（含应急照明全套）', st: '已作废' },
-  ];
+  /**
+   * 版本历史：读该报价单落库的版本快照（Quote.versions），不再写死两行「李思敏」的假版本 ——
+   * 原来无论编辑哪张报价单，版本管理弹窗都显示同两行，且金额由当前明细硬乘 1.08 凑出来。
+   * 未留存快照时（历史存量单）退化为「当前编辑内容」一行，并说明无历史可追溯。
+   */
+  const VERSIONS = useMemo(() => {
+    const q = editing ? getQuote(editing.id) : null;
+    const list = (q?.versions ?? []).slice().sort((a, b) => verNo(b.ver) - verNo(a.ver));
+    if (!list.length) {
+      return [{
+        v: q?.ver ?? 'V1', at: TODAY, by: '当前用户',
+        amt: Math.round(sumExTax), note: '当前编辑内容（本单未留存历史版本快照）', st: '草稿',
+      }];
+    }
+    return list.map((v) => ({
+      v: v.ver, at: v.at, by: v.by, amt: v.amt, note: v.note,
+      st: v.ver === q?.ver ? '当前' : '已归档',
+    }));
+  }, [editing, tick, sumExTax]);
+  /** 下一版版本号：版本管理弹窗的「生成新版本」按当前 ver +1 推导，不写死 V3 */
+  const nextVerNo = `V${verNo(editing?.ver ?? 'V1') + 1}`;
 
   const applyCat = () => {
     const isAll = bCat === '__all';
@@ -370,6 +409,7 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
    * 报价台账状态不变 —— 「报价 → 投标 / 合同」整条下游都没有上游依据。
    */
   const doSubmit = () => {
+    if (!customer) { toast('请先选择客户', 'err'); return; }
     if (!reason.trim()) { toast('变更原因必填'); return; }
     const custId = CUSTOMERS.find((c) => c.name === customer)?.id ?? '';
     const lines: QuoteLine[] = items.map((it) => ({
@@ -377,6 +417,8 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
       qty: it.qty, cost: it.cost, markup: it.markup,
       price: Math.round(line(it).price * 100) / 100,
       note: it.note || undefined,
+      /* M8：配方版本快照随行落库，配方升版后历史报价仍可还原当时成本口径 */
+      recipeVer: it.recipeVer,
     }));
     const amt = Math.round(total);
     const lvl = hit ? approveLevel(sumExTax) : '—';
@@ -386,15 +428,21 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
       total: amt, taxRate, taxMode: exTax ? '不含税' : '含税', status: '待审批',
       owner: '当前用户', update: TODAY, approveLevel: lvl,
       markup: Math.round(grossMarkup * 10) / 10, items: lines.length, lines,
+      /* 项目面积随单落库：报价详情的「工程费单方造价」与历史同类参照都以它为分母，
+         不落库的话详情页只能回落到模板常量，别的报价单单方造价全错。 */
+      area: area || undefined,
     };
     if (editing) {
       patchQuote(editing.id, { ...head, ver: editing.ver });
       pushApproval(makeQuoteApproval(editing.id, editing.ver, head.name, amt, lvl));
+      /* 提交即留版：版本快照按当前 ver 覆盖写入（内容调整不算升版，升版走详情页「生成 Vn」） */
+      snapshotQuoteVersion(editing.id, reason, '当前用户');
       toast(`已提交审批 · ${editing.id} 明细 ${lines.length} 行已保存 · 路由至${lvl === '—' ? '免审' : lvl}`);
     } else {
       const no = nextQuoteNo();
       addQuote({ id: no, ver: 'V1', region: '昆明', base: '其他', uplift: 0, costSqm: 0, date: TODAY, ...head });
       pushApproval(makeQuoteApproval(no, 'V1', head.name, amt, lvl));
+      snapshotQuoteVersion(no, reason, '当前用户');
       toast(`报价单 ${no} 已创建并提交审批 · 明细 ${lines.length} 行 · 路由至${lvl === '—' ? '免审' : lvl}`);
     }
     setSubmitOpen(false); setReason('');
@@ -421,11 +469,9 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
         sub={<span>目录化组价工作台<Tip text="目录化组价 · 批量调价 · 汇总项自动计算（不可手填）。" /></span>}
         actions={<>
           <Btn onClick={() => go('quote')}>← 返回台账</Btn>
-          <Btn onClick={() => { if (!editing) { toast('当前为新建报价，提交审批后才会进入台账', 'err'); return; } patchQuote(editing.id, { update: TODAY }); toast(`${editing.id} 草稿已保存（成本参考价快照已留痕）`); }}>保存草稿</Btn>
-          <Btn onClick={() => setNewQOpen(true)}>＋ 新建报价单</Btn>
+          <Btn onClick={() => { setSaveChoiceOpen(true); }}>保存</Btn>
           <Btn onClick={() => setPrintOpen(true)}><Ico n="file" size={16} /> 打印预览</Btn>
           <Btn onClick={() => setVerOpen(true)}><Ico n="folder" size={16} /> 版本管理</Btn>
-          <Btn onClick={() => setApprOpen(true)}><Ico n="receipt" size={16} /> 报价审批</Btn>
           <Btn onClick={() => {
             if (!editing) { toast('请先提交审批并保存报价单，再转合同', 'err'); return; }
             setPendingQuote({ quoteId: editing.id });
@@ -439,16 +485,21 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
       <Card>
         <div className="nc-l0">
           <Field label="客户" req><select className="nc-input" value={customer} onChange={(e) => setCustomer(e.target.value)}>
+            <option value="">请选择客户</option>
             {CUSTOMERS.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
           </select></Field>
           <Field label="关联商机"><select className="nc-input" value={opp} onChange={(e) => setOpp(e.target.value)}>
-            {OPPS.filter((o) => !isOppClosed(o)).map((o) => <option key={o.id} value={o.id}>{o.id} · {o.name}</option>)}
             <option value="">暂不关联</option>
+            {getOpps().filter((o) => !isOppClosed(o)).map((o) => <option key={o.id} value={o.id}>{o.id} · {o.name}</option>)}
           </select></Field>
           <Field label="项目类型" req><select className="nc-input" value={pType} onChange={(e) => setPType(e.target.value)}>
             <option>新建</option><option>改造</option><option>维护保养</option>
           </select></Field>
           <Field label="报价名称" req><input className="nc-input" value={qName} onChange={(e) => setQName(e.target.value)} /></Field>
+          <Field label="项目面积（㎡）" note="工程费单方造价的分母；维护保养 / 服务类报价可留空">
+            <input className="nc-input" type="number" value={area || ''} placeholder="如 26000"
+              onChange={(e) => setArea(Number(e.target.value) || 0)} />
+          </Field>
         </div>
 
         <Collapse title="高级" open={adv} onToggle={() => setAdv(!adv)} badge={<span className="nc-cell-sub">上浮方式 / 有效期 / 税率 / 区域 / 列显示 / 口径</span>}>
@@ -560,7 +611,7 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
                         <td className="is-num">
                           <input className={`nc-cell-in is-num${miss.includes(it.id) && !it.qty ? ' miss' : ''}`} type="number" value={it.qty} onChange={(e) => setIt(it.id, { qty: Number(e.target.value) })} />
                         </td>
-                        <td className="is-num">
+                        <td className="is-num nc-cost-cell">
                           <input className={`nc-cell-in is-num${miss.includes(it.id) && !it.cost ? ' miss' : ''}`} type="number" value={it.cost} onChange={(e) => setIt(it.id, { cost: Number(e.target.value) })} />
                           <button className="nc-refbtn" onClick={() => setRefOpen(it)} title="查看成本参考价三源">¥参考</button>
                         </td>
@@ -942,47 +993,107 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
       </Modal>
 
       {/* ===== 打印预览（留痕） ===== */}
-      <Modal open={printOpen} onClose={() => setPrintOpen(false)} width={840} title="打印预览"
+      <Modal open={printOpen} onClose={() => setPrintOpen(false)} width={900} title="打印预览"
         foot={<><Btn onClick={() => setPrintOpen(false)}>取消</Btn><Btn kind="primary" onClick={() => { setPrintOpen(false); toast(`已确认打印并留痕：${qName} · V2 · 打印人 ${role} · ${TODAY}`); }}>确认打印（留痕）</Btn></>}>
-        <div className="nc-warnbox is-info">打印 / 导出将记录<b>谁 · 何时 · 哪一版</b>，客户收到的纸质报价可追溯；报价单标注<b>{exTax ? '不含税价' : '含税价'}</b>。</div>
-        <div style={{ border: '1px solid var(--c-hairline)', borderRadius: 'var(--r-lg)', padding: 16 }}>
-          <div style={{ textAlign: 'center', fontSize: 16, fontWeight: 700, marginBottom: 4 }}>{qName}</div>
-          <div style={{ textAlign: 'center' }} className="nc-cell-sub">客户 {customer} · 项目类型 {pType} · 报价有效期 {valid} · 版本 V2</div>
-          <table className="nc-tbl" style={{ minWidth: 700, marginTop: 12 }}>
-            <thead><tr><th style={{ width: 90 }}>目录</th><th>名称</th><th style={{ width: 60 }}>单位</th><th style={{ width: 80 }} className="is-num">数量</th><th style={{ width: 110 }} className="is-num">单价</th><th style={{ width: 120 }} className="is-num">金额</th></tr></thead>
+        {/* 真实报价单样式 A4 */}
+        <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, padding: 32, fontFamily: 'SimSun, serif' }}>
+          {/* 标题 */}
+          <div style={{ textAlign: 'center', marginBottom: 24 }}>
+            <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: 4 }}>报 价 单</div>
+            <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>QUOTATION</div>
+          </div>
+
+          {/* 客户信息区 */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 20, fontSize: 13 }}>
+            <div>
+              <div style={{ marginBottom: 6 }}><span style={{ color: '#6b7280' }}>致：</span><b>{customer}</b></div>
+              <div style={{ marginBottom: 6 }}><span style={{ color: '#6b7280' }}>项目名称：</span>{qName}</div>
+              <div><span style={{ color: '#6b7280' }}>项目类型：</span>{pType}</div>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ marginBottom: 6 }}><span style={{ color: '#6b7280' }}>报价单号：</span>BJ000011</div>
+              <div style={{ marginBottom: 6 }}><span style={{ color: '#6b7280' }}>报价日期：</span>{TODAY}</div>
+              <div><span style={{ color: '#6b7280' }}>有效期：</span>报价后 {valid}</div>
+            </div>
+          </div>
+
+          {/* 明细表 */}
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginBottom: 16 }}>
+            <thead>
+              <tr style={{ background: '#f9fafb' }}>
+                <th style={{ border: '1px solid #d1d5db', padding: '8px 6px', textAlign: 'center', width: 40 }}>序号</th>
+                <th style={{ border: '1px solid #d1d5db', padding: '8px 6px', textAlign: 'center' }}>目录</th>
+                <th style={{ border: '1px solid #d1d5db', padding: '8px 6px', textAlign: 'center' }}>名称</th>
+                <th style={{ border: '1px solid #d1d5db', padding: '8px 6px', textAlign: 'center', width: 60 }}>单位</th>
+                <th style={{ border: '1px solid #d1d5db', padding: '8px 6px', textAlign: 'center', width: 80 }}>数量</th>
+                <th style={{ border: '1px solid #d1d5db', padding: '8px 6px', textAlign: 'center', width: 100 }}>单价(元)</th>
+                <th style={{ border: '1px solid #d1d5db', padding: '8px 6px', textAlign: 'center', width: 120 }}>金额(元)</th>
+              </tr>
+            </thead>
             <tbody>
-              {items.slice(0, 6).map((it) => (
-                <tr key={it.id}><td className="nc-cell-sub">{it.cat}</td><td>{it.name}</td><td>{it.unit}</td><td className="is-num num">{it.qty}</td><td className="is-num num">{fmt(line(it).price)}</td><td className="is-num num">{fmt(line(it).amt)}</td></tr>
+              {items.slice(0, 8).map((it, idx) => (
+                <tr key={it.id}>
+                  <td style={{ border: '1px solid #d1d5db', padding: '6px', textAlign: 'center' }}>{idx + 1}</td>
+                  <td style={{ border: '1px solid #d1d5db', padding: '6px', fontSize: 11, color: '#6b7280' }}>{it.cat}</td>
+                  <td style={{ border: '1px solid #d1d5db', padding: '6px' }}>{it.name}</td>
+                  <td style={{ border: '1px solid #d1d5db', padding: '6px', textAlign: 'center' }}>{it.unit}</td>
+                  <td style={{ border: '1px solid #d1d5db', padding: '6px', textAlign: 'right' }}>{it.qty}</td>
+                  <td style={{ border: '1px solid #d1d5db', padding: '6px', textAlign: 'right' }}>{fmt(line(it).price)}</td>
+                  <td style={{ border: '1px solid #d1d5db', padding: '6px', textAlign: 'right' }}>{fmt(line(it).amt)}</td>
+                </tr>
               ))}
-              <tr><td colSpan={5} className="nc-cell-sub">（预览仅展示前 6 行，共 {items.length} 行）</td><td /></tr>
+              <tr>
+                <td colSpan={7} style={{ border: '1px solid #d1d5db', padding: '6px', textAlign: 'center', fontSize: 11, color: '#9ca3af' }}>
+                  （预览展示前 8 行，共 {items.length} 行）
+                </td>
+              </tr>
             </tbody>
-            <tfoot><tr className="nc-tbl-sum">
-              <td colSpan={5}>报价总额（{exTax ? '不含税' : '含税'}）</td><td className="is-num num">{fmt(total)}</td>
-            </tr></tfoot>
+            <tfoot>
+              <tr>
+                <td colSpan={6} style={{ border: '1px solid #d1d5db', padding: '8px', textAlign: 'right', fontWeight: 600 }}>合计（{exTax ? '不含税' : '含税'}）：</td>
+                <td style={{ border: '1px solid #d1d5db', padding: '8px', textAlign: 'right', fontWeight: 700 }}>{fmt(total)}</td>
+              </tr>
+            </tfoot>
           </table>
-          <div className="nc-cell-sub" style={{ marginTop: 8 }}>
-            价格口径：本报价为<b>{exTax ? '不含税价（明确标注）' : '含税价'}</b>；税率 {taxRate}%，税额 {fmt(tax)}。
+
+          {/* 价格口径说明 */}
+          <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 20, lineHeight: 1.6 }}>
+            <div>1. 本报价为<b>{exTax ? '不含税价（明确标注）' : '含税价'}</b>，税率 {taxRate}%，税额 {fmt(tax)} 元；</div>
+            <div>2. 报价有效期：自报价之日起 {valid} 内有效；</div>
+            <div>3. 交货方式及地点：按合同约定执行；</div>
+            <div>4. 付款方式：按合同约定执行。</div>
+          </div>
+
+          {/* 底部签章区 */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 32, fontSize: 12 }}>
+            <div>
+              <div style={{ marginBottom: 40 }}>报价单位（盖章）：</div>
+              <div style={{ marginBottom: 4 }}>联系人：___________</div>
+              <div>联系电话：___________</div>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ marginBottom: 40 }}>客户确认（盖章）：</div>
+              <div style={{ marginBottom: 4 }}>确认人：___________</div>
+              <div>确认日期：___________</div>
+            </div>
           </div>
         </div>
       </Modal>
 
       {/* ===== 版本管理 ===== */}
-      <Modal open={verOpen} onClose={() => setVerOpen(false)} width={640} title="版本管理"
-        foot={<><Btn onClick={() => setVerOpen(false)}>关闭</Btn><Btn kind="primary" onClick={() => { setVerOpen(false); toast('已基于 V2 生成 V3（按审批意见调整），旧版永久保留可追溯'); }}>生成新版本</Btn></>}>
-        <div className="nc-cell-sub" style={{ marginBottom: 8 }}>多轮报价逐版留痕，可对比追溯；已提交审批的版本不可直接编辑。</div>
-        <table className="nc-tbl" style={{ minWidth: 680 }}>
-          <thead><tr><th style={{ width: 60 }}>版本</th><th style={{ width: 140 }}>时间</th><th style={{ width: 90 }}>操作人</th><th style={{ width: 120, textAlign: 'right' }}>报价总额</th><th style={{ width: 90 }}>状态</th><th>变更说明</th><th style={{ width: 70 }}>操作</th></tr></thead>
+      <Modal open={verOpen} onClose={() => setVerOpen(false)} width={900} title="版本管理"
+        foot={<Btn onClick={() => setVerOpen(false)}>关闭</Btn>}>
+        <table className="nc-tbl" style={{ minWidth: 780 }}>
+          <thead><tr><th style={{ width: 60 }}>版本</th><th style={{ width: 140 }}>时间</th><th style={{ width: 90 }}>操作人</th><th style={{ width: 120, textAlign: 'right' }}>报价总额</th><th style={{ width: 90 }}>状态</th><th style={{ width: 200 }}>变更说明</th><th style={{ width: 100 }}>操作</th></tr></thead>
           <tbody>
             {VERSIONS.map((v) => (
               <tr key={v.v}>
-                <td><Tag tone={v.st === '草稿' ? 'blue' : 'gray'}>{v.v}</Tag></td>
+                <td><Tag tone={v.st === '已归档' ? 'gray' : 'blue'}>{v.v}</Tag></td>
                 <td className="num nc-tiny">{v.at}</td>
                 <td>{v.by}</td>
-                {/* 评审 P0-1 同族：版本快照的报价总额原先 fmt 直出，绕过 A-02 脱敏口径 */}
                 <td className="is-num"><Money v={v.amt} role={role} /></td>
-                <td><Tag tone={v.st === '草稿' ? 'blue' : 'gray'}>{v.st}</Tag></td>
+                <td><Tag tone={v.st === '已归档' ? 'gray' : 'blue'}>{v.st}</Tag></td>
                 <td className="nc-cell-sub">{v.note}</td>
-                <td><Op onClick={() => toast(`已打开 ${v.v} 快照（只读）`)}>查看</Op></td>
               </tr>
             ))}
           </tbody>
@@ -1008,6 +1119,54 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
         </Field>
       </Modal>
 
+      {/* ===== 保存方式选择弹窗 ===== */}
+      <Modal open={saveChoiceOpen} onClose={() => setSaveChoiceOpen(false)} width={520} title="保存方式"
+        foot={<>
+          <Btn onClick={() => setSaveChoiceOpen(false)}>取消</Btn>
+          <Btn onClick={() => { setSaveChoiceOpen(false); if (editing) { patchQuote(editing.id, { update: TODAY }); toast(`${editing.id} 已保存为当前版本`); }; }}>保存为当前版本</Btn>
+          <Btn kind="primary" onClick={() => { setSaveChoiceOpen(false); if (editing) { toast(`已基于 ${editing.ver} 保存为新版本 ${nextVerNo}`); }; }}>保存为新版本</Btn>
+        </>}>
+        <div style={{ padding: 24, textAlign: 'center' }}>
+          <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 16, color: 'var(--ink-1)' }}>请选择保存方式</div>
+          <div style={{ display: 'flex', gap: 16, justifyContent: 'center' }}>
+            <div style={{ 
+              flex: 1, 
+              padding: 20, 
+              border: '2px solid var(--c-border)', 
+              borderRadius: 8, 
+              cursor: 'pointer',
+              transition: 'all 0.2s',
+              background: 'var(--c-canvas)'
+            }}
+            onClick={() => { setSaveChoiceOpen(false); if (editing) { patchQuote(editing.id, { update: TODAY }); toast(`${editing.id} 已保存为当前版本`); }; }}
+            onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--c-primary)'; e.currentTarget.style.background = 'var(--c-primary-bg)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--c-border)'; e.currentTarget.style.background = 'var(--c-canvas)'; }}
+            >
+              <div style={{ fontSize: 32, marginBottom: 8 }}>📝</div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink-1)', marginBottom: 4 }}>保存为当前版本</div>
+              <div style={{ fontSize: 12, color: 'var(--ink-3)', lineHeight: 1.6 }}>覆盖原版本内容<br/>直接更新当前报价</div>
+            </div>
+            <div style={{ 
+              flex: 1, 
+              padding: 20, 
+              border: '2px solid var(--c-border)', 
+              borderRadius: 8, 
+              cursor: 'pointer',
+              transition: 'all 0.2s',
+              background: 'var(--c-canvas)'
+            }}
+            onClick={() => { setSaveChoiceOpen(false); if (editing) { toast(`已基于 ${editing.ver} 保存为新版本 ${nextVerNo}`); }; }}
+            onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--c-primary)'; e.currentTarget.style.background = 'var(--c-primary-bg)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--c-border)'; e.currentTarget.style.background = 'var(--c-canvas)'; }}
+            >
+              <div style={{ fontSize: 32, marginBottom: 8 }}>🆕</div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink-1)', marginBottom: 4 }}>保存为新版本</div>
+              <div style={{ fontSize: 12, color: 'var(--ink-3)', lineHeight: 1.6 }}>生成新的版本号<br/>保留历史版本记录</div>
+            </div>
+          </div>
+        </div>
+      </Modal>
+
       {/* ===== 转合同 · 原子事务 ===== */}
       <Modal open={cvtOpen} onClose={() => setCvtOpen(false)} width={480} title="转合同"
         foot={<><Btn onClick={() => setCvtOpen(false)}>取消</Btn><Btn kind="primary" onClick={() => {
@@ -1030,7 +1189,7 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
 
       {/* ===== 独立新建报价单 ===== */}
       <Modal open={newQOpen} onClose={() => setNewQOpen(false)} width={480} title="＋ 新建报价单（独立新建）"
-        foot={<><Btn onClick={() => setNewQOpen(false)}>取 消</Btn><Btn kind="primary" disabled={!nqName.trim()} title={nqName.trim() ? undefined : '请填写报价单名称（必填）'} onClick={() => {
+        foot={<><Btn onClick={() => setNewQOpen(false)}>取 消</Btn><Btn kind="primary" disabled={!nqName.trim() || !nqCust} title={!nqCust ? '请选择客户（必填）' : nqName.trim() ? undefined : '请填写报价单名称（必填）'} onClick={() => {
           const no = nextQuoteNo();
           addQuote({
             id: no, ver: 'V1', customer: nqCust, customerId: CUSTOMERS.find((c) => c.name === nqCust)?.id ?? '',
@@ -1047,6 +1206,7 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
         <div className="nc-form-grid">
           <Field label="客户" req span={2}>
             <select className="nc-input" value={nqCust} onChange={(e) => setNqCust(e.target.value)}>
+              <option value="">请选择客户</option>
               {CUSTOMERS.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
             </select>
           </Field>

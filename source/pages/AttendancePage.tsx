@@ -268,7 +268,7 @@ export default function AttendancePage({ go, role, nav }: { go: (p: string) => v
               <tbody>
                 {byProj.map((r) => (
                   <tr key={r.id}>
-                    <td className="num nc-id-cell"><EntityLink target="project-center" id={r.id} go={go} title="下钻到项目经营中心">{r.id}</EntityLink></td>
+                    <td className="num nc-id-cell"><EntityLink target="project-center" id={r.id} go={go} title="下钻到项目详情">{r.id}</EntityLink></td>
                     <td>{r.name}</td>
                     <td className="is-num num">{r.cnt}</td>
                     <td className="is-num num">{r.days}</td>
