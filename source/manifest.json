@@ -29,6 +29,38 @@
       "kind": "source"
     },
     {
+      "path": "components/project-center/BizSub.tsx",
+      "kind": "source"
+    },
+    {
+      "path": "components/project-center/CostSub.tsx",
+      "kind": "source"
+    },
+    {
+      "path": "components/project-center/ctx.ts",
+      "kind": "source"
+    },
+    {
+      "path": "components/project-center/ExecSub.tsx",
+      "kind": "source"
+    },
+    {
+      "path": "components/project-center/MembersSub.tsx",
+      "kind": "source"
+    },
+    {
+      "path": "components/project-center/OverviewSub.tsx",
+      "kind": "source"
+    },
+    {
+      "path": "components/project-center/PjSection.tsx",
+      "kind": "source"
+    },
+    {
+      "path": "components/project-center/QualitySub.tsx",
+      "kind": "source"
+    },
+    {
       "path": "components/store.ts",
       "kind": "source"
     },

@@ -236,7 +236,6 @@ export default function ProjectPage({ go, role, nav }: { go: (p: string) => void
         const ct = contractOf(r.id);
         const more: OpMoreItem[] = [
           { label: '查看', onClick: () => openProject(r) },
-          { label: '编辑', disabled: done, title: done ? '终态项目不可编辑' : '编辑基础信息与甲方对接人（抽屉）', onClick: () => setEdit(r) },
           ...(ct ? [{ label: '查看合同', onClick: () => { setFocus('contract', ct); go('contract'); } }] : []),
           ...(r.customerId ? [{ label: '下钻客户档案', onClick: () => { setFocus('customer', r.customerId!); go('customer'); } }] : []),
           ...(r.noContract ? [{ label: '去补签合同', title: '无合同施工：补签并关联销售合同', onClick: () => go('contract-new') }] : []),
@@ -244,7 +243,6 @@ export default function ProjectPage({ go, role, nav }: { go: (p: string) => void
         return (
           <div className="nc-ops" onClick={(e) => e.stopPropagation()}>
             <Op onClick={() => openProject(r)} title="打开项目经营中心">查看</Op>
-            {done ? <span className="nc-cell-sub">—</span> : <Op onClick={() => setEdit(r)} title="编辑基础信息与甲方对接人">编辑</Op>}
             <OpMore items={more} />
           </div>
         );

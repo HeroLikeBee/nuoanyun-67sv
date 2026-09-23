@@ -58,6 +58,8 @@ export default function ProjectNewPage({ go, role }: { go: (p: string) => void; 
   const [owner, setOwner] = useState('蓝峰');
   const [pm, setPm] = useState('');
   const [amt, setAmt] = useState(srcContract ? srcContract.amt : 0);
+  const [budget, setBudget] = useState(0);
+  const [budgetSrc, setBudgetSrc] = useState<'manual' | 'quote'>('manual');
   const [contractId, setContractId] = useState(srcContract?.id || '');
 
   /* ---------- 合同交底（入口 A） ---------- */
@@ -104,6 +106,7 @@ export default function ProjectNewPage({ go, role }: { go: (p: string) => void; 
       pm,
       contractAmt: amt,
       execAmt: amt,
+      budget: budget || undefined,
       cost: 0,
       milestone: 0,
       milestoneName: '进场准备',
@@ -222,9 +225,19 @@ export default function ProjectNewPage({ go, role }: { go: (p: string) => void; 
               {DEPT_STAFF.pm.map((s) => <option key={s.name} value={s.name}>{s.name}（{s.role}）</option>)}
             </select>
           </Field>
-          <Field label="预计额（元）" note="可空">
+          <Field label="预计合同额（元）" note="可空 · 立项后在经营中心只读">
             <input className="nc-input" type="number" value={amt || ''} placeholder="暂不确定可留空"
               onChange={(e) => setAmt(Number(e.target.value) || 0)} />
+          </Field>
+          <Field label="目标成本（立项预算，元）" note="成本管理基线">
+            <input className="nc-input" type="number" value={budget || ''} placeholder="如 1300000"
+              onChange={(e) => setBudget(Number(e.target.value) || 0)} />
+          </Field>
+          <Field label="预算来源" note="从报价带入或手工编制">
+            <select className="nc-input" value={budgetSrc} onChange={(e) => setBudgetSrc(e.target.value as 'manual' | 'quote')}>
+              <option value="manual">手工编制</option>
+              <option value="quote">从关联报价带入</option>
+            </select>
           </Field>
           <Field label="关联合同" span={2} note={entryA ? '入口 A 已预关联，不可更改' : '可空 · 仅列同客户且未挂其它项目的合同'}>
             {entryA

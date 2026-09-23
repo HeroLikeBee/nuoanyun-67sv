@@ -691,6 +691,8 @@ export type Project = {
   start: string; end: string; profit: number;
   /** 立项来源合同（合同立项路径写入；历史数据缺省） */
   contractId?: string;
+  /** 目标成本（立项预算）：从报价单成本明细带入或手工编制 */
+  budget?: number;
   /** 无合同施工标记（应急工程） */
   noContract?: boolean;
   /** 合同补签期限（应急工程 = 立项日 + 30 日） */
@@ -716,7 +718,7 @@ export type Project = {
   progressActual?: number;
   progressPlan?: number;
   /** 工序产值清单：进度 = Σ(doneQty×unitPrice) ÷ Σ(totalQty×unitPrice) */
-  workItems?: { name: string; totalQty: number; doneQty: number; unitPrice: number }[];
+  workItems?: { name: string; totalQty: number; doneQty: number; unitPrice: number; unit: string }[];
 };
 
 /** 项目状态流转日志（规格 §6.2：暂停 / 恢复必填原因，留痕可审计） */
@@ -728,13 +730,13 @@ export type ProjectLog = {
 export const PROJECTS: Project[] = [
   /* contractAmt = 主合同签约价（HT000009 合同额冻结为 1,800,000，立项锚点）；execAmt = 执行额 1,950,000（180 + 已生效价格调整补充 +15 万）。
      cost = 已发生实际成本 1,423,000（立项预算/目标成本 1,300,000，超支 12.3 万）。回款 recvPct = 已到账 54 万 ÷ 执行额 195 万 = 27.7%。 */
-  { id: 'XM000123', name: '昆明万达广场消防改造工程', type: '改造', biz: 'GC', source: '投标中标', customer: '昆明万达广场商业管理有限公司', customerId: 'KH20260312001', owner: '蓝峰', pm: '张工', contractAmt: 1800000, execAmt: 1950000, cost: 1423000, milestone: 70, milestoneName: '施工中', recvPct: 27.7, risk: 'overcost', status: '执行中', start: '2026-09-20', end: '2027-03-31', profit: 21.0, updatedAt: '2026-09-22', contractId: 'HT000009',
+  { id: 'XM000123', name: '昆明万达广场消防改造工程', type: '改造', biz: 'GC', source: '投标中标', customer: '昆明万达广场商业管理有限公司', customerId: 'KH20260312001', owner: '蓝峰', pm: '张工', contractAmt: 1800000, execAmt: 1950000, cost: 1423000, milestone: 70, milestoneName: '施工中', recvPct: 27.7, risk: 'overcost', status: '执行中', start: '2026-09-20', end: '2027-03-31', profit: 21.0, updatedAt: '2026-09-22', contractId: 'HT000009', budget: 1300000,
     progressActual: 70, progressPlan: 82,
     workItems: [
-      { name: '喷头安装', totalQty: 100, doneQty: 80, unitPrice: 1000 },
-      { name: '镀锌钢管敷设', totalQty: 1000, doneQty: 600, unitPrice: 100 },
-      { name: '报警探测器安装', totalQty: 200, doneQty: 140, unitPrice: 500 },
-      { name: '防排烟风管制作', totalQty: 500, doneQty: 350, unitPrice: 200 },
+      { name: '喷头安装', totalQty: 100, doneQty: 80, unitPrice: 1000, unit: '个' },
+      { name: '镀锌钢管敷设', totalQty: 1000, doneQty: 600, unitPrice: 100, unit: '米' },
+      { name: '报警探测器安装', totalQty: 200, doneQty: 140, unitPrice: 500, unit: '只' },
+      { name: '防排烟风管制作', totalQty: 500, doneQty: 350, unitPrice: 200, unit: '㎡' },
     ] },
   { id: 'XM000118', name: '楚雄州人民医院消防维护保养', type: '维护保养', biz: 'WB', source: '商机直签', customer: '楚雄州人民医院', customerId: 'KH20250902004', owner: '赵薇', pm: '李工', contractAmt: 960000, execAmt: 960000, cost: 590000, milestone: 58, milestoneName: '周期巡检', recvPct: 62.5, risk: 'none', status: '维保服务中', serviceStart: '2026-09-01', serviceEnd: '2027-08-31', start: '2026-09-01', end: '2027-08-31', profit: 38.5, updatedAt: '2026-09-18', contractId: 'WB000003' },
   { id: 'XM000105', name: '丽江景区智慧消防平台', type: '新建', biz: 'RJ', source: '报价转化', customer: '丽江××文旅开发集团', owner: '陈静', pm: '王工', contractAmt: 2400000, execAmt: 2400000, cost: 1620000, milestone: 25, milestoneName: '进场准备', recvPct: 25, risk: 'none', status: '待启动', start: '2026-09-01', end: '2027-01-31', profit: 32.5, updatedAt: '2026-09-15', contractId: 'HT000005' },

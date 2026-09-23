@@ -188,7 +188,7 @@ export default function OppPage({ go, role, nav }: { go: (p: string) => void; ro
     if (idxOf(advStage) >= gateIdx && !o.amt) { toast(`推进到「${stages[gateIdx]}」起预计金额必填 · 请先在商机详情就地补填`, 'err'); return; }
     /* requireBid 门控（按单启用）：投标阶段须先发起关联投标单，否则不允许推进 */
     const advTpl = tpl.find((x) => x.name === advStage);
-    if (advTpl?.requireBid && getOppBids(o.id).length === 0) { toast(`推进到「``」须先发起关联投标单 · 请前往投标管理新建投标`, 'err'); return; }
+    if (advTpl?.requireBid && getOppBids(o.id).length === 0) { toast(`推进到「${advStage}」须先发起关联投标单 · 请前往投标管理新建投标`, 'err'); return; }
     moveOpp(o.id, advStage, advNote.trim(), o.owner);
     toast(`阶段已推进：${o.stage} → ${advStage}（权重 ${stageW(advStage)}% · 说明：${advNote.trim()}）`);
     setAdvOpen(null); setAdvNote('');

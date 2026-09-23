@@ -3637,3 +3637,95 @@ button.nc-ovcell:hover .nc-drill, button.nc-ovcell:focus-visible .nc-drill { opa
 /* ---- 弹窗内表格自适应：去掉 min-width:720px，避免横向滚动条 ---- */
 .nc-modal-bd .nc-tbl { min-width: 0; }
 .nc-modal-bd { overflow-x: hidden; }
+
+/* ==========================================================================
+   项目详情 · 分层重构（概览页 + 5 个子页）
+   版式：二级导航页签 → 内容区。子页由 view=?sub= 深链承载，不是弹窗/抽屉。
+   台账类子页（members/track）由 <ProjectLedgerShell> 复用合同详情的视口锁定模型；
+   概览页与其他子页吃满剩余高度后在内容区整页滚动（层级固定、内容独立滚动）。
+   ========================================================================== */
+
+/* ---- 二级导航条：附着在内容区顶部，不随内容滚动 ---- */
+.nc-pjnav {
+  flex: none; display: flex; align-items: center; flex-wrap: wrap; gap: 10px;
+  margin-top: 12px; padding: 6px 10px;
+  background: var(--c-canvas); border: 1px solid var(--c-hairline);
+  border-radius: var(--r-lg); box-shadow: 0 1px 2px rgba(0,0,0,.03);
+}
+.nc-pjnav-lb { font-size: 12px; color: var(--ink-3); margin-left: 4px; }
+.nc-pjnav .nc-tabs { border-bottom: 0; }
+
+/* ---- 内容区：吃满剩余高度后内部滚动，页头与导航条常驻 ---- */
+.nc-pjbody {
+  flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column;
+  overflow-y: auto; overflow-x: hidden; margin-top: 12px; padding-right: 2px; padding-bottom: 4px;
+}
+/* 子页根容器：flex 子项必须显式 flex:0 0 auto —— 否则 overflow 子项最小尺寸判为 0，
+   内容超视口时会被压扁裁切（本项目踩过：434px → 2px）。 */
+.nc-pjsection { flex: 0 0 auto; }
+
+/* ---- 概览页：三列摘要 + 风险待办 + 业务域入口 ---- */
+.nc-pjsplit { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.05fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.nc-pjsplit > * { min-width: 0; }
+.nc-pjglance { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px dashed var(--c-hairline); }
+.nc-pjglance:last-child { border-bottom: 0; }
+.nc-pjglance-k { flex: none; width: 76px; font-size: 12px; color: var(--ink-3); }
+.nc-pjglance-v { flex: 1 1 auto; min-width: 0; font-size: 13px; color: var(--ink); }
+.nc-pjglance-r { flex: none; text-align: right; }
+
+/* ---- 业务域入口卡：5 个域，各带计数与待办角标 ---- */
+.nc-domain { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.nc-domain-card {
+  position: relative; text-align: left; display: flex; flex-direction: column; gap: 4px;
+  padding: 12px 14px; background: var(--c-canvas); border: 1px solid var(--c-hairline);
+  border-radius: var(--r-md); font: inherit; cursor: pointer; transition: border-color .15s, box-shadow .15s, transform .15s;
+}
+.nc-domain-card:hover { border-color: var(--c-primary-border); box-shadow: 0 3px 10px rgba(0,0,0,.06); transform: translateY(-1px); }
+.nc-domain-card-hd { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--ink); }
+.nc-domain-card-hd .nc-drill { margin-left: auto; opacity: 0; transition: opacity .15s; }
+.nc-domain-card:hover .nc-drill { opacity: 1; }
+.nc-domain-card-v { font-size: 20px; font-weight: 700; line-height: 26px; color: var(--ink); }
+.nc-domain-card-sub { font-size: 11.5px; color: var(--ink-3); }
+.nc-domain-card .nc-tag { align-self: flex-start; }
+
+/* ---- 全链路血缘链：可点击节点 + 当前所处位置高亮 ---- */
+.nc-lineage { display: flex; align-items: stretch; flex-wrap: wrap; gap: 6px; }
+.nc-lineage-node {
+  flex: 1 1 0; min-width: 108px; text-align: left; padding: 8px 10px;
+  background: var(--c-canvas); border: 1px solid var(--c-hairline); border-radius: var(--r-md);
+  font: inherit; display: flex; flex-direction: column; gap: 2px; transition: border-color .15s, background .15s;
+}
+button.nc-lineage-node { cursor: pointer; }
+button.nc-lineage-node:hover { border-color: var(--c-primary-border); background: #f5f7fa; }
+.nc-lineage-node.is-cur { border-color: var(--c-primary); background: var(--c-primary-bg); }
+.nc-lineage-node.is-void { border-style: dashed; }
+.nc-lineage-k { font-size: 11.5px; color: var(--ink-3); }
+.nc-lineage-v { font-size: 13px; font-weight: 600; color: var(--ink); }
+.nc-lineage-st { font-size: 11px; color: var(--ink-3); }
+.nc-lineage-arrow { flex: none; align-self: center; color: var(--ink-3); font-size: 12px; }
+
+/* ---- 节点准入：资料齐备性清单 ---- */
+.nc-gate { border: 1px solid var(--c-hairline); border-radius: var(--r-md); overflow: hidden; }
+.nc-gate-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; font-size: 13px; border-top: 1px solid var(--c-hairline); }
+.nc-gate-row:first-child { border-top: 0; }
+.nc-gate-row .nc-gate-n { flex: 1 1 auto; min-width: 0; }
+.nc-gate-row .nc-gate-s { flex: none; }
+.nc-gate-block {
+  display: flex; align-items: center; gap: 8px; padding: 8px 12px; font-size: 12.5px;
+  background: var(--c-danger-bg); border: 1px solid var(--c-danger-border); border-radius: var(--r-md);
+  color: var(--ink-2); margin-top: 10px;
+}
+
+/* ---- 闭环处置条：现状 → 目标 → 处置 ---- */
+.nc-looprow { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px dashed var(--c-hairline); font-size: 13px; }
+.nc-looprow:last-child { border-bottom: 0; }
+.nc-looprow-k { flex: none; width: 84px; color: var(--ink-3); font-size: 12px; }
+.nc-looprow-v { flex: 1 1 auto; min-width: 0; }
+.nc-looprow-act { flex: none; }
+
+@media (max-width: 1240px) {
+  .nc-pjsplit { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+}
+@media (max-width: 900px) {
+  .nc-pjsplit { grid-template-columns: minmax(0, 1fr); }
+}

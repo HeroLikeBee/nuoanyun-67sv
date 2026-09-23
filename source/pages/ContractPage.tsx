@@ -20,7 +20,7 @@ const TYPE_TONE: Record<string, 'blue' | 'orange' | 'purple' | 'green'> = {
 };
 type C = (typeof CONTRACTS)[number];
 
-const TABS = ['全部', '待审批', '已签约', '收款逾期', '已续签', '已终止'] as const;
+const TABS = ['全部', '销售合同', '采购合同', '待审批', '已签约', '收款逾期', '已续签', '已终止'] as const;
 /** 需要红点提示的行动项页签（有积压才亮红，避免常红疲劳） */
 const HOT_TABS = ['待审批', '已签约', '收款逾期'] as const;
 const QUICKS = ['全部状态', '履约中', '待签署', '有逾期', '超付预警'] as const;
@@ -73,6 +73,8 @@ export default function ContractPage({ go, role, nav }: { go: (p: string) => voi
 
   const counts: Record<string, number> = {
     全部: contracts.length,
+    销售合同: contracts.filter((c) => c.type === '销售合同').length,
+    采购合同: contracts.filter((c) => c.type === '采购合同').length,
     待审批: contracts.filter((c) => st(c) === '待审批').length,
     已签约: contracts.filter((c) => st(c) === '已签约').length,
     收款逾期: contracts.filter((c) => c.overdue).length,
@@ -81,6 +83,8 @@ export default function ContractPage({ go, role, nav }: { go: (p: string) => voi
   };
 
   const rows = useMemo(() => contracts.filter((c) => {
+    if (tab === '销售合同' && c.type !== '销售合同') return false;
+    if (tab === '采购合同' && c.type !== '采购合同') return false;
     if (tab === '待审批' && st(c) !== '待审批') return false;
     if (tab === '已签约' && st(c) !== '已签约') return false;
     if (tab === '收款逾期' && !c.overdue) return false;
