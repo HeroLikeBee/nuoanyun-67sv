@@ -4,12 +4,82 @@
 // 版式：KPI 带 → 三列（合同与回款 / 成本与利润 / 风险与覆盖）× 业务域入口 → 全链路血缘。
 // 口径：所有绝对值只在此处出现一次，其余子页只承接差额 / 比率 / 流水。
 import React from 'react';
-import { Btn, Card, Code, EntityLink, Progress, Tag, Tip } from '../ui';
+import { Btn, Card, Code, EntityLink, KvGrid, Progress, Tag, Tip } from '../ui';
 import { Ico } from '../icons';
 import type { IconName } from '../icons';
-import { PROJECT_STATUS_TONE, isServiceProject, fmtAmt } from '../data';
+import { PROJECT_STATUS_TONE, TODAY, isServiceProject, fmtAmt } from '../data';
 import { PjSection } from './PjSection';
 import type { PjCtx } from './ctx';
+
+/** 业务线中文（数据层存缩写） */
+const BIZ_CN: Record<string, string> = {
+  GC: '消防工程', WB: '维保服务', JC: '消防检测', RJ: '软件平台', QT: '其他',
+};
+
+/** 基本信息：项目档案的身份与契约属性（不含任何金额——金额全归 KPI 带，避免重复） */
+function CardProfile({ C }: { C: PjCtx }) {
+  const { P } = C;
+  const DAY = 86400000;
+  const t = (s?: string) => (s ? new Date(s).getTime() : NaN);
+  /** 距计划竣工日剩余天数；无竣工日显示 — */
+  const daysLeft = Number.isFinite(t(P.end)) ? Math.round((t(P.end) - t(TODAY)) / DAY) : null;
+  const daysText = daysLeft == null ? '—'
+    : daysLeft >= 0 ? `剩余 ${daysLeft} 天`
+      : `已超期 ${Math.abs(daysLeft)} 天`;
+  /** 工期已过比例 = 已过天数 ÷ 总工期；总工期为 0 时按 0 处理，避免除零放大成 100% */
+  const span = Number.isFinite(t(P.start)) && Number.isFinite(t(P.end)) ? Math.round((t(P.end) - t(P.start)) / DAY) : 0;
+  const passed = span > 0 && Number.isFinite(t(TODAY)) ? Math.round((t(TODAY) - t(P.start)) / DAY) : 0;
+  const done = span > 0 ? Math.min(100, Math.max(0, Math.round((passed / span) * 100))) : 0;
+  return (
+    <Card
+      hd={<span><Ico n="building" size={16} /> 基本信息</span>}
+      extra={<>
+        <span className="nc-cell-sub">
+          立项来源 {(BIZ_CN[P.biz] ?? P.biz)} · 最近更新 {P.updatedAt ?? P.start}
+        </span>
+        <Btn size="sm" onClick={C.openLog}>变更留痕</Btn>
+      </>}
+    >
+      <KvGrid cols={2} rows={[
+        { k: '项目类型', v: P.type },
+        { k: '业务线', v: BIZ_CN[P.biz] ?? P.biz },
+        {
+          k: '立项来源', v: P.noContract && P.backfillBy
+            ? <><span>{P.source}</span> <Tag tone="orange">无合同施工 · 补签期限 {P.backfillBy}</Tag></>
+            : P.source,
+        },
+        { k: '客户', v: P.customerId
+          ? <EntityLink target="customer" id={P.customerId} go={C.go} title="下钻到客户详情">{P.customer}</EntityLink>
+          : P.customer },
+        { k: '甲方现场对接人', v: (P as { clientContact?: string }).clientContact ?? '—' },
+        { k: '项目经理', v: P.pm },
+        { k: '销售负责人', v: P.owner },
+        { k: '消防验收状态', v: <Tag tone={P.acceptStatus === '已通过' || P.acceptStatus === '已备案' ? 'green' : P.acceptStatus ? 'blue' : 'gray'}>{P.acceptStatus ?? '未申报'}</Tag> },
+        {
+          k: '计划工期',
+          v: <><span className="num">{P.start} ~ {P.end}</span> <span className="nc-cell-sub">{daysText} · 已过工期 {done}%</span></>,
+        },
+        {
+          k: '项目状态',
+          v: <><Tag tone={(PROJECT_STATUS_TONE[P.status] || 'blue') as 'blue'}>{P.status}</Tag> <span className="nc-cell-sub">当前节点 {P.milestoneName}</span></>,
+        },
+      ]} />
+      {isServiceProject(P) && (
+        <div className="nc-gate-block" style={{ background: 'var(--c-primary-bg)', borderColor: 'var(--c-primary-border)', marginTop: 10 }}>
+          <Ico n="shield" size={14} />
+          本项目含维保服务，服务期 <span className="num">{P.serviceStart ?? '—'} ~ {P.serviceEnd ?? '—'}</span>
+          （服务期限由合同带出，此处只读）—— 结项后可转入长期维保。
+        </div>
+      )}
+      {P.pauseReason && (
+        <div className="nc-gate-block" style={{ marginTop: 10 }}>
+          <Ico n="warning" size={14} />
+          暂停原因：{P.pauseReason}（暂停于 {P.pausedAt ?? '—'}，留痕见操作记录）
+        </div>
+      )}
+    </Card>
+  );
+}
 
 /** KPI 带：6 格，绝对值口径；每格可穿透（jump 为 undefined 时不可点） */
 function KpiStrip({ C }: { C: PjCtx }) {
@@ -350,6 +420,7 @@ export default function OverviewSub({ C }: { C: PjCtx }) {
   return (
     <div className="nc-pjsection">
       <KpiStrip C={C} />
+      <CardProfile C={C} />
       <div className="nc-pjsplit" style={{ marginTop: 16 }}>
         <CardReceipt C={C} />
         <CardCost C={C} />

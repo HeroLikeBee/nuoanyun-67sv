@@ -1,20 +1,19 @@
 // 报价详情（只读详情 + 版本追溯）
 // 复刻「报价详情.html」：派生=金额/税额/单方；工具=区域上浮批量；参照=历史同类单方；流转=撤回/升版
 // 硬规则：税率口径公式写死 · 区域上浮 0~30 越界拦截且联动顶部卡与单方造价 · 升版必填变更原因 · 版本对比含「不变/已删除/新增」性质
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Btn, Banner, Card, EntityLink, KvGrid, Modal, Money, PageHead, Tag, Timeline, useToast, Code,
 } from '../components/ui';
-import { QUOTES, PROJECTS, fmt, TODAY } from '../components/data';
-import { getFocus } from '../components/store';
+import { fmt, TODAY } from '../components/data';
+import { getBizStatus, getFocus, getProjects, getQuotes, subscribeStore } from '../components/store';
 import { Ico } from '../components/icons';
 
 /* G3：原 const Q = QUOTES[0] 硬编码索引 0 —— 从任何入口进入都只看 BJ000011。
    改为组件内读取聚焦 ID（上游页面跳转前写入 store），并以 nav 为依赖重新解析，
    保证「客户 → 报价 → 客户 → 另一张报价」这类反复下钻都能正确定位。
-   AREA / DEVICE_IDX 等常量保持模块级。 */
-const AREA = 26000; // 项目面积（㎡）
-const DEVICE_IDX = 2; // 设备 / 平台接入行（计算「工程费单方」时剔除）
+   项目面积 / 设备行下标也改为按当前报价单明细派生（见组件内 AREA / DEVICE_IDX），
+   不再用模块级常量 —— 那两个常量只对 BJ000011 成立。 */
 
 /**
  * 报价明细行模板（结构口径 + 金额权重）。
@@ -58,11 +57,22 @@ const DIFF_TONE: Record<string, string> = { warn: 'var(--c-warning-deep)', gray:
 
 export default function QuoteDetailPage({ go, role, nav }: { go: (p: string) => void; role: string; nav?: number }) {
   const toast = useToast();
+  /* 订阅共享 store：报价工作台 / 台账的编辑与状态回写要即时反映到详情页 */
+  const [tick, setTick] = useState(0);
+  useEffect(() => subscribeStore(() => setTick((n) => n + 1)), []);
   /** 穿透目标报价单：按 nav 重算，保证反复下钻时始终定位到当前聚焦实体（取不到回落首条） */
   const Q = useMemo(() => {
     const id = getFocus('quote-detail');
-    return QUOTES.find((q) => q.id === id) || QUOTES[0];
-  }, [nav]);
+    const all = getQuotes();
+    return all.find((q) => q.id === id) || all[0];
+  }, [nav, tick]);
+  /* 状态口径走审批回写覆盖层，与台账 / 审批中心一致 */
+  const Q_ST = getBizStatus(Q.id, Q.status);
+  /* 关联项目：优先报价单自身外键（projectId），兜底按项目的 quoteId 反查 —— 修复前固定显示 PROJECTS[0] */
+  const relProj = useMemo(() => {
+    const all = getProjects();
+    return all.find((p) => p.id === Q.projectId) || all.find((p) => p.quoteId === Q.id);
+  }, [Q.id, Q.projectId, tick]);
   const [uplift, setUplift] = useState(3);
   const [taxMode, setTaxMode] = useState('tax9');
   const [applied, setApplied] = useState(false);
@@ -86,6 +96,19 @@ export default function QuoteDetailPage({ go, role, nav }: { go: (p: string) => 
   const preTotal = LINES.reduce((a, l) => a + linkAmt(l), 0);
   const total = LINES.reduce((a, l) => a + lineUp(l, uplift), 0);
 
+  /**
+   * 项目面积：取明细中「㎡」计量行的数量（按当前报价单明细派生，无 ㎡ 行时回落到原型常量）。
+   * 设备 / 平台接入行（「项」计量）在计算「工程费单方」时剔除。
+   * 修复前两者是模块级常量 26000 / 2，只对 BJ000011 成立，别的报价单单方造价全错。
+   */
+  const AREA = LINES.find((l) => l.unit === '㎡')?.qty || 26000;
+  const DEVICE_IDX = LINES.findIndex((l) => l.unit === '项');
+
+  /** 初版基价锚点：明细未含区域上浮的合计（数据模型无版本历史，故以「未上浮基价」为 V1 参照，
+      不再写死 4862000 —— 那个数字只对 BJ000011 成立）。 */
+  const V1_AMT = preTotal;
+  const v1Diff = total - V1_AMT;
+
   /** 税率口径：含税 → 税额 = 总额×税率÷(100+税率)；不含税 → 税额 = 总额×税率÷100 */
   const taxInfo = () => {
     const m = taxMode.slice(0, 3);
@@ -98,12 +121,8 @@ export default function QuoteDetailPage({ go, role, nav }: { go: (p: string) => 
     return { mode: '不含税', rate, tax, net: total, gross: total + tax };
   };
   const t = taxInfo();
-  const eng = total - lineUp(LINES[DEVICE_IDX], uplift);
-  const unit = eng / AREA;
-
-  /** V1 初版总额：当前版本卡片只显示「较 V1 的增减」，不重复顶部派生卡的报价总额 */
-  const V1_AMT = 4862000;
-  const v1Diff = total - V1_AMT;
+  const eng = total - (DEVICE_IDX >= 0 ? lineUp(LINES[DEVICE_IDX], uplift) : 0);
+  const unit = AREA > 0 ? eng / AREA : 0;
 
   const mean = REF.reduce((a, r) => a + r.up, 0) / REF.length;
   const dev = ((unit - mean) / mean) * 100;
@@ -128,7 +147,7 @@ export default function QuoteDetailPage({ go, role, nav }: { go: (p: string) => 
     <>
       <PageHead
         title={<span className="nc-mono-lg">{Q.id}</span>}
-        badges={<><Tag tone="blue">{Q.ver} 当前版本</Tag><Tag tone="blue">{Q.status}</Tag><Tag tone="orange">{t.mode} {t.rate}%</Tag></>}
+        badges={<><Tag tone="blue">{Q.ver} 当前版本</Tag><Tag tone="blue">{Q_ST}</Tag><Tag tone="orange">{t.mode} {t.rate}%</Tag></>}
         sub={`${Q.name} · ${Q.customer} · 负责人 ${Q.owner}`}
         actions={<>
           <Btn onClick={() => go('quote')}>← 返回台账</Btn>
@@ -159,7 +178,7 @@ export default function QuoteDetailPage({ go, role, nav }: { go: (p: string) => 
       </div>
 
       {/* 基本信息 */}
-      <Card hd="基本信息" extra={<span className="nc-cell-sub">关联项目 {PROJECTS[0] ? <EntityLink target="project-center" id={PROJECTS[0].id} go={go} title="下钻到项目经营中心">{PROJECTS[0].id} →</EntityLink> : '—'}</span>}>
+      <Card hd="基本信息" extra={<span className="nc-cell-sub">关联项目 {relProj ? <EntityLink target="project-center" id={relProj.id} go={go} title="下钻到项目经营中心">{relProj.id} →</EntityLink> : '—'}</span>}>
         <div className="nc-rv-grid">
           <KvGrid cols={2} rows={[
             { k: '客户', v: <EntityLink target="customer" id={Q.customerId} go={go} title="下钻到客户档案">{Q.customer}</EntityLink> },
@@ -191,8 +210,18 @@ export default function QuoteDetailPage({ go, role, nav }: { go: (p: string) => 
       <Card hd="报价明细" extra={
         <div className="nc-inline-ops">
           <span className="nc-cell-sub">区域上浮</span>
+          {/* 输入即时夹取 0~30：修复前只在点「一键应用」时校验，直接输入 999 会让
+              顶部报价总额与单方造价先按 999% 重算，再点应用才被拒 —— 数字先错后拦。 */}
           <input className="nc-input nc-input-sm num" type="number" min={0} max={30} value={uplift}
-            onChange={(e) => setUplift(Number(e.target.value))} style={{ width: 64 }} />
+            onChange={(e) => {
+              const raw = e.target.value;
+              if (raw === '') { setUplift(0); return; }
+              const n = Number(raw);
+              if (Number.isNaN(n)) return;
+              if (n < 0) { setUplift(0); toast('区域上浮不得为负，已修正为 0'); return; }
+              if (n > 30) { setUplift(30); toast('区域上浮上限 30%，已截断为 30'); return; }
+              setUplift(n);
+            }} style={{ width: 64 }} />
           <span className="nc-cell-sub">%（0~30）</span>
           <Btn size="sm" kind="primary" onClick={() => applyUp(String(uplift))}>一键应用到全部行</Btn>
         </div>
@@ -261,14 +290,14 @@ export default function QuoteDetailPage({ go, role, nav }: { go: (p: string) => 
       <Card hd="版本记录" extra={<span className="nc-cell-sub">多轮报价逐版留痕，可对比追溯</span>}>
         <div className="nc-vercard is-cur">
           <Tag tone="blue">{Q.ver} · 当前</Tag>
-          <b className="num">较 V1 {v1Diff >= 0 ? '+' : '−'}{fmt(Math.abs(v1Diff))}</b>
-          <span className="nc-cell-sub" style={{ marginTop: 0 }}>{Q.update} · 按院方预算删减应急照明系统，报警点位优化</span>
-          <span className="nc-vercard-ops"><Btn size="sm" onClick={() => setDiffOpen(true)}>与 V1 对比</Btn></span>
+          <b className="num">较初版基价 {v1Diff >= 0 ? '+' : '−'}{fmt(Math.abs(v1Diff))}</b>
+          <span className="nc-cell-sub" style={{ marginTop: 0 }}>{Q.update} · 当前版本（含区域上浮 {uplift}%）</span>
+          <span className="nc-vercard-ops"><Btn size="sm" onClick={() => setDiffOpen(true)}>与初版对比</Btn></span>
         </div>
         <div className="nc-vercard">
-          <Tag>V1</Tag>
+          <Tag>初版</Tag>
           <span className="num">{fmt(V1_AMT)}</span>
-          <span className="nc-cell-sub" style={{ marginTop: 0 }}>{Q.date} · 初版（含应急照明系统改造，无区域上浮）</span>
+          <span className="nc-cell-sub" style={{ marginTop: 0 }}>{Q.date} · 明细基价合计（未含区域上浮）</span>
         </div>
       </Card>
 

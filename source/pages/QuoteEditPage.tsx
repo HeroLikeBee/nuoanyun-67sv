@@ -1,11 +1,13 @@
 // 报价编辑（工作台）—— 目录化组价与批量调价，报价的「干活页面」
 // 核心：8 目录批量调价 · 明细 5 列内嵌可编辑 · 汇总项只读自动计算 · 粘性汇总条触发提示
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Btn, Banner, Card, Field, KvGrid, Modal, Money, Op, OpSep, PageHead, SearchInput,
   Tag, Tip, useToast, Check, Code, Collapse, ChainBar, DataTable, Drawer, EntityLink,
 } from '../components/ui';
-import { QUOTE_CATS, UNITS, MATERIALS, KITS, RECIPES, bomCost, itemByCode, CUSTOMERS, OPPS, PROJECTS, matPriceRef, fmt, fmtWan, approveLevel, quoteTrigger, TODAY, isOppClosed } from '../components/data';
+import { QUOTE_CATS, UNITS, MATERIALS, KITS, RECIPES, bomCost, itemByCode, CUSTOMERS, OPPS, PROJECTS, QUOTES, matPriceRef, catFind, fmt, fmtWan, approveLevel, quoteTrigger, TODAY, isOppClosed } from '../components/data';
+import type { Quote, QuoteLine } from '../components/data';
+import { addQuote, getApprovals, getFocus, getItems, getQuote, getQuotes, patchQuote, pushApproval, setBizStatus, setFocus, setPendingQuote, subscribeStore } from '../components/store';
 import { Ico } from '../components/icons';
 
 type Item = {
@@ -41,6 +43,46 @@ const INIT: Item[] = [
 const CAT_KEYS = QUOTE_CATS.map((c) => c.name);
 const catDefaultMarkup = (cat: string) => QUOTE_CATS.find((c) => c.name === cat)?.markup ?? 15;
 
+/**
+ * 明细行 id 自增计数器（模块作用域）。
+ * 原先各添加入口用 `200 + i` / `300 + p.length` / `400 + items.length` 硬编码基数，会互相撞号，
+ * 导致 React key 冲突与 `setIt(id)` 命中错行。
+ */
+let rowSeq = 1000;
+const nextRowId = () => ++rowSeq;
+
+/** 物料目录（CAT_TREE.mat 一级名）→ 报价 8 目录名（QUOTE_CATS.name），名称不一致的做别名归一 */
+const CAT_ALIAS: Record<string, string> = { 气体灭火设备: '气体灭火' };
+/** 物料分类码 → 报价目录名（取不到或不在 8 目录内时回落「消防电」） */
+const quoteCatOf = (itemCat?: string) => {
+  const top = itemCat ? (catFind(itemCat)?.path?.[1]?.n ?? '') : '';
+  const name = CAT_ALIAS[top] || top;
+  return CAT_KEYS.includes(name) ? name : '消防电';
+};
+
+/** 报价单号：BJ + 6 位流水（取现有最大流水 + 1） */
+const nextQuoteNo = () => {
+  const max = getQuotes()
+    .filter((q) => /^BJ\d{6}$/.test(q.id))
+    .map((q) => Number(q.id.slice(2)))
+    .reduce((a, b) => Math.max(a, b), 0);
+  return `BJ${String(max + 1).padStart(6, '0')}`;
+};
+
+/** 生成报价审批单（提交审批 → 审批中心可见，形成正向闭环） */
+const makeQuoteApproval = (ref: string, ver: string, obj: string, amt: number, level: string) => {
+  const [y, m, d] = TODAY.split('-');
+  const seq = getApprovals().length + 1;
+  return {
+    id: `SP-${y}-${m}${d}-${String(seq).padStart(2, '0')}`,
+    ap: '蓝峰', type: '报价审批', obj,
+    ref: `${ref} 报价单 ${ver}`,
+    amt, time: `${TODAY} 14:00`, status: '待审批',
+    level: level === '—' ? '部门负责人' : level,
+    node: 0, reason: '', cc: ['李思敏'],
+  } as Parameters<typeof pushApproval>[0];
+};
+
 /* ============ 项目用料清单（原型派生） ============ */
 /** 项目推荐套件：按项目编码散列取一半套件，保证不同项目用料清单不同 */
 const projKitList = (projId: string) => {
@@ -49,14 +91,27 @@ const projKitList = (projId: string) => {
   const picked = kits.filter((_, i) => (i + h) % 2 === 0);
   return picked.length ? picked : kits.slice(0, 1);
 };
-/** 项目常用材料：按项目编码散列取 6~7 项 */
+/** 项目用料材料：从项目关联报价单的明细行取（matId 存在的行） */
 const projMatList = (projId: string) => {
-  const h = [...projId].reduce((a, c) => a + c.charCodeAt(0), 0);
-  return MATERIALS.filter((_, i) => (i + h) % 3 !== 2).slice(0, 7);
+  const q = QUOTES.find((x) => x.projectId === projId);
+  if (!q?.lines) return [];
+  const matCodes = q.lines.filter((ln) => ln.matId).map((ln) => ln.matId!);
+  return MATERIALS.filter((m) => matCodes.includes(m.code));
 };
 
 export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => void; role: string; nav?: number }) {
   const toast = useToast();
+  /**
+   * 编辑目标：由报价台账「编辑」经 setFocus('quote-edit', id) 传入；取不到 = 新建模式。
+   * 修复前本页永远加载硬编码的 INIT 15 行 + 固定表头 —— 点哪张报价单进来都显示同一份。
+   */
+  const editing = useMemo(() => {
+    const id = getFocus('quote-edit');
+    return id ? getQuote(id) : null;
+  }, [nav]);
+  /** store 变更脉冲：材料页新增 / 停用物料后，本页材料库候选即时跟随 */
+  const [tick, setTick] = useState(0);
+  useEffect(() => subscribeStore(() => setTick((n) => n + 1)), []);
   // L0 头部
   const [customer, setCustomer] = useState('昆明市第一人民医院');
   const [opp, setOpp] = useState('SJ000470');
@@ -89,14 +144,23 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
   /* —— 从项目拉取用料 —— */
   const [projOpen, setProjOpen] = useState(false);
   const [projPick, setProjPick] = useState(PROJECTS[0]?.id || '');
+  /** 项目关联报价单的明细映射：matId → { qty, cost, markup, price, cat } */
+  const quoteMap = useMemo(() => {
+    const m: Record<string, { qty: number; cost: number; markup: number; price: number; cat: string }> = {};
+    const q = QUOTES.find((x) => x.projectId === projPick) || QUOTES.find((x) => x.lines && x.bidId);
+    (q?.lines ?? []).forEach((ln) => { if (ln.matId) m[ln.matId] = { qty: ln.qty, cost: ln.cost, markup: ln.markup, price: ln.price, cat: ln.cat }; });
+    return m;
+  }, [projPick]);
   /** 已勾选的用料编码（套件 = CP 编码 / 材料 = CL 编码） */
   const [projSel, setProjSel] = useState<Set<string>>(new Set());
   /** 套件带入方式：expand 展开为材料明细 / whole 整体带入 1 行 */
   const [kitMode, setKitMode] = useState<Record<string, 'expand' | 'whole'>>({});
+  const [kitLineQty, setKitLineQty] = useState<Record<string, number>>({});
+  const [matLineQty, setMatLineQty] = useState<Record<string, number>>({});
   const [submitOpen, setSubmitOpen] = useState(false);
   const [reason, setReason] = useState('');
   const [aiRun, setAiRun] = useState(false);
-  const [aiPicked, setAiPicked] = useState<string[]>([]);
+  const [aiPicked, setAiPicked] = useState<{ name: string; qty: number; unit: string }[]>([]);
   const [matKw, setMatKw] = useState('');
   const [matPick, setMatPick] = useState<string[]>([]);
   const [cName, setCName] = useState(''); const [cSpec, setCSpec] = useState(''); const [cUnit, setCUnit] = useState('项');
@@ -112,6 +176,34 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
   const [nqCust, setNqCust] = useState('昆明市第一人民医院');
   const [nqType, setNqType] = useState('改造');
   const [matCat, setMatCat] = useState('全部目录');
+
+  /* ---------- 载入编辑目标（明细已落库 → 回到工作台无损还原 cost / markup） ---------- */
+  useEffect(() => {
+    if (!editing) return;
+    setCustomer(editing.customer);
+    setOpp(editing.opp);
+    setQName(editing.name);
+    setTaxRate(editing.taxRate);
+    setUpRate(editing.markup || 20);
+    if (editing.lines?.length) {
+      setItems(editing.lines.map((l, i) => ({
+        id: i + 1, cat: l.cat || '消防电', name: l.name, spec: l.spec ?? '', unit: l.unit,
+        qty: l.qty, cost: l.cost, markup: l.markup, note: l.note ?? '', code: l.matId,
+      })));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nav]);
+
+  /* ---------- 材料库候选：读共享 store 且只取「启用」物料 ----------
+     修复两处缺陷：① 原先只读 data.ts 常量 MATERIALS，材料页新维护的物料选不到、停用的物料照样能选；
+     ② 原先「目录」筛选拿材料分类码（m21）去比报价目录名（消防水），永远筛不出结果。 */
+  const matCandidates = useMemo(() => {
+    const active = getItems().filter((m) => m.status === '启用' && (m.ty === '材料' || m.ty === '设备'));
+    return active.filter((m) => {
+      if (matCat !== '全部目录' && quoteCatOf(m.cat) !== matCat) return false;
+      return !matKw || (m.name + m.code + (m.spec || '')).includes(matKw);
+    });
+  }, [matCat, matKw, nav, tick]);
 
   /* ---------- 派生计算（只读，不可手填） ---------- */
   const line = (it: Item) => {
@@ -139,23 +231,20 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
   ];
 
   const applyCat = () => {
-    const hitRows = items.filter((it) => it.cat === bCat);
-    if (!hitRows.length) { toast(`目录「${bCat}」下暂无明细行`); return; }
+    const isAll = bCat === '__all';
+    const hitRows = isAll ? items : items.filter((it) => it.cat === bCat);
+    if (!hitRows.length) { toast(isAll ? '暂无明细行' : `目录「${bCat}」下暂无明细行`); return; }
     setItems((p) => p.map((it) => {
-      if (it.cat !== bCat) return it;
+      if (!isAll && it.cat !== bCat) return it;
       if (bMode === 'rate') return { ...it, markup: bRate };
       const price = it.cost + (it.markup / 100) * it.cost;
       return { ...it, markup: price ? Math.max(0, ((bPrice - it.cost) / it.cost) * 100) : it.markup };
     }));
-    toast(`已应用于「${bCat}」目录 ${hitRows.length} 条明细`);
+    toast(`已${isAll ? '整体调价' : `应用于「${bCat}」目录`} ${hitRows.length} 条明细（覆盖原上浮率，非累计）`);
   };
 
   const useCatDef = () => { setBRate(catDefaultMarkup(bCat)); toast(`已带出「${bCat}」默认上浮率 ${catDefaultMarkup(bCat)}%`); };
 
-  const applyRegion = () => {
-    setItems((p) => p.map((it) => ({ ...it, markup: Math.round((it.markup + 3) * 10) / 10 })));
-    toast('区域系数（云南 +3%）已刷新全清单报价价，共 15 条变动');
-  };
 
   const doAI = () => {
     setAiRun(true);
@@ -166,66 +255,83 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
         { id: 103, cat: '防排烟', name: '止回阀', spec: 'DN800 · 排烟系统', unit: '个', qty: 6, cost: 1240, markup: 22, note: 'AI 识别：风管节点' },
       ];
       setItems((p) => [...p, ...add]);
-      setAiRun(false); setAiPicked(add.map((a) => a.name));
+      setAiRun(false); setAiPicked(add.map((a) => ({ name: a.name, qty: a.qty, unit: a.unit })));
       toast('AI 已识别图纸并生成 3 条明细，请逐条核对规格与数量');
     }, 700);
   };
 
   const addFromMat = () => {
-    const add: Item[] = (matPick.length ? matPick : [MATERIALS[0]?.id ?? '']).filter(Boolean).map((id, i) => {
-      const m = MATERIALS.find((x) => x.id === id);
+    if (!matPick.length) { toast('请先勾选材料'); return; }
+    const all = getItems();
+    const add: Item[] = matPick.map((id) => {
+      const m = all.find((x) => x.id === id || x.code === id);
+      const cat = quoteCatOf(m?.cat);
       return {
-        id: 200 + i, cat: '消防电', name: m?.name ?? '材料', spec: m?.spec ?? '', unit: m?.unit ?? '个',
-        qty: m?.stock ?? 1, cost: Math.round((m?.price ?? 0) / 1.13), markup: catDefaultMarkup('消防电'), note: '来自材料库',
+        id: nextRowId(), cat, name: m?.name ?? '材料', spec: m?.spec ?? '', unit: m?.unit ?? '个',
+        /* 数量默认填 1：报价数量是「需求量」，不能拿库存量当默认值 */
+        qty: 1, cost: Math.round((m?.price ?? 0) / 1.13), markup: catDefaultMarkup(cat), note: '来自材料库',
         code: m?.code,
       } as Item;
     });
-    if (!add.length) { toast('请先勾选材料'); return; }
     setItems((p) => [...p, ...add]);
     setAddOpen(false); setMatPick([]);
     toast(`已从材料库添加 ${add.length} 条明细（自动带出编码/规格/单位/目录/成本参考价）`);
   };
 
-  /** 从项目拉取用料 → 生成报价明细（套件可整体带入 1 行，或展开为材料明细） */
+  /** 从项目拉取用料 → 生成报价明细
+   *  优先读该项目关联报价单的实际明细（数量/成本/上浮率），二次编辑直接基于历史数据 */
   const addFromProj = () => {
     if (!projSel.size) { toast('请先勾选用料'); return; }
     const proj = PROJECTS.find((p) => p.id === projPick);
-    /* 数量规模：按项目合同额派生（50 万为 1 个基准单位），避免全部为 1 的不真实感 */
-    const scale = Math.max(1, Math.round((proj?.contractAmt ?? 500000) / 500000));
+
+    /* 找到项目关联的报价单，构建 matId → 历史数量/成本/上浮率映射 */
+    const projQuote = QUOTES.find((q) => q.projectId === projPick)
+      || QUOTES.find((q) => q.bidId && q.lines);
+    const quoteMap: Record<string, { qty: number; cost: number; markup: number; price: number; cat: string }> = {};
+    (projQuote?.lines ?? []).forEach((ln) => {
+      if (ln.matId) quoteMap[ln.matId] = { qty: ln.qty, cost: ln.cost, markup: ln.markup, price: ln.price, cat: ln.cat };
+    });
+
     const add: Item[] = [];
     let seq = 400 + items.length;
     projKitList(projPick).filter((k) => projSel.has(k.code)).forEach((k) => {
-      const mode = kitMode[k.code] ?? 'expand';
-      if (mode === 'whole') {
+      const R = RECIPES[k.code];
+      const ver = R?.versions.find((v) => v.v === R.cur);
+      (ver?.lines ?? []).forEach((l) => {
+        const m = itemByCode(l.code);
+        if (!m) return;
+        const hist = quoteMap[l.code];
+        const lineKey = `${k.code}__${l.code}`;
+        const lineChecked = projSel.has(lineKey);
+        if (!lineChecked) return;
         add.push({
-          id: seq++, cat: '消防电', name: k.name, spec: k.spec, unit: k.unit,
-          qty: scale, cost: bomCost(k.code).total, markup: catDefaultMarkup('消防电'),
-          note: `来自项目 ${projPick} · 套件整体`, code: k.code,
+          id: seq++,
+          cat: hist?.cat || '消防电',
+          name: m.name, spec: m.spec, unit: m.unit,
+          qty: hist?.qty ?? (kitLineQty[lineKey] ?? l.qty),
+          cost: hist?.cost ?? Math.round(m.price / 1.13),
+          markup: hist?.markup ?? catDefaultMarkup('消防电'),
+          note: `来自项目 ${projPick} · 套件「${k.name}」${projQuote ? `（报价 ${projQuote.id} 历史）` : ''}`,
+          code: m.code,
         });
-      } else {
-        const R = RECIPES[k.code];
-        const ver = R?.versions.find((v) => v.v === R.cur);
-        (ver?.lines ?? []).forEach((l) => {
-          const m = itemByCode(l.code);
-          if (!m) return;
-          add.push({
-            id: seq++, cat: '消防电', name: m.name, spec: m.spec, unit: m.unit,
-            qty: l.qty * scale, cost: Math.round(m.price / 1.13), markup: catDefaultMarkup('消防电'),
-            note: `来自项目 ${projPick} · 套件「${k.name}」展开`, code: m.code,
-          });
-        });
-      }
+      });
     });
     projMatList(projPick).filter((m) => projSel.has(m.code)).forEach((m) => {
+      const hist = quoteMap[m.code];
       add.push({
-        id: seq++, cat: '消防电', name: m.name, spec: m.spec, unit: m.unit,
-        qty: 10 * scale, cost: Math.round(m.price / 1.13), markup: catDefaultMarkup('消防电'),
-        note: `来自项目 ${projPick}`, code: m.code,
+        id: seq++,
+        cat: hist?.cat || '消防水',
+        name: m.name, spec: m.spec, unit: m.unit,
+        qty: matLineQty[m.code] ?? hist?.qty ?? 10,
+        cost: hist?.cost ?? Math.round(m.price / 1.13),
+        markup: hist?.markup ?? catDefaultMarkup('消防水'),
+        note: `来自项目 ${projPick}${projQuote ? ` · 报价 ${projQuote.id} 历史` : ''}`,
+        code: m.code,
       });
     });
     setItems((p) => [...p, ...add]);
-    setProjOpen(false); setProjSel(new Set()); setKitMode({});
-    toast(`已从项目 ${projPick} 拉取 ${add.length} 条报价明细`);
+    setProjOpen(false); setProjSel(new Set()); setKitMode({}); setKitLineQty({}); setMatLineQty({});
+    toast(`已从项目 ${projPick} 拉取 ${add.length} 条报价明细${projQuote ? `（含报价 ${projQuote.id} 历史数量与单价）` : ''}`);
   };
 
   const addCustom = () => {
@@ -235,13 +341,64 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
     toast('自定义行已添加');
   };
 
+  /**
+   * 已停用材料集合（H8）：明细行引用的材料被停用后，行内标红并在提交时硬阻断。
+   * 修复前工作台只读材料常量、不筛 status —— 停用材料仍可被报价选中，且引用后毫无提示。
+   */
+  const deadCodes = useMemo(
+    () => new Set(getItems().filter((i) => i.status === '停用').map((i) => i.code)),
+    [tick, nav],
+  );
+
   const preSubmit = () => {
     const m = items.filter((it) => !it.name.trim() || !it.qty || !it.cost).map((it) => it.id);
     setMiss(m);
     if (m.length) { toast(`有 ${m.length} 行缺少必填（名称 / 数量 / 成本参考价），已红框定位`); return; }
+    const dead = items.filter((it) => it.code && deadCodes.has(it.code));
+    if (dead.length) {
+      toast(`有 ${dead.length} 行引用的材料已停用（${dead.map((it) => it.code).join('、')}），请替换为在用材料后再提交`);
+      return;
+    }
     const below = items.filter((it) => line(it).price < it.cost);
     if (below.length) { toast(`${below.length} 行报价价低于成本价，锁死不可提交（须理由 + 特批）`); return; }
     setSubmitOpen(true);
+  };
+
+  /**
+   * 提交审批（落库）。
+   * 修复前此处只 toast：明细停在组件 state，刷新即丢；审批中心也看不到这条待办，
+   * 报价台账状态不变 —— 「报价 → 投标 / 合同」整条下游都没有上游依据。
+   */
+  const doSubmit = () => {
+    if (!reason.trim()) { toast('变更原因必填'); return; }
+    const custId = CUSTOMERS.find((c) => c.name === customer)?.id ?? '';
+    const lines: QuoteLine[] = items.map((it) => ({
+      matId: it.code, cat: it.cat, name: it.name, spec: it.spec, unit: it.unit,
+      qty: it.qty, cost: it.cost, markup: it.markup,
+      price: Math.round(line(it).price * 100) / 100,
+      note: it.note || undefined,
+    }));
+    const amt = Math.round(total);
+    const lvl = hit ? approveLevel(sumExTax) : '—';
+    const head = {
+      customer, customerId: custId, opp,
+      name: qName.trim() || `${customer}消防工程报价`,
+      total: amt, taxRate, taxMode: exTax ? '不含税' : '含税', status: '待审批',
+      owner: '当前用户', update: TODAY, approveLevel: lvl,
+      markup: Math.round(grossMarkup * 10) / 10, items: lines.length, lines,
+    };
+    if (editing) {
+      patchQuote(editing.id, { ...head, ver: editing.ver });
+      pushApproval(makeQuoteApproval(editing.id, editing.ver, head.name, amt, lvl));
+      toast(`已提交审批 · ${editing.id} 明细 ${lines.length} 行已保存 · 路由至${lvl === '—' ? '免审' : lvl}`);
+    } else {
+      const no = nextQuoteNo();
+      addQuote({ id: no, ver: 'V1', region: '昆明', base: '其他', uplift: 0, costSqm: 0, date: TODAY, ...head });
+      pushApproval(makeQuoteApproval(no, 'V1', head.name, amt, lvl));
+      toast(`报价单 ${no} 已创建并提交审批 · 明细 ${lines.length} 行 · 路由至${lvl === '—' ? '免审' : lvl}`);
+    }
+    setSubmitOpen(false); setReason('');
+    go('quote');
   };
 
   /** 采纳三源价格：写入成本参考价并留痕（含来源）；上浮单价由 line() 按浮率自动重算 */
@@ -260,16 +417,20 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
     <>
       <PageHead
         title="报价编辑 · 工作台"
-        badges={<><Tag tone="gray">草稿</Tag><Tag tone="blue">BJ000011 V2</Tag></>}
+        badges={<><Tag tone="gray">{editing ? editing.status : '新建草稿'}</Tag><Tag tone="blue">{editing ? `${editing.id} ${editing.ver}` : '未生成单号'}</Tag></>}
         sub={<span>目录化组价工作台<Tip text="目录化组价 · 批量调价 · 汇总项自动计算（不可手填）。" /></span>}
         actions={<>
           <Btn onClick={() => go('quote')}>← 返回台账</Btn>
-          <Btn onClick={() => toast('草稿已保存（成本参考价快照已留痕）')}>保存草稿</Btn>
+          <Btn onClick={() => { if (!editing) { toast('当前为新建报价，提交审批后才会进入台账', 'err'); return; } patchQuote(editing.id, { update: TODAY }); toast(`${editing.id} 草稿已保存（成本参考价快照已留痕）`); }}>保存草稿</Btn>
           <Btn onClick={() => setNewQOpen(true)}>＋ 新建报价单</Btn>
           <Btn onClick={() => setPrintOpen(true)}><Ico n="file" size={16} /> 打印预览</Btn>
           <Btn onClick={() => setVerOpen(true)}><Ico n="folder" size={16} /> 版本管理</Btn>
           <Btn onClick={() => setApprOpen(true)}><Ico n="receipt" size={16} /> 报价审批</Btn>
-          <Btn onClick={() => setCvtOpen(true)}><Ico n="bolt" size={16} /> 转合同</Btn>
+          <Btn onClick={() => {
+            if (!editing) { toast('请先提交审批并保存报价单，再转合同', 'err'); return; }
+            setPendingQuote({ quoteId: editing.id });
+            go('contract-new');
+          }}><Ico n="bolt" size={16} /> 转合同</Btn>
           <Btn kind="primary" onClick={preSubmit}>提交审批</Btn>
         </>}
       />
@@ -336,6 +497,7 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
         <div className="nc-catbar">
           <span className="nc-catbar-lb">目录批量调价</span>
           <select className="nc-input nc-input-sm" value={bCat} onChange={(e) => setBCat(e.target.value)}>
+            <option value="__all">全部目录（整体调价）</option>
             {CAT_KEYS.map((c) => <option key={c} value={c}>{c}（默认 ±{catDefaultMarkup(c)}%）</option>)}
           </select>
           <select className="nc-input nc-input-sm" value={bMode} onChange={(e) => setBMode(e.target.value as 'rate' | 'price')}>
@@ -345,10 +507,8 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
             ? <input className="nc-input nc-input-sm" type="number" value={bRate} onChange={(e) => setBRate(Number(e.target.value))} />
             : <input className="nc-input nc-input-sm" type="number" value={bPrice} onChange={(e) => setBPrice(Number(e.target.value))} />}
           <Btn size="sm" onClick={useCatDef}>按目录默认上浮率带出</Btn>
-          <Btn size="sm" kind="primary" onClick={applyCat}>应用到目录</Btn>
-          <span className="nc-cell-sub">命中 <b className="num">{items.filter((it) => it.cat === bCat).length}</b> 条</span>
-          <span className="nc-catbar-sp" />
-          <Btn size="sm" onClick={applyRegion}>区域系数调价（云南 +3%）</Btn>
+          <Btn size="sm" kind="primary" onClick={applyCat}>应用</Btn>
+          <span className="nc-cell-sub">命中 <b className="num">{bCat === "__all" ? items.length : items.filter((it) => it.cat === bCat).length}</b> 条</span>
         </div>
 
         {/* ===== 明细表 ===== */}
@@ -382,12 +542,14 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
                     const l = line(it);
                     const dev = it.cost ? (l.price - it.cost) / it.cost : 0;
                     const offTone = dev > 0.2 ? ' is-red' : dev > 0.1 ? ' is-orange' : '';
+                    const isDead = !!it.code && deadCodes.has(it.code);
                     return (
-                      <tr key={it.id} className={miss.includes(it.id) ? 'is-miss' : ''}>
+                      <tr key={it.id} className={miss.includes(it.id) || isDead ? 'is-miss' : ''}>
                         <td className="is-num">{items.indexOf(it) + 1}</td>
                         <td><span className="nc-cell-sub">{it.cat}</span></td>
                         <td className={miss.includes(it.id) && !it.name.trim() ? 'cell-miss' : ''}>
                           <input className={`nc-cell-in${miss.includes(it.id) && !it.name.trim() ? ' miss' : ''}`} value={it.name} maxLength={50} onChange={(e) => setIt(it.id, { name: e.target.value })} />
+                          {isDead && <div className="nc-field-err">{it.code} 已在材料主数据中停用，请替换为在用材料</div>}
                         </td>
                         {showSpec && <td><span className="nc-cell-sub">{it.spec || '/'}</span></td>}
                         <td>
@@ -432,7 +594,7 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
       </Card>
 
       {/* ===== 从材料库添加 ===== */}
-      <Drawer open={addOpen} onClose={() => setAddOpen(false)} width={640} title="从材料库添加" sub="材料自动带出编码 / 规格 / 单位 / 目录 / 成本参考价；目录列只读锁定"
+      <Drawer open={addOpen} onClose={() => setAddOpen(false)} width={960} title="从材料库添加" sub="材料自动带出编码 / 规格 / 单位 / 目录 / 成本参考价；目录列只读锁定"
         foot={<><Btn onClick={() => setAddOpen(false)}>取消</Btn><Btn kind="primary" onClick={addFromMat}>添加 {matPick.length || 0} 条</Btn></>}>
         <div className="nc-toolbar">
           <SearchInput value={matKw} onChange={setMatKw} placeholder="材料名称 / 编码 / 规格" width={260} />
@@ -443,17 +605,17 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
         </div>
         <DataTable
           cols={[
-            { key: 'id', title: '编码', width: 110, render: (m: any) => <Code>{m.id}</Code> },
+            { key: 'id', title: '编码', width: 110, render: (m: any) => <Code>{m.code}</Code> },
             { key: 'name', title: '材料名称', width: 190, render: (m: any) => <div className="nc-cell-main"><div>{m.name}</div><div className="nc-cell-sub">{m.spec}</div></div> },
             { key: 'unit', title: '单位', width: 60 },
-            { key: 'cat', title: '目录', width: 90, render: (m: any) => <Tag tone="blue">{m.cat}</Tag> },
+            { key: 'cat', title: '目录', width: 90, render: (m: any) => <Tag tone="blue">{quoteCatOf(m.cat)}</Tag> },
             { key: 'stock', title: '库存', width: 70, align: 'right' as const },
             { key: 'price', title: '含税成交价', width: 110, align: 'right' as const, render: (m: any) => <b className="num">{fmt(m.price)}</b> },
             { key: 'cost', title: '成本参考价', width: 110, align: 'right' as const, render: (m: any) => <span className="num nc-cell-sub">{fmt(Math.round(m.price / 1.13))}</span> },
             { key: 'src', title: '价格来源', width: 110, render: () => <span className="nc-cell-sub">采购合同沉淀</span> },
           ]}
-          rows={MATERIALS.filter((m: any) => (matCat === '全部目录' || m.cat === matCat) && (!matKw || (m.name + m.id + (m.spec || '')).includes(matKw)))}
-          rowKey={(m: any) => m.id}
+          rows={matCandidates}
+          rowKey={(m: any) => m.code}
           minWidth={860}
           selectable
           selected={matPick}
@@ -471,7 +633,7 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
         {!!aiPicked.length && (
           <>
             <div className="nc-sec-title">识别结果（{aiPicked.length} 条待确认）</div>
-            <ul className="nc-check-list">{aiPicked.map((n) => <li key={n}><Ico n="check" size={16} /> {n}</li>)}</ul>
+            <ul className="nc-check-list">{aiPicked.map((n) => <li key={n.name}><Ico n="check" size={16} /> {n.name} <span className="nc-tiny nc-muted" style={{ marginLeft: 8 }}>×{n.qty} {n.unit}</span></li>)}</ul>
           </>
         )}
       </Modal>
@@ -494,7 +656,7 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
       </Modal>
 
       {/* ===== 从项目拉取用料 ===== */}
-      <Drawer open={projOpen} onClose={() => setProjOpen(false)} width={640} title="从项目拉取用料"
+      <Drawer open={projOpen} onClose={() => setProjOpen(false)} width={880} title="从项目拉取用料"
         sub="选项目 → 勾材料 / 套件 → 一键生成报价明细（支持部分选择）"
         foot={<>
           <span className="nc-cell-sub" style={{ marginRight: 'auto' }}>已选 {projSel.size} 项</span>
@@ -514,7 +676,7 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
               <Banner tone="info">按项目用料清单拉取：材料自动带出规格 / 单位 / 成本参考价；<b>套件可选「整体带入」或「展开为材料明细」</b>。</Banner>
               <div className="nc-form-grid">
                 <Field label="选择项目" req span={2}>
-                  <select className="nc-input" value={projPick} onChange={(e) => { setProjPick(e.target.value); setProjSel(new Set()); setKitMode({}); }}>
+                  <select className="nc-input" value={projPick} onChange={(e) => { setProjPick(e.target.value); setKitMode({}); setMatLineQty({}); setKitLineQty({}); const pid = e.target.value; const ks = projKitList(pid); const ms = projMatList(pid); const s = new Set<string>(); ks.forEach((k) => s.add(k.code)); ms.forEach((m) => s.add(m.code)); setProjSel(s); }}>
                     {PROJECTS.map((p) => <option key={p.id} value={p.id}>{p.id} · {p.name}（{p.type}）</option>)}
                   </select>
                 </Field>
@@ -523,38 +685,58 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
                 </Field>
               </div>
 
-              <div className="nc-sec-title" style={{ marginTop: 14 }}>套件（{kits.length}）<span className="nc-tiny nc-muted">可整体带入或展开为材料明细</span></div>
-              <table className="nc-tbl" style={{ minWidth: 840 }}>
-                <thead><tr>
-                  <th style={{ width: 40 }}><Check checked={allKits} onChange={(v) => toggleAll(kits.map((k) => k.code), v)} /></th>
-                  <th>套件</th>
-                  <th style={{ width: 90 }} className="is-num">含材料</th>
-                  <th style={{ width: 110 }} className="is-num">套件成本</th>
-                  <th style={{ width: 176 }}>带入方式</th>
-                </tr></thead>
-                <tbody>
-                  {kits.map((k) => {
-                    const c = bomCost(k.code);
-                    const ver = RECIPES[k.code]?.versions.find((v) => v.v === RECIPES[k.code].cur);
-                    return (
-                      <tr key={k.code}>
-                        <td><Check checked={projSel.has(k.code)} onChange={(v) => toggleOne(k.code, v)} /></td>
-                        <td><b>{k.name}</b> <Tag tone="purple">套件</Tag><div className="nc-tiny nc-muted">{k.code} · {k.spec}</div></td>
-                        <td className="is-num num">{ver?.lines.length ?? 0} 项</td>
-                        <td className="is-num num">{fmt(c.total)}</td>
-                        <td>
-                          <select className="nc-input" value={kitMode[k.code] ?? 'expand'} onChange={(e) => setKitMode((m) => ({ ...m, [k.code]: e.target.value as 'expand' | 'whole' }))}>
-                            <option value="expand">展开为材料明细</option>
-                            <option value="whole">整体带入（1 行）</option>
-                          </select>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+              <div className="nc-sec-title" style={{ marginTop: 14 }}>套件（{kits.length}）</div>
+              <div>
+                {kits.map((k) => {
+                  const c = bomCost(k.code);
+                  const ver = RECIPES[k.code]?.versions.find((v) => v.v === RECIPES[k.code].cur);
+                  const kitChecked = projSel.has(k.code);
+                  return (
+                    <div key={k.code} style={{ border: '1px solid var(--c-hairline)', borderRadius: 8, marginBottom: 8, overflow: 'hidden' }}>
+                      {/* 套件主行 */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: kitChecked ? 'var(--c-primary-bg)' : '#fafbfc' }}>
+                        <Check checked={kitChecked} onChange={(v) => {
+                          toggleOne(k.code, v);
+                          (ver?.lines ?? []).forEach((_, li) => {
+                            const lineKey = `${k.code}__${li}`;
+                            if (v) setProjSel((s: Set<string>) => new Set([...s, lineKey]));
+                            else setProjSel((s: Set<string>) => { const n = new Set(s); n.delete(lineKey); return n; });
+                          });
+                        }} />
+                        <b>{k.name}</b> <Tag tone="purple">套件</Tag>
+                        <span className="nc-tiny nc-muted">{k.code} · {k.spec}</span>
+                        <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--ink-3)' }}>含材料 {ver?.lines.length ?? 0} 项 · 套件成本 {fmt(c.total)}</span>
+                      </div>
+                      {/* 展开材料明细 */}
+                      {ver?.lines.map((ln, li) => {
+                        const item = itemByCode(ln.code);
+                        const lineKey = `${k.code}__${li}`;
+                        const lineChecked = projSel.has(lineKey);
+                        const lineQty = kitLineQty[lineKey] ?? ln.qty;
+                        return (
+                          <div key={lineKey} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 14px 6px 44px', borderTop: '1px dashed var(--c-hairline)' }}>
+                            <Check checked={lineChecked} onChange={(v) => {
+                              if (v) setProjSel((s: Set<string>) => new Set([...s, lineKey]));
+                              else setProjSel((s: Set<string>) => { const n = new Set(s); n.delete(lineKey); return n; });
+                            }} />
+                            <span style={{ fontSize: 13 }}>{item?.name ?? ln.code} <span className="nc-tiny nc-muted">{ln.code}</span></span>
+                            <span className="nc-tiny nc-muted" style={{ color: 'var(--ink-3)' }}>{ln.kind}</span>
+                            <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <span className="nc-tiny nc-muted">数量</span>
+                              <input className="nc-input" type="number" style={{ width: 70, padding: '2px 6px', fontSize: 13 }}
+                                value={lineQty} min={0}
+                                onChange={(e) => setKitLineQty((q: Record<string, number>) => ({ ...q, [lineKey]: Number(e.target.value) || 0 }))} />
+                              <span className="nc-tiny nc-muted">{item?.unit ?? ''}</span>
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </div>
 
-              <div className="nc-sec-title" style={{ marginTop: 16 }}>材料（{mats.length}）</div>
+              <div className="nc-sec-title" style={{ marginTop: 16 }}>材料（{mats.length}）<span className="nc-tiny nc-muted">勾选后可修改数量</span></div>
               <table className="nc-tbl" style={{ minWidth: 840 }}>
                 <thead><tr>
                   <th style={{ width: 40 }}><Check checked={allMats} onChange={(v) => toggleAll(mats.map((m) => m.code), v)} /></th>
@@ -562,17 +744,26 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
                   <th>名称 / 规格</th>
                   <th style={{ width: 64, textAlign: 'center' }}>单位</th>
                   <th style={{ width: 110 }} className="is-num">成本参考价</th>
+                  <th style={{ width: 120 }} className="is-num">数量</th>
                 </tr></thead>
                 <tbody>
-                  {mats.map((m) => (
+                  {mats.map((m) => {
+                    const hist = quoteMap[m.code];
+                    return (
                     <tr key={m.code}>
                       <td><Check checked={projSel.has(m.code)} onChange={(v) => toggleOne(m.code, v)} /></td>
                       <td className="num nc-id-cell">{m.code}</td>
                       <td>{m.name} <span className="nc-tiny nc-muted">{m.spec}</span></td>
                       <td style={{ textAlign: 'center' }}>{m.unit}</td>
                       <td className="is-num num">{fmt(Math.round(m.price / 1.13))}</td>
+                      <td className="is-num">
+                        <input className="nc-input" type="number" style={{ width: 80, padding: '2px 6px', fontSize: 13 }}
+                          value={matLineQty[m.code] ?? hist?.qty ?? 1} min={0}
+                          onChange={(e) => setMatLineQty((q: Record<string, number>) => ({ ...q, [m.code]: Number(e.target.value) || 0 }))} />
+                      </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </>
@@ -581,7 +772,7 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
       </Drawer>
 
       {/* ===== 价格参考（三源 · 图表化） ===== */}
-      <Drawer open={!!refOpen} onClose={() => setRefOpen(null)} width={640} title="价格参考"
+      <Drawer open={!!refOpen} onClose={() => setRefOpen(null)} width={720} title="价格参考"
         sub={refOpen && (() => {
           const m = MATERIALS.find((x) => x.code === refOpen.code) || MATERIALS.find((x) => x.name === refOpen.name);
           return `${refOpen.name}${m ? `（${m.code}）` : '（自定义材料）'} · 当前成本 ${fmt(refOpen.cost)}`;
@@ -737,11 +928,7 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
 
       {/* ===== 提交审批 ===== */}
       <Modal open={submitOpen} onClose={() => setSubmitOpen(false)} width={480} title="提交审批"
-        foot={<><Btn onClick={() => setSubmitOpen(false)}>取消</Btn><Btn kind="primary" onClick={() => {
-          if (!reason.trim()) { toast('变更原因必填'); return; }
-          toast(`已提交审批 · 路由至${approveLevel(sumExTax)}`);
-          setSubmitOpen(false); go('quote');
-        }}>确认提交</Btn></>}>
+        foot={<><Btn onClick={() => setSubmitOpen(false)}>取消</Btn><Btn kind="primary" onClick={doSubmit}>确认提交</Btn></>}>
         <Banner tone={hit ? 'warn' : 'info'}>{hitWhy}{hit && <> · 按金额分级路由至 <b>{approveLevel(sumExTax)}</b></>}</Banner>
         <KvGrid cols={2} rows={[
           { k: '明细行数', v: `${items.length} 行` },
@@ -844,14 +1031,23 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
       {/* ===== 独立新建报价单 ===== */}
       <Modal open={newQOpen} onClose={() => setNewQOpen(false)} width={480} title="＋ 新建报价单（独立新建）"
         foot={<><Btn onClick={() => setNewQOpen(false)}>取 消</Btn><Btn kind="primary" disabled={!nqName.trim()} title={nqName.trim() ? undefined : '请填写报价单名称（必填）'} onClick={() => {
+          const no = nextQuoteNo();
+          addQuote({
+            id: no, ver: 'V1', customer: nqCust, customerId: CUSTOMERS.find((c) => c.name === nqCust)?.id ?? '',
+            opp: '', name: nqName.trim(), total: 0, taxRate: 9, taxMode: '含税', status: '草稿',
+            owner: '当前用户', date: TODAY, update: TODAY, approveLevel: '—', markup: 0,
+            region: '昆明', uplift: 0, items: 0, base: nqType, costSqm: 0, lines: [],
+          });
           setNewQOpen(false); setNqName('');
-          toast(`报价草稿已创建：BJ${TODAY.replace(/-/g, '')}-0021（客户 ${nqCust} · 类型 ${nqType}）`);
+          setFocus('quote-edit', no);
+          go('quote-edit');
+          toast(`报价单 ${no} 已创建（草稿）· 已切到该单继续组价`);
         }}>创建草稿</Btn></>}>
-        <div className="nc-warnbox is-info">独立新建不继承当前页明细；编号自动生成 <Code>BJ</Code> + 日期 + 4 位流水，初始状态「草稿」。</div>
+        <div className="nc-warnbox is-info">独立新建不继承当前页明细；单号自动生成，初始状态「草稿」，组价完成后再提交审批。</div>
         <div className="nc-form-grid">
           <Field label="客户" req span={2}>
             <select className="nc-input" value={nqCust} onChange={(e) => setNqCust(e.target.value)}>
-              {['昆明市第一人民医院', '文山三七产业园管委会', '昆明万达广场商业管理有限公司', '云南师大附中'].map((c) => <option key={c}>{c}</option>)}
+              {CUSTOMERS.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
             </select>
           </Field>
           <Field label="报价名称" req span={2}>

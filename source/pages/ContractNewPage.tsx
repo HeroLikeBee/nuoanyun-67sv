@@ -13,11 +13,15 @@
 //  · 签约日期 ≤ 今天（硬拦截）· 工期止 ≥ 工期起（硬拦截）
 //  · 收款计划 ≤ 12 期，合计须与明细合计勾稽（差额一键补平）
 //  · 附件：单份 ≤50MB、每类 ≤5 份；DWG / DXF 仅「其他」类可传
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Alert, Banner, Btn, Card, Check, Collapse, EntityLink, Field, Modal, Money, Op, PageHead, Tag, Tip, useToast, pressProps,} from '../components/ui';
-import { CUSTOMERS, PROJECTS, PROJECT_TERMINAL, SUPPLIERS, QUOTES, canSeeMoney, fmt, TODAY } from '../components/data';
-import { addContract, getPendingContract, setPendingContract } from '../components/store';
+import { CUSTOMERS, PROJECT_TERMINAL, SUPPLIERS, canSeeMoney, fmt, TODAY } from '../components/data';
+import type { Contract } from '../components/data';
+import {
+  addContract, consumePendingQuote, consumePendingRenew, getBizStatus, getContracts, getPendingContract,
+  getProjects, getQuotes, patchContract, patchQuote, setBizStatus, setPendingContract, subscribeStore,
+} from '../components/store';
 import { Ico, StatusIco, type IconName } from '../components/icons';
 
 /* ============================ 常量：来源 / 类型 / 路由 ============================ */
@@ -53,6 +57,18 @@ const PARTIES: Record<string, string[]> = {
   销售合同: CUS, 维护保养合同: CUS, 采购合同: SUP,
   分包合同: ['SUB-000007 云南××机电安装工程有限公司', 'SUB-000011 ××消防工程劳务有限公司'],
   框架协议: [CUS[0], SUP[0]],
+};
+
+/** 相对方下拉的选项值形如「KH20260312001 昆明万达广场商业管理有限公司」；
+    上游（投标 / 报价 / 续签）只带客户名或客户 ID，这里统一归一，否则 select 值匹配不上会显示为空。 */
+const partyOptOf = (raw: string): string => {
+  if (!raw) return '';
+  if (Object.values(PARTIES).flat().includes(raw)) return raw;
+  const cust = CUSTOMERS.find((c) => c.id === raw || c.name === raw);
+  if (cust) return `${cust.id} ${cust.name}`;
+  const sup = SUPPLIERS.find((s) => s.id === raw || s.name === raw);
+  if (sup) return `${sup.id} ${sup.name}`;
+  return '';
 };
 
 /** 审批路由矩阵：阈值与或签 / 会签 */
@@ -121,10 +137,7 @@ const OCR_INIT: OcrField[] = [
   { k: 'term', l: '付款条款', v: '签订后7日内支付30%预付款，竣工验收后支付60%，质保期满支付10%', c: 91 },
 ];
 
-/** 可关联项目：排除已到终态（已结项 / 已关闭 / 作废）的项目 */
-const PROJ_OPTS = PROJECTS.filter((p) => !(PROJECT_TERMINAL as readonly string[]).includes(p.status)).map((p) => ({
-  id: p.id, name: p.name, a04: p.id === 'XM000087',
-}));
+/** 可关联项目：排除已到终态（已结项 / 已关闭 / 作废）的项目 —— 数据源改为组件内读共享 store（见 projOpts） */
 
 /** 复制历史：仅 已签约 / 履约中 / 已续签（可复用的在履行合同）；本客户优先 → 同类型 */
 const HIST = [
@@ -195,9 +208,49 @@ type Plan = { node: string; amt: number; date: string; qual: boolean };
 type Att = { n: string; cat: string; sz: string; fix?: boolean };
 type Err = [string, string];
 
+/** 新建合同的空白表单基线（重置向导与首次进入共用同一份，避免两处口径漂移） */
+const EMPTY_FORM = {
+  name: '',
+  type: '销售合同',
+  proj: '',
+  pjname: '',
+  party: '',
+  owner: '蓝峰',
+  addr: '',
+  amt: 0,
+  tax: '9',
+  taxOther: '',
+  sign: TODAY,
+  start: '',
+  end: '',
+  p1: '',
+  p2: '',
+  term: '',
+  pbr: '', pbm: '', rat: '3', ratm: '24',
+  war: '', multi: '', myears: 3, renew: '30',
+  cost: '', ct: '', tel: '', ind: '', reg: '',
+};
+
 /* ============================ 页面 ============================ */
 export default function ContractNewPage({ go, role, nav }: { go: (p: string) => void; role: string; nav?: number }) {
   const toast = useToast();
+
+  /* 共享 store 订阅：可关联项目 / 可导入报价单都读 store，新建的实体本页立即可见 */
+  const [tick, setTick] = useState(0);
+  useEffect(() => subscribeStore(() => setTick((n) => n + 1)), []);
+  /** 可关联项目：排除已到终态（已结项 / 已关闭 / 作废）的项目 */
+  const projOpts = useMemo(
+    () => getProjects()
+      .filter((p) => !(PROJECT_TERMINAL as readonly string[]).includes(p.status))
+      .map((p) => ({ id: p.id, name: p.name, a04: p.id === 'XM000087' })),
+    [tick, nav],
+  );
+
+  /* --- 来源外键：从报价 / 投标 / 续签转来的合同，落库时记录 quoteId / bidId / parentId，
+         保证「合同 → 上游」可反查 --- */
+  const [srcQuote, setSrcQuote] = useState<string | null>(null);
+  const [srcBid, setSrcBid] = useState<string | null>(null);
+  const [srcRenew, setSrcRenew] = useState<string | null>(null);
 
   /* --- 向导状态 --- */
   const [src, setSrc] = useState<Src>('manual');
@@ -218,36 +271,20 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
     name: true, type: true, party: true, amt: true, term: true, sign: false, war: true, dtl: true, plan: true,
   });
 
-  /* --- Step3 字段 --- */
-  const [f, setF] = useState({
-    name: '昆明万达广场消防改造工程合同',
-    type: '销售合同',
-    proj: 'XM000123',
-    pjname: '',
-    party: CUS[0],
-    owner: '蓝峰',
-    addr: '昆明市西山区××中心大厦 B2 消防泵房',
-    amt: 3200000,
-    tax: '9',
-    taxOther: '',
-    sign: '2026-09-12',
-    start: '2026-09-20',
-    end: '2027-03-31',
-    p1: '2026-09-20',
-    p2: '2027-03-31',
-    term: '签订后7日内付30%预付款；竣工验收后付60%；质保期满付10%',
-    pbr: '', pbm: '', rat: '3', ratm: '24',
-    war: '24', multi: '', myears: 3, renew: '30',
-    cost: '工程成本', ct: '王志豪', tel: '13888001101', ind: '商业综合体', reg: '西南',
-  });
+  /* --- Step3 字段 ---
+     全部留空（除签约日期默认今天 · 质保金默认法定上限 3%）：修复前这里写死
+     「昆明万达广场消防改造工程合同 / XM000123 / ¥3,200,000」，任何来源转合同都会
+     生成同一份万达合同草稿，报价→合同、投标→合同两条支线在数据上完全无法区分。 */
+  const [f, setF] = useState(EMPTY_FORM);
   /**
-   * 投标中标 → 转合同：从投标页携带中标标的跳转过来时，预填合同关键字段。
+   * 投标中标 → 转合同：从投标页携带中标标的跳转过来时，预填合同关键字段，并记录 bidId 外键。
    * 原链路「中标 → 直接建项目」跳过合同环节，与「合同 → 项目」主线矛盾，此处补齐。
    */
   useEffect(() => {
     const p = getPendingContract();
     if (!p) return;
-    setF((prev) => ({ ...prev, name: `${p.name} 合同`, party: p.customer, amt: p.amt || prev.amt, pjname: p.name }));
+    setF((prev) => ({ ...prev, name: `${p.name} 合同`, party: partyOptOf(p.customer), amt: p.amt || prev.amt, pjname: p.name }));
+    setSrcBid(p.bidId);
     setPmode('draft');
     setDtl([{ t: '消防工程', s: TODAY, e: '', a: p.amt || 0, r: p.name }]);
     toast(`已带入中标标的「${p.name}」· 中标金额 ¥${(p.amt || 0).toLocaleString('en-US')}；合同签署后可在项目台账生成项目`);
@@ -255,20 +292,74 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nav]);
 
+  /**
+   * 报价已审批 → 转合同：从报价台账 / 报价详情携带报价单跳转过来，带出客户、金额与逐行明细，
+   * 并记录 quoteId 外键。消费式读取，避免下次独立进入合同新建页也误预填。
+   */
+  useEffect(() => {
+    const pq = consumePendingQuote();
+    if (!pq) return;
+    const q = getQuotes().find((x) => x.id === pq.quoteId);
+    if (!q) return;
+    setSrcQuote(q.id);
+    setF((prev) => ({
+      ...prev,
+      name: `${q.name} 合同`,
+      party: partyOptOf(q.customerId || q.customer),
+      amt: q.total || prev.amt,
+      tax: String(q.taxRate),
+    }));
+    if (q.lines?.length) {
+      setDtl(q.lines.map((l) => ({
+        t: /维护|保养/.test(l.name) ? '维护保养服务' : /检测/.test(l.name) ? '消防检测' : '消防改造',
+        s: TODAY,
+        e: '',
+        a: Math.round(l.price * l.qty * 100) / 100,
+        r: `报价单 ${q.id} · ${l.name}`,
+      })));
+    }
+    toast(`已带入报价单 ${q.id} 的客户 / 金额 / ${q.lines?.length ?? 0} 行明细；签约后可在项目台账生成项目`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nav]);
+
+  /**
+   * 合同续签：从合同台账 / 详情点「续签」跳转过来，按源合同要素生成续签草稿，
+   * 并记录 parentId 外键。修复前该入口只 toast 后裸跳，续签与原合同没有任何数据关联。
+   */
+  useEffect(() => {
+    const pr = consumePendingRenew();
+    if (!pr) return;
+    const k = getContracts().find((x) => x.id === pr.contractId);
+    if (!k) return;
+    setSrcRenew(k.id);
+    setF((prev) => ({
+      ...prev,
+      name: `${k.name.replace(/（续签[^）]*）$/, '')}（续签）`,
+      type: k.type,
+      party: partyOptOf(k.party),
+      amt: k.amt,
+      start: k.start,
+      end: k.end,
+      p1: k.start,
+      p2: k.end,
+      term: k.nodes ? `按原合同收款节点：${k.nodes}` : prev.term,
+    }));
+    setDtl([{
+      t: /维护|保养/.test(k.name) ? '维护保养服务' : '消防改造',
+      s: TODAY, e: '', a: k.amt, r: `续签自 ${k.id} ${k.name}`,
+    }]);
+    toast(`已按原合同 ${k.id} 生成续签草稿 · 请核对期限与金额后提交`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nav]);
+
   const [pmode, setPmode] = useState<'exist' | 'draft' | 'none'>('exist');
   const [cal, setCal] = useState<'inc' | 'exc'>('inc');
-  const [tags, setTags] = useState<string[]>(['战略客户']);
-  const [dtl, setDtl] = useState<Dtl[]>([
-    { t: '消防改造', s: '2026-09-20', e: '2027-03-31', a: 3200000, r: '昆明万达广场消防改造' },
-  ]);
-  const [plan, setPlan] = useState<Plan[]>([
-    { node: '预付款（签订后7日内）', amt: 960000, date: '2026-09-19', qual: false },
-    { node: '进度款（竣工验收后）', amt: 1920000, date: '2027-01-31', qual: false },
-    { node: '质保金（质保期满）', amt: 0, date: '2028-03-31', qual: true },
-  ]);
-  const [files, setFiles] = useState<Att[]>([
-    { n: '主合同-昆明万达广场消防改造（签署版）.pdf', cat: '合同扫描件', sz: '8.8MB', fix: true },
-  ]);
+  const [tags, setTags] = useState<string[]>([]);
+  /* 明细 / 收款计划 / 附件默认空：由来源（报价导入 / OCR / 模板 / 复制历史）或人工录入填充，
+     不再预置「万达广场消防改造」那一份演示数据，否则任意新建合同都自带同一组明细与附件。 */
+  const [dtl, setDtl] = useState<Dtl[]>([]);
+  const [plan, setPlan] = useState<Plan[]>([]);
+  const [files, setFiles] = useState<Att[]>([]);
   const [more, setMore] = useState(false);
   /* --- 从报价单导入明细 --- */
   const [quoteImport, setQuoteImport] = useState(false);
@@ -292,18 +383,21 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
   const plnSum = plan.reduce((s, p) => s + (+p.amt || 0), 0);
   const gap = dtlSum - plnSum;
   const chain = getChain(f.type, f.amt);
-  const proj = PROJ_OPTS.find((p) => p.id === f.proj);
+  const proj = projOpts.find((p) => p.id === f.proj);
 
   /* ---------- 报价单导入候选（关键字 + 状态筛选） ----------
      仅「已审批 / 已转化」报价单可作为合同明细依据：未审批完成的报价金额还会变，导进来就是错的。
-     状态筛选也只给这两种，避免出现点了必定空列表的选项。 */
-  const qList = QUOTES.filter((q) => {
-    if (q.status !== '已审批' && q.status !== '已转化') return false;
+     状态筛选也只给这两种，避免出现点了必定空列表的选项。
+     数据源与状态口径都走 store：修复前读 data.ts 常量 + q.status 原值，
+     本次会话新建的报价单导不进来，且审批通过的报价单仍被显示为「待审批」而筛不出来。 */
+  const qList = useMemo(() => getQuotes().filter((q) => {
+    const s = getBizStatus(q.id, q.status);
+    if (s !== '已审批' && s !== '已转化') return false;
     const kw = qKw.trim();
     if (kw && !`${q.id} ${q.name} ${q.customer}`.includes(kw)) return false;
-    if (qStatus !== '全部' && q.status !== qStatus) return false;
+    if (qStatus !== '全部' && s !== qStatus) return false;
     return true;
-  });
+  }), [qKw, qStatus, tick, nav]);
 
   /* ---------- 校验（硬拦截） ---------- */
   const errors: Err[] = [];
@@ -335,6 +429,9 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
   if (+f.ratm > 24) issues.push(['rat', `缺陷责任期 ${f.ratm} 个月超过 24 个月：请确认资金占用与回收风险`]);
   if (f.multi === '是' && plan.length === 0) issues.push(['plan', '已选择多年期维护保养：收款计划为空，建议按服务年度生成']);
   if (src && src !== 'manual') issues.push(['name', `名称 / 相对方 / 金额等已由「${SRC_META[src].n}」带出，请确认`]);
+  if (srcQuote) issues.push(['name', `本单由报价单 ${srcQuote} 转入，提交后将回写该报价单状态`]);
+  if (srcBid) issues.push(['name', `本单由中标投标单 ${srcBid} 转入，中标依据将随合同存档`]);
+  if (srcRenew) issues.push(['name', `本单为 ${srcRenew} 的续签合同，提交后原合同将标记「续签 → 新合同号」`]);
 
   const moreFilled = [
     !!f.term, !!f.pbr, !!f.pbm, !!f.war, !!f.rat, !!f.ratm, f.multi === '是', !!f.renew,
@@ -468,7 +565,14 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
   const importQuotes = () => {
     const chosen = qList.filter((q) => qSel.includes(q.id));
     if (!chosen.length) { toast('请先勾选要导入的报价单', 'err'); return; }
-    const lines: Dtl[] = chosen.map((q) => ({
+    /* M1 去重：同一张报价单重复导入会生成重复明细行，把明细合计抬高。
+       以备注里的「报价单 <单号>」作为已导入标记，重复勾选时跳过并提示。 */
+    const already = new Set(
+      dtl.map((d) => (d.r.match(/^报价单 (\S+)/) || [])[1]).filter(Boolean),
+    );
+    const fresh = chosen.filter((q) => !already.has(q.id));
+    if (!fresh.length) { toast('所选报价单已全部导入过，无需重复导入', 'err'); return; }
+    const lines: Dtl[] = fresh.map((q) => ({
       t: /维护|保养/.test(q.name) ? '维护保养服务' : /检测/.test(q.name) ? '消防检测' : '消防改造',
       s: q.date || TODAY,
       e: '',
@@ -476,11 +580,13 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
       r: `报价单 ${q.id} ${q.name} 导入`,
     }));
     setDtl((p) => [...p, ...lines]);
+    /* 单张导入时记录来源报价外键，合同提交后可在合同详情「来源报价」栏下钻 */
+    if (fresh.length === 1) setSrcQuote(fresh[0].id);
     setQuoteImport(false);
     setQSel([]);
     setQKw('');
     setQStatus('全部');
-    toast(`已从报价单导入 ${chosen.length} 行合同明细 · 合计 ${fmt(chosen.reduce((s, q) => s + q.total, 0))}`);
+    toast(`已从报价单导入 ${fresh.length} 行合同明细 · 合计 ${fmt(fresh.reduce((s, q) => s + q.total, 0))}${chosen.length > fresh.length ? `（跳过已导入 ${chosen.length - fresh.length} 张）` : ''}`);
   };
   const fillGap = () => {
     if (!gap) { toast('当前无差额需要补入'); return; }
@@ -578,16 +684,30 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
         </div>
       ),
       cb: () => {
-        /* G1 跨页 Q17：原仅本地 setOkInfo，合同台账永远查不到新建合同。写入共享 store。 */
-        const newContract: Parameters<typeof addContract>[0] = {
+        /* G1 跨页 Q17：原仅本地 setOkInfo，合同台账永远查不到新建合同。写入共享 store。
+           同时落 quoteId / bidId 两个上游外键：合同详情与项目中心据此反查报价单 / 中标投标单，
+           修复前这两个字段被读后丢弃，合同→上游的溯源链在数据层是断的。 */
+        const newContract: Contract = {
           id: no, name: f.name.trim(), type: f.type, party: f.party,
           project: pmode === 'exist' ? f.proj : '',
           amt: f.amt, execAmt: f.amt, status: '待审批', recvPct: 0, recv: 0,
           owner: '当前用户', sign: f.sign, start: f.p1 || f.sign, end: f.p2 || f.sign,
           nodes: plan.map((r) => r.node).join(' · ') || '按明细收款计划',
           overdue: false, overpay: false,
-        } as unknown as Parameters<typeof addContract>[0];
+          ...(srcQuote ? { quoteId: srcQuote } : {}),
+          ...(srcBid ? { bidId: srcBid } : {}),
+          ...(srcRenew ? { parentId: srcRenew } : {}),
+        };
         addContract(newContract);
+        /* 续签回写：源合同记 renewedTo = 新合同号，形成「原合同 ⇄ 续签合同」双向链。
+           源合同状态不在此时改「已续签」—— 续签合同仍处待审批，签约后才算真正续上。 */
+        if (srcRenew) patchContract(srcRenew, { renewedTo: no });
+        /* 报价单转合同后置「已转化」（5 态机终态）。同步写 bizStatus 覆盖层，
+           否则审批中心回写的「已审批」会把它盖回去，报价永远到不了终态。 */
+        if (srcQuote) {
+          patchQuote(srcQuote, { status: '已转化', update: TODAY });
+          setBizStatus(srcQuote, '已转化');
+        }
         setOkInfo({ no, line: projLine() });
         setConfirm(null);
         toast(`合同 ${no} 已提交审批 · 已回流合同台账（状态「待审批」）`);
@@ -602,7 +722,8 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
     setEntCust(''); setTplVars({ a: '', b: '诺盾博达消防科技有限公司', p: '', m: '' });
     setCopySel(''); setPmode('exist'); setCal('inc'); setMore(false); setForce(false);
     setChk(SIX_CLAUSES.slice(0, 5));
-    setFiles([{ n: '主合同-昆明万达广场消防改造（签署版）.pdf', cat: '合同扫描件', sz: '8.8MB', fix: true }]);
+    setF(EMPTY_FORM); setTags([]); setDtl([]); setPlan([]); setFiles([]);
+    setSrcQuote(null); setSrcBid(null); setSrcRenew(null); setOkInfo(null);
     toast('向导已重置');
   };
   const askReset = () => {
@@ -913,7 +1034,7 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
                   <Field label="关联项目" span={2} err={showErr('proj')}>
                     <select className="nc-input" value={f.proj} onChange={(e) => set('proj', e.target.value)}>
                       <option value="">请选择项目</option>
-                      {PROJ_OPTS.map((p) => <option key={p.id} value={p.id}>{p.id} {p.name}</option>)}
+                      {projOpts.map((p) => <option key={p.id} value={p.id}>{p.id} {p.name}</option>)}
                     </select>
                     <div className="nc-field-note"><Ico n="bolt" size={16} />A-04：提交时检测所选项目是否存在未归并收支（演示：XM000087 产业园一期消防工程 将被硬拦截）</div>
                   </Field>

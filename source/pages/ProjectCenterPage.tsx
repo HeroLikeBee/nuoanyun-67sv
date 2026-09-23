@@ -32,11 +32,11 @@ import {
 } from '../components/ui';
 import { Ico } from '../components/icons';
 import {
-  ATT_WORKERS, CONTRACTS, CUSTOMERS, EQUIPMENTS, MATERIALS, OPPS, PROJECTS,
-  PROJECT_STATUS_TONE, PROJECT_TERMINAL, QUOTES, TODAY,
-  attCost, attDays, fmt, fmtAmt, fmtPct, isOppClosed, isServiceProject, laborRate, teamOfProject, occOfProject, CERTS,
+  ATT_WORKERS, CUSTOMERS, EQUIPMENTS, MATERIALS,
+  PROJECT_STATUS_TONE, PROJECT_TERMINAL, TODAY,
+  attCost, attDays, fmt, fmtAmt, fmtPct, isServiceProject, laborRate, teamOfProject, occOfProject, CERTS,
 } from '../components/data';
-import { applyChangeDelta, consumeFocusTab, getFocus, getProjects, moveProject, setFocus, subscribeStore } from '../components/store';
+import { applyChangeDelta, consumeFocusTab, getContracts, getFocus, getOpps, getProjects, moveProject, relOfProject, setFocus, subscribeStore } from '../components/store';
 import OverviewSub from '../components/project-center/OverviewSub';
 import ExecSub from '../components/project-center/ExecSub';
 import QualitySub from '../components/project-center/QualitySub';
@@ -141,22 +141,9 @@ const APPROVALS = [
   { id: 'PF000082', type: '付款', desc: `材料费 ${fmtAmt(80000)} · 无合同付款` },
 ];
 
-/** 关联合同（收款类）：主合同 + 价格调整补充 + 服务补充 + 维保 */
-const SALE_CT = [{
-  code: 'HT000009', name: '昆明万达广场消防改造工程合同', st: '履约中', tone: 'blue' as const, role: 'primary',
-  badge: '工期倒计时 193 天 · 执行额 195 万 = 合同额 180 万 + 已生效变更 +15 万',
-  amt: 1800000,
-  children: [{ code: 'HT000009S1', name: '价格调整补充协议（材料调差）', amt: 150000, note: '+15 万（增量）· 已签署生效 · 仅加执行额，合同额不动' }],
-  payplan: [
-    { n: '收款期次 1 · 预付款', amt: 540000, st: '已到账', plan: '2026-08-20', got: 540000, gotDate: '2026-09-12', inv: '已开票', note: '30% 预付款 · 银行已到账' },
-    { n: '收款期次 2 · 进度款', amt: 337500, st: '已开票·待到账', plan: '2026-09-01', got: 0, gotDate: '—', inv: '已开票', note: '已开票未到账 · 账龄 75 天（计入应收账龄，不计回款）' },
-    { n: '收款期次 3 · 竣工结算款', amt: 1072500, st: '未到期', plan: '2027-03-31', got: 0, gotDate: '—', inv: '未开票', note: '竣工验收后结算' },
-  ],
-}, {
-  code: 'HT000009S2', name: '新增服务补充协议（联动调试培训）', st: '已签约', tone: 'green' as const, role: 'supplement_service', amt: 80000,
-}, {
-  code: 'WB000123', name: '维保合同（验收后一年）', st: '待审批', tone: 'orange' as const, role: 'maintenance', amt: 120000,
-}];
+/** 合同状态 → 合同树徽标色（与合同台账语义色一致） */
+const CT_TONE = (s: string): 'blue' | 'orange' | 'green' =>
+  s === '履约中' ? 'blue' : (s === '已签约' || s === '已续签') ? 'green' : 'orange';
 
 /** 我方缴纳、尚未退回的保证金台账（质保金是客户扣留的应收义务，单独派生不混算） */
 const DEPOSITS = [
@@ -237,13 +224,15 @@ const OPS = [
 /** 出处与去向链（项目全景抽屉用）：每个数字都能指回它的来源单据 */
 function Panorama({ C, open, onClose }: { C: PjCtx; open: boolean; onClose: () => void }) {
   const { P } = C;
+  /* 溯源链按外键精确取数（relOfProject），不再按 customerId 模糊匹配取首个单据 */
   const tr = useMemo(() => {
-    const opp = OPPS.find((o) => o.customerId === P.customerId && o.status === '赢单')
-      || OPPS.find((o) => o.customerId === P.customerId && !isOppClosed(o));
-    const quote = QUOTES.find((q) => q.customerId === P.customerId && q.status === '已转化');
-    const contract = CONTRACTS.find((c) => c.project === P.id);
-    return { opp, quote, contract };
-  }, [P]);
+    const r = relOfProject(P.id);
+    const oppId = r.quotes.map((q) => q.opp).find(Boolean) || '';
+    return {
+      opp: oppId ? getOpps().find((o) => o.id === oppId) : undefined,
+      quote: r.quotes[0], contract: r.contracts[0], bid: r.bids[0],
+    };
+  }, [P.id]);
 
   return (
     <Drawer
@@ -258,6 +247,7 @@ function Panorama({ C, open, onClose }: { C: PjCtx; open: boolean; onClose: () =
           { k: '客户', v: P.customer, go: () => C.go('customer') },
           { k: '商机', v: tr.opp ? `${tr.opp.id} · ${tr.opp.stage} · ${tr.opp.status}` : '—', go: () => C.go('opp') },
           { k: '报价', v: tr.quote ? `${tr.quote.id} · ${tr.quote.status}` : '—', go: () => C.go('quote') },
+          { k: '投标', v: tr.bid ? `${tr.bid.id} · ${tr.bid.stage}` : '—', go: () => C.go('bid') },
           { k: '合同', v: tr.contract ? `${tr.contract.id} · ${tr.contract.status}` : '—', go: () => C.go('contract-detail') },
           { k: '立项审批', v: '已通过 · 2026-09-18 · 蓝峰', go: null },
         ].map((r) => (
@@ -271,7 +261,7 @@ function Panorama({ C, open, onClose }: { C: PjCtx; open: boolean; onClose: () =
       <div className="nc-ledhd" style={{ marginTop: 18 }}>去向（钱与货流到哪去）</div>
       <div className="nc-gate">
         {[
-          { k: '合同树', v: `${C.saleCt.length} 收款类 / ${C.buyCt.length} 付款类`, sub: '合同额 180 万 · 执行额 195 万' },
+          { k: '合同树', v: `${C.saleCt.length} 收款类 / ${C.buyCt.length} 付款类`, sub: `合同额 ${fmtAmt(C.CONTRACT_NOW)} · 执行额 ${fmtAmt(C.EXEC_AMT)}` },
           { k: '成本流水', v: `${C.costRows.length} 笔 · ${C.COST_SUM.toLocaleString()} 元`, sub: `目标成本 ${C.PLAN_SUM.toLocaleString()} 元 · ${C.dev > 0 ? '超支' : '结余'} ${Math.abs(C.dev).toLocaleString()}` },
           { k: '收支明细', v: `收入 ${C.SUM_IN.toLocaleString()} / 支出 ${C.SUM_OUT.toLocaleString()}`, sub: `净现金流 ${C.NET_IN.toLocaleString()} 元` },
           { k: '未回款', v: `${C.UNRECV.toLocaleString()} 元`, sub: `已回款率 ${C.PAY_PROGRESS.toFixed(1)}% · 应收账龄 ${C.overdueAmt.toLocaleString()} 元` },
@@ -306,7 +296,10 @@ function Panorama({ C, open, onClose }: { C: PjCtx; open: boolean; onClose: () =
 export default function ProjectCenterPage({ go, role, nav }: { go: (p: string) => void; role: string; nav?: number }) {
   const toast = useToast();
   const [projects, setProjects] = useState(getProjects);
-  useEffect(() => subscribeStore(() => setProjects(getProjects())), []);
+  /* 每次 store 变更都递增 tick：合同 / 报价 / 投标切片变化时也要重渲染，
+     否则本项目合同树读到的是旧快照（getProjects() 引用不变时 React 会跳过重渲染）。 */
+  const [tick, setTick] = useState(0);
+  useEffect(() => subscribeStore(() => { setProjects(getProjects()); setTick((n) => n + 1); }), []);
   const P = useMemo(() => {
     const id = getFocus('project-center');
     return projects.find((p) => p.id === id) || projects[0];
@@ -432,13 +425,44 @@ export default function ProjectCenterPage({ go, role, nav }: { go: (p: string) =
   const certRows = useMemo(() => occOfProject(P.id), [P.id]);
   const certValidTo = (certId: string) => CERTS.find((c) => c.id === certId)?.validTo || '—';
 
-  const buyCt = useMemo(() => CONTRACTS
-    .filter((c) => c.project === P.id && (c.type === '采购合同' || c.type === '分包合同'))
+  /* ---------- 项目合同树：全部由本项目真实合同派生 ----------
+     修复前 saleCt 是硬编码常量 SALE_CT（昆明万达 4 份合同），任意项目点开「商务合同」
+     都看到同一棵万达合同树 —— 项目 A 的页面显示项目 B 的合同。
+     现在按 store 中 project === P.id 的合同分组：收款类 = 销售 / 维护保养；
+     付款类 = 采购 / 分包；补充协议按 parentId 挂到主合同下。
+     注：合同模型只有聚合口径（amt / execAmt / recv / nodes 文本），没有到「期次级」明细，
+     故合同树不再展示收款期次表；期次明细待数据模型补 installments[] 后恢复。 */
+  const projContracts = useMemo(
+    () => getContracts().filter((c) => c.project === P.id),
+    [P.id, tick],
+  );
+  const saleCt = useMemo(() => {
+    const isBuy = (t: string) => t === '采购合同' || t === '分包合同';
+    return projContracts
+      .filter((c) => !isBuy(c.type) && !c.parentId)
+      .map((c) => {
+        const kids = projContracts.filter((k) => k.parentId === c.id);
+        const delta = c.execAmt - c.amt;
+        return {
+          code: c.id, name: c.name, st: c.status, tone: CT_TONE(c.status), amt: c.amt,
+          role: c.contractRole,
+          badge: `合同额 ${fmtAmt(c.amt)} · 执行额 ${fmtAmt(c.execAmt)}${delta ? `（含已生效变更 ${delta > 0 ? '+' : ''}${fmtAmt(delta)}）` : ''}`,
+          children: kids.length
+            ? kids.map((k) => ({
+              code: k.id, name: k.name, amt: k.amt,
+              note: k.contractRole === 'supplement_price'
+                ? '价格调整补充协议（增量：合同额不动，只加执行额）'
+                : '服务类补充协议（独立成行）',
+            }))
+            : undefined,
+        };
+      });
+  }, [projContracts]);
+  const buyCt = useMemo(() => projContracts
+    .filter((c) => c.type === '采购合同' || c.type === '分包合同')
     .map((c) => ({
-      code: c.id, name: c.name, st: c.status,
-      tone: (c.status === '履约中' ? 'blue' : c.status === '已完成' ? 'green' : 'orange') as 'blue' | 'green' | 'orange',
-      amt: c.amt, warn: (c as { warn?: string }).warn,
-    })), [P.id]);
+      code: c.id, name: c.name, st: c.status, tone: CT_TONE(c.status), amt: c.amt,
+    })), [projContracts]);
 
   const payRows = payFilter === '全部' ? PAY_ROWS : PAY_ROWS.filter((r) => r.kind === payFilter);
   const bars = COST9.map((t) => {
@@ -467,17 +491,20 @@ export default function ProjectCenterPage({ go, role, nav }: { go: (p: string) =
     laborRows, laborSum, machRows, machSum, matRows, matSum,
     payRows, payFilter, setPayFilter, SUM_IN, SUM_OUT,
     depositRows, teamRows, certRows, certValidTo,
-    saleCt: SALE_CT, buyCt, attach: ATTACH, attCnt: ATT_CNT, mileRows: MILE_ROWS,
+    saleCt, buyCt, attach: ATTACH, attCnt: ATT_CNT, mileRows: MILE_ROWS,
     curMile, curReq, curFiles, curMiss, dunCount,
   };
 
+  /* 溯源链：按外键精确取数（relOfProject），不再按 customerId 模糊匹配取首个单据 ——
+     修复前同客户有多个项目时会取到别的项目的报价 / 投标，溯源链指错上游。 */
   const trace = useMemo(() => {
-    const opp = OPPS.find((o) => o.customerId === P.customerId && o.status === '赢单')
-      || OPPS.find((o) => o.customerId === P.customerId && !isOppClosed(o));
-    const quote = QUOTES.find((q) => q.customerId === P.customerId && q.status === '已转化');
-    const contract = CONTRACTS.find((c) => c.project === P.id);
-    return { opp, quote, contract };
-  }, [P]);
+    const r = relOfProject(P.id);
+    const oppId = r.quotes.map((q) => q.opp).find(Boolean) || '';
+    return {
+      opp: oppId ? getOpps().find((o) => o.id === oppId) : undefined,
+      quote: r.quotes[0], contract: r.contracts[0], bid: r.bids[0],
+    };
+  }, [P.id, tick]);
 
   const CurComp = (SUBS.find((s) => s.key === sub) ?? SUBS[0]).comp;
   const closeM = () => setM(null);
@@ -495,6 +522,7 @@ export default function ProjectCenterPage({ go, role, nav }: { go: (p: string) =
         sub={<span className="nc-pjtrace">溯源链：
           {trace.opp ? <><EntityLink target="opp" id={trace.opp.id} go={go} title="下钻到商机详情">商机 {trace.opp.id}</EntityLink> → </> : <span className="nc-muted">无关联商机 → </span>}
           {trace.quote ? <><EntityLink target="quote-detail" id={trace.quote.id} go={go} title="下钻到报价详情">报价 {trace.quote.id}</EntityLink> → </> : <span className="nc-muted">无关联报价 → </span>}
+          {trace.bid ? <><EntityLink target="bid" id={trace.bid.id} go={go} title="下钻到投标详情">投标 {trace.bid.id}</EntityLink> → </> : <span className="nc-muted">无关联投标 → </span>}
           {trace.contract ? <><EntityLink target="contract-detail" id={trace.contract.id} go={go} title="下钻到合同详情">合同 {trace.contract.id}</EntityLink> → </> : <span className="nc-muted">无关联合同 → </span>}
           本项目
         </span>}
@@ -540,7 +568,7 @@ export default function ProjectCenterPage({ go, role, nav }: { go: (p: string) =
             { key: 'overview', label: '概览' },
             { key: 'track', label: '执行履约', cnt: MILE_ROWS.length },
             { key: 'quality', label: curMiss.length > 0 ? `质量验收 ⚠` : '质量验收', cnt: 3 + 2 + 5 },
-            { key: 'biz', label: '商务合同', cnt: SALE_CT.length + buyCt.length + PAY_ROWS.length },
+            { key: 'biz', label: '商务合同', cnt: saleCt.length + buyCt.length + PAY_ROWS.length },
             { key: 'cost', label: dev > 0 ? '成本台账 ⚠' : '成本台账', cnt: costRows.length },
             { key: 'members', label: '团队资料', cnt: teamRows.length + certRows.length + ATT_CNT },
           ]}

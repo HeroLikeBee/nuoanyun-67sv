@@ -26,7 +26,7 @@ import {
   type RecipeLine, type RfqRow,
 } from '../components/data';
 import { Ico } from '../components/icons';
-import { getFocus } from '../components/store';
+import { getFocus, getItems, subscribeStore, updateItems } from '../components/store';
 
 /* ============ 类型色板 ============ */
 const KIND_TONE: Record<ItemKind, TagTone> = { 材料: 'gray', 设备: 'blue', 服务: 'purple', 套件: 'gold' };
@@ -58,8 +58,14 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
     toast(`当前角色（${role}）无主数据写入权限 · 需 项目经理 / 分管副总 / 总经理 / 超级管理员`, 'err');
   };
 
-  /* ============ 可写主数据（原型级会话副本，数据层 ITEMS / RECIPES 为基线） ============ */
-  const [items, setItems] = useState<Item[]>(() => ITEMS.map((i) => ({ ...i })));
+  /* ============ 可写主数据 ============
+   * 数据落在共享 store（不再用页面本地副本）：材料新增 / 停用 / 改价 / 认证维护后，
+   * 报价工作台的「从材料库添加」与配方编辑器即时可见。
+   * setItems 指向 store 的 updateItems（签名与 setState 一致），页面内既有写点无需改写。
+   * ==================================================================== */
+  const [items, setItemsState] = useState<Item[]>(getItems);
+  useEffect(() => subscribeStore(() => setItemsState(getItems())), []);
+  const setItems = updateItems;
   const [recipes, setRecipes] = useState(() => JSON.parse(JSON.stringify(RECIPES)) as typeof RECIPES);
   const byCode = (code: string) => items.find((x) => x.code === code);
   const costOf = (code: string, ver?: string) => recipeCost(code, ver, { items, recipes });
@@ -228,7 +234,7 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
   useEffect(() => {
     const code = getFocus('material');
     if (!code) return;
-    const hit = ITEMS.find((x) => x.code === code);
+    const hit = items.find((x) => x.code === code);
     if (!hit) return;
     setDomain('master'); setTab('list'); setTyF('全部'); setCatTree(''); setPage(1);
     setDetail(hit);

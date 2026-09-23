@@ -707,6 +707,9 @@ export default function ContractDetailPage({ go, role, nav }: { go: (p: string) 
             {cur.isSub && <span>所属主合同 <a className="nc-link" onClick={backMain}>{cur.parentCode}</a> {cur.parentName}</span>}
             {!cur.isSub && <span>相对方 {go ? <EntityLink target="customer" id={custOf(c.party)?.id} go={go} title="下钻到客户档案">{c.party}</EntityLink> : c.party}</span>}
             <span>负责人 {cur.owner}</span>
+            {/* 上游来源单据（投标 → 合同 / 报价 → 合同）：按外键反查，修复前这两个字段落了库却没有出口 */}
+            {c.bidId && <span>中标依据 {go ? <EntityLink target="bid" id={c.bidId} go={go} title="下钻到中标投标单">{c.bidId}</EntityLink> : c.bidId}</span>}
+            {c.quoteId && <span>来源报价 {go ? <EntityLink target="quote-detail" id={c.quoteId} go={go} title="下钻到来源报价单">{c.quoteId}</EntityLink> : c.quoteId}</span>}
             {c.project && <span>关联项目 {go ? <EntityLink target="project-center" id={c.project} go={go} title="下钻到项目经营中心">{c.project}</EntityLink> : c.project}</span>}
             <span>工期 {cur.start} → {cur.end}</span>
             <span>签约 {cur.sign}</span>

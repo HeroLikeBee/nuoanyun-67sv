@@ -30,7 +30,8 @@ const PAY_FILTERS = ['全部', '收入', '采购付款', '无合同付款', '红
 
 /** 合同树：收款类（销售 / 维保 / 补充协议）+ 付款类（采购 / 分包） */
 function ContractTree({ C }: { C: PjCtx }) {
-  const [open, setOpen] = useState<Record<string, boolean>>({ HT000009: true });
+  /* 展开态按项目内实际合同号初始化，不预置某个具体合同号（原来写死 HT000009，别的项目点了没反应） */
+  const [open, setOpen] = useState<Record<string, boolean>>({});
   const toggle = (k: string) => setOpen((s) => ({ ...s, [k]: !s[k] }));
   const saleSum = C.saleCt.reduce((s, c) => s + c.amt, 0);
   const buySum = C.buyCt.reduce((s, c) => s + c.amt, 0);
@@ -86,7 +87,7 @@ function ContractTree({ C }: { C: PjCtx }) {
             </div>
           ))}
 
-          <div className="nc-ledhd" style={{ marginTop: 18 }}>无合同付款（项目级挂账） <b>2</b>
+          <div className="nc-ledhd" style={{ marginTop: 18 }}>无合同付款（项目级挂账） <b>{C.payRows.filter((r) => r.kind === '无合同付款').length}</b>
             <Tip w={340} text="应急采购在归并到合同前单独挂账；归并后原行保留置灰、标记去向，避免重复计入成本。" />
           </div>
           <div className="nc-gate">

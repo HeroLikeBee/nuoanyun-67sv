@@ -3,8 +3,8 @@
 // 设计：模块级可变数组 + 订阅广播；各台账页用 useState(getXxx) 播种并 useEffect 订阅，
 //      保证 A 页写入后 B 页挂载 / 已挂载都能拿到最新数据（不引入第三方状态库）。
 // 说明：BIDS / QUOTES / INVOICES 等在下方「实体关系图」处二次导入，此处不重复声明。
-import { APPROVALS, CONTRACTS, OPP_STAGE_TPL, OPPS, PROJECTS, SIGN_CHAINS, TODAY, normContractStatus } from './data';
-import type { OppStageTpl, SignConfig } from './data';
+import { APPROVALS, BIDS, CONTRACTS, CUSTOMERS, INVOICES, ITEMS, OPP_STAGE_TPL, OPPS, PROJECTS, QUOTES, SIGN_CHAINS, TODAY, normContractStatus } from './data';
+import type { Item, OppStageTpl, Quote, SignConfig } from './data';
 
 type C = (typeof CONTRACTS)[number];
 type P = (typeof PROJECTS)[number];
@@ -38,6 +38,84 @@ export function addContract(c: C) {
 /** 新增项目（项目台帐页会实时出现）。p.contractId 有值时即为「合同立项」，上游单据由合同继承。 */
 export function addProject(p: P) {
   projects = [p, ...projects];
+  emit();
+}
+
+/* ============================ 主数据 / 报价 / 投标切片 ============================
+ * 修复「新建 / 编辑不落库」：原先这三个实体只存在于各自页面的 useState，
+ * 跨页不可见（材料新增后在报价工作台选不到、报价提交后审批中心无待办、投标新建后商机看不到）。
+ * 与 contracts / projects 同构：模块级可变数组 + emit() 广播 + resetStore() 同步。
+ * ========================================================================== */
+
+let items: Item[] = ITEMS.map((i) => ({ ...i }));
+
+export const getItems = () => items;
+/** 仅「启用」物料：报价 / 投标 / 配方等下游选择器一律用这个，避免停用物料继续被引用 */
+export const getActiveItems = () => items.filter((i) => i.status === '启用');
+
+export function addItem(it: Item) {
+  items = [it, ...items];
+  emit();
+}
+
+/** 按编码局部回写物料（改价 / 认证 / 安全库存 / 配方对外价等） */
+export function patchItem(code: string, patch: Partial<Item>) {
+  items = items.map((x) => (x.code === code ? ({ ...x, ...patch } as Item) : x));
+  emit();
+}
+
+/** 启用 ⇄ 停用（停用后下游选择器不再出现该物料） */
+export function toggleItemStatus(code: string) {
+  items = items.map((x) => (x.code === code ? { ...x, status: x.status === '启用' ? '停用' : '启用' } : x));
+  emit();
+}
+
+/**
+ * 整表更新（供材料页的批量操作使用）。
+ * 材料页有多处「按条件 map 整表」的写点（入库回写库存 / 配方保存 / 改价 / 认证维护 / 停用启用），
+ * 逐个改成 patchItem 会打散原有逻辑，故保留 updater 形态；与 useState 的 setState 签名一致，
+ * 页面侧只需把 `setItems` 指向本函数即可完成落库改造。
+ */
+export function updateItems(updater: (list: Item[]) => Item[]) {
+  items = updater(items);
+  emit();
+}
+
+let quotes: Quote[] = QUOTES.slice();
+
+export const getQuotes = () => quotes;
+export const getQuote = (id: string) => quotes.find((q) => q.id === id) ?? null;
+
+export function addQuote(q: Quote) {
+  quotes = [q, ...quotes];
+  emit();
+}
+
+/** 按 id 局部回写报价单（状态 / 明细行 / 关联外键 / 浮率等） */
+export function patchQuote(id: string, patch: Partial<Quote>) {
+  quotes = quotes.map((q) => (q.id === id ? ({ ...q, ...patch } as Quote) : q));
+  emit();
+}
+
+/** 保存报价明细行（工作台提交时调用；同时把 items 行数同步为明细行数） */
+export function saveQuoteLines(id: string, lines: Quote['lines']) {
+  quotes = quotes.map((q) => (q.id === id ? ({ ...q, lines, items: lines?.length ?? q.items } as Quote) : q));
+  emit();
+}
+
+let bids: B[] = BIDS.slice();
+
+export const getBids = () => bids;
+export const getBid = (id: string) => bids.find((b) => b.id === id) ?? null;
+
+export function addBid(b: B) {
+  bids = [b, ...bids];
+  emit();
+}
+
+/** 按 id 局部回写投标单（阶段 / 保证金 / 中标金额 / 关联报价等） */
+export function patchBid(id: string, patch: Partial<B>) {
+  bids = bids.map((b) => (b.id === id ? ({ ...b, ...patch } as B) : b));
   emit();
 }
 
@@ -214,8 +292,8 @@ export function setOppStageWeight(name: string, weight: number): { ok: boolean; 
   return { ok: true, msg: `阶段「${name}」权重已更新为 ${weight}%（加权预测即时重算）` };
 }
 
-/** 按商机 ID 取关联投标：商机侧只挂关联投标数，投标单据本身归 BidPage 管理（BIDS[].opp 关联） */
-export const getOppBids = (oppId: string) => BIDS.filter((b) => b.opp === oppId);
+/** 按商机 ID 取关联投标：读 store 切片，保证「新建投标 → 商机页即时可见」 */
+export const getOppBids = (oppId: string) => bids.filter((b) => b.opp === oppId);
 
 /* ---------- 商机（SJ）----------
    阶段与状态正交：stage ∈ store 的阶段模板（仅活跃商机推进）；status ∈ 跟进中 / 赢单 / 输单。
@@ -439,6 +517,42 @@ export function setPendingContract(v: typeof pendingContract) {
   emit();
 }
 
+/* ============================ 报价 → 转合同 ============================
+ * 场景：报价台账「转合同」→ 跳合同新建页，带上来源报价单。
+ * 修复前 QuotePage 只 go('contract-new') 不传参，合同新建页回落硬编码默认值
+ * （昆明万达 / 320 万 / XM000123），导致从任意报价转合同都生成同一份合同草稿。
+ * 消费式读取：合同新建页读后立即清除，避免下次独立进入也误预填。
+ * ==================================================================== */
+let pendingQuote: { quoteId: string } | null = null;
+export const getPendingQuote = () => pendingQuote;
+export function setPendingQuote(v: typeof pendingQuote) {
+  pendingQuote = v;
+  emit();
+}
+export function consumePendingQuote() {
+  const v = pendingQuote;
+  pendingQuote = null;
+  return v;
+}
+
+/* ============================ 合同续签 ============================
+ * 场景：合同台账 / 详情点「续签」→ 跳合同新建页，带上源合同。
+ * 新建页据此预填（按源合同要素生成续签草稿）并在提交时落 parentId，
+ * 同时回写源合同 renewedTo，形成「原合同 ⇄ 续签合同」双向可追溯。
+ * 消费式读取：合同新建页读后立即清除，避免下次独立进入也误预填。
+ * ================================================================== */
+let pendingRenew: { contractId: string } | null = null;
+export const getPendingRenew = () => pendingRenew;
+export function setPendingRenew(v: typeof pendingRenew) {
+  pendingRenew = v;
+  emit();
+}
+export function consumePendingRenew() {
+  const v = pendingRenew;
+  pendingRenew = null;
+  return v;
+}
+
 /* ============================ 立项入口 A：合同 → 创建项目 ============================
  * 场景：合同详情点「创建项目」→ 跳立项页，并带上来源合同。
  * 立项页据此切换为「入口 A」形态：预填合同要素 + 生成合同交底卡（确认阅读 = 交底留痕）。
@@ -519,10 +633,16 @@ export function resetStore() {
   approvals = APPROVALS.slice();
   opps = OPPS.slice();
   oppStages = OPP_STAGE_TPL.map((s) => ({ ...s }));
+  /* 深拷贝：quotes / bids / items 含嵌套数组（lines / workItems 等），浅拷贝会与常量共享引用 */
+  quotes = JSON.parse(JSON.stringify(QUOTES));
+  bids = JSON.parse(JSON.stringify(BIDS));
+  items = ITEMS.map((i) => ({ ...i }));
   oppLogs = {};
   oppClose = {};
   bizStatus = {};
   pendingContract = null;
+  pendingQuote = null;
+  pendingRenew = null;
   pendingProject = null;
   focus = {};
   focusTab = {};
@@ -543,8 +663,9 @@ export function resetStore() {
 //   项目 project     ──── 合同 CONTRACTS.project
 //
 // 用法：rel.customer('KH20260312001') → { opps, quotes, bids, projects, contracts, invoices }
-
-import { BIDS, CONTRACTS as CT, CUSTOMERS, INVOICES, PROJECTS as PJ, QUOTES } from './data';
+//
+// ⚠️ 一律读 store 切片（quotes / bids / contracts / projects）而非 data.ts 模块常量，
+//    否则新建 / 编辑的单据在下钻链路里看不到。
 
 /** 按客户 ID 汇总该客户的全部关联单据 */
 export function relOfCustomer(customerId: string) {
@@ -553,23 +674,34 @@ export function relOfCustomer(customerId: string) {
   return {
     customer: c,
     opps: OPPS.filter((o) => o.customerId === customerId),
-    quotes: QUOTES.filter((q) => q.customerId === customerId),
-    bids: BIDS.filter((b) => b.customerId === customerId),
+    quotes: quotes.filter((q) => q.customerId === customerId),
+    bids: bids.filter((b) => b.customerId === customerId),
     projects: projects.filter((p) => p.customerId === customerId),
     contracts: contracts.filter((k) => !!name && k.party === name),
     invoices: INVOICES.filter((v) => !!name && v.buyer === name),
   };
 }
 
-/** 按项目 ID 汇总该项目的全部关联单据（合同按 project 外键） */
+/**
+ * 按项目 ID 汇总该项目的全部关联单据。
+ * 报价 / 投标走**外键精确匹配**（QUOTES.projectId / PROJECTS.quoteId / bidId），
+ * 不再用「客户相同 + 名称前 4 字模糊匹配」——那个写法会取到同客户的另一张报价单。
+ */
 export function relOfProject(projectId: string) {
   const p = projects.find((x) => x.id === projectId);
   const custId = (p as { customerId?: string } | undefined)?.customerId || '';
+  const contractIds = contracts.filter((k) => k.project === projectId).map((k) => k.id);
   return {
     project: p,
     contracts: contracts.filter((k) => k.project === projectId),
     customer: custId ? CUSTOMERS.find((x) => x.id === custId) : (p ? CUSTOMERS.find((x) => x.name === p.customer) : undefined),
-    quotes: custId ? QUOTES.filter((q) => q.customerId === custId && q.name.includes(p?.name.slice(0, 4) || '\u0000')) : [],
+    /* 报价：优先外键（projectId），兜底经来源合同反查（CONTRACTS.quoteId） */
+    quotes: quotes.filter((q) => q.projectId === projectId
+      || (q.id === (p?.quoteId ?? ''))
+      || contractIds.some((cid) => contracts.find((k) => k.id === cid)?.quoteId === q.id)),
+    /* 投标：优先外键（bidId），兜底经来源合同反查（CONTRACTS.bidId） */
+    bids: bids.filter((b) => b.id === (p?.bidId ?? '')
+      || contractIds.some((cid) => contracts.find((k) => k.id === cid)?.bidId === b.id)),
   };
 }
 
@@ -578,13 +710,13 @@ export function relOfOpp(oppId: string) {
   const o = OPPS.find((x) => x.id === oppId);
   return {
     opp: o,
-    quotes: QUOTES.filter((q) => q.opp === oppId),
-    bids: BIDS.filter((b) => b.opp === oppId),
+    quotes: quotes.filter((q) => q.opp === oppId),
+    bids: bids.filter((b) => b.opp === oppId),
     customer: o ? CUSTOMERS.find((x) => x.id === o.customerId) : undefined,
   };
 }
 
-/** 按合同 ID 汇总关联单据（客户 / 项目 / 同项目其他合同） */
+/** 按合同 ID 汇总关联单据（客户 / 项目 / 同项目其他合同 / 来源报价与投标） */
 export function relOfContract(contractId: string) {
   const k = contracts.find((x) => x.id === contractId);
   const projId = k?.project || '';
@@ -594,5 +726,8 @@ export function relOfContract(contractId: string) {
     customer: k ? CUSTOMERS.find((x) => x.name === k.party) : undefined,
     siblings: projId ? contracts.filter((x) => x.project === projId && x.id !== contractId) : [],
     invoices: k ? INVOICES.filter((v) => v.buyer === k.party) : [],
+    /* 上游来源单据（中标投标单 / 来源报价单），供合同详情「中标依据 / 来源报价」栏位下钻 */
+    bid: k?.bidId ? bids.find((b) => b.id === k.bidId) : undefined,
+    quote: k?.quoteId ? quotes.find((q) => q.id === k.quoteId) : undefined,
   };
 }

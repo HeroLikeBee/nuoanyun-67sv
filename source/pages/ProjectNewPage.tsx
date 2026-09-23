@@ -15,10 +15,13 @@ import {
   Banner, Btn, Card, Check, Field, Money, PageHead, Tag, Tip, useToast, pressProps,
 } from '../components/ui';
 import {
-  CONTRACTS, CUSTOMERS, DEPT_STAFF, PROJECT_SOURCES, PROJ_TYPES, TODAY, fmt, fmtAmt,
+  CERTS, CUSTOMERS, DEPT_STAFF, PROJECT_SOURCES, PROJ_TYPES, TODAY, fmt, fmtAmt,
+  isContractClosed, normContractStatus, occCount,
 } from '../components/data';
 import type { Project } from '../components/data';
-import { addProject, consumePendingProject, getPendingProject, getProjects } from '../components/store';
+import {
+  addProject, consumePendingProject, getContracts, getPendingProject, getProjects, patchContract,
+} from '../components/store';
 import { Ico } from '../components/icons';
 
 /** 项目编号：XM + 6 位流水（《研发级功能规格》§0.2） */
@@ -39,14 +42,16 @@ const certReqOf = (type: string) => (type === '维护保养'
   ? ['消防设施维护保养检测资质', '注册消防工程师（有效且未被占用）']
   : ['消防设施工程专业承包资质', '注册建造师（机电）+ B 证（有效且无在建）', '安全生产许可证']);
 
-export default function ProjectNewPage({ go, role }: { go: (p: string) => void; role: string; nav?: number }) {
+export default function ProjectNewPage({ go, role, nav }: { go: (p: string) => void; role: string; nav?: number }) {
   const toast = useToast();
 
   /* ---------- 入口判定：有来源合同 → 入口 A；否则入口 B ---------- */
   const srcContract = useMemo(() => {
     const pend = getPendingProject();
     if (!pend) return null;
-    return CONTRACTS.find((c) => c.id === pend.contractId) || null;
+    /* 读共享 store：修复前读 data.ts 常量，本次会话新建的合同从合同详情点「创建项目」查不到，
+       入口 A 会静默退化为入口 B（合同要素全部带不出来）。 */
+    return getContracts().find((c) => c.id === pend.contractId) || null;
   }, []);
   const entryA = !!srcContract;
 
@@ -66,13 +71,16 @@ export default function ProjectNewPage({ go, role }: { go: (p: string) => void; 
   const [read, setRead] = useState(false);
   const [tried, setTried] = useState(false);
 
-  const usedNos = useMemo(() => getProjects().map((p) => p.id), []);
+  const usedNos = useMemo(() => getProjects().map((p) => p.id), [nav]);
   const projectNo = useMemo(() => nextProjectNo(usedNos), [usedNos]);
 
-  /* 可关联合同：同客户、且未挂到其它项目（入口 B 可空） */
+  /* 可关联合同：同客户、未挂到其它项目、且处于可立项状态（已签约 / 履约中）。
+     修复前只过滤「未挂项目」，草稿 / 待审批 / 已终止的合同同样能被选中立项 —— 立项闸口形同虚设。 */
   const ctOptions = useMemo(
-    () => CONTRACTS.filter((c) => !c.project && (!customer || c.party === customer)),
-    [customer],
+    () => getContracts().filter((c) => !c.project && !isContractClosed(c)
+      && ['已签约', '履约中'].includes(normContractStatus(c.status))
+      && (!customer || c.party === customer)),
+    [customer, nav],
   );
 
   /* ---------- 交底卡派生（全部来自合同，不手填） ---------- */
@@ -87,12 +95,64 @@ export default function ProjectNewPage({ go, role }: { go: (p: string) => void; 
   const pmErr = tried && !pm ? '请选择项目经理' : '';
   const readErr = tried && entryA && !read ? '请确认已阅读合同要点' : '';
 
+  /**
+   * 项目经理资格（M9）：与投标「建造师三要素」同口径。
+   *   工程施工类（新建 / 改造 / 检测）：建造师证有效 + B 证有效 + 无在建，三要素齐备；
+   *   维护保养类：注册消防工程师证有效且未被占用。
+   * 「无在建」按 occCount() 判定（证书占用记录已排除终态项目），不用 c.used.length。
+   */
+  const pmCheck = useMemo(() => {
+    if (!pm) return null;
+    if (ptype === '维护保养') {
+      const cert = CERTS.find((c) => c.subType === '注册消防工程师' && c.holder === pm);
+      if (!cert) return { pass: false, label: '注册消防工程师证', note: `${pm} 名下无注册消防工程师证` };
+      const used = occCount(cert.id);
+      const ok = cert.validTo >= TODAY && used === 0;
+      return {
+        pass: ok, label: '注册消防工程师证',
+        note: ok ? `${cert.id} 有效期至 ${cert.validTo}，且未被占用`
+          : `${cert.id} ${cert.validTo < TODAY ? `已于 ${cert.validTo} 过期` : `正被 ${used} 个项目占用`}`,
+      };
+    }
+    const b = CERTS.find((c) => (c as { isBuilder?: boolean }).isBuilder && c.holder === pm);
+    if (!b) return { pass: false, label: '建造师三要素', note: `${pm} 名下无注册建造师证，工程施工类不可担任项目经理` };
+    const okValid = b.validTo >= TODAY;
+    const okB = !!(b as { hasB?: boolean }).hasB && ((b as { bValidTo?: string }).bValidTo || '') >= TODAY;
+    const okFree = occCount(b.id) === 0;
+    const miss = [!okValid && `建造师证${b.validTo < TODAY ? '已过期' : '无效'}`, !okB && 'B 证无效 / 已过期', !okFree && '存在在建项目'].filter(Boolean);
+    return {
+      pass: !miss.length, label: '建造师三要素',
+      note: miss.length ? `${b.id}：${miss.join(' / ')}，三要素未齐备` : `${b.id} 建造师证 + B 证有效，且无在建项目`,
+    };
+  }, [pm, ptype]);
+
   /* ---------- 保存 → 待启动 ---------- */
   const save = () => {
     setTried(true);
     if (!name.trim() || !customer || !pm || (entryA && !read)) {
       toast(entryA ? '请补全必填项并确认已阅读合同要点' : '请补全必填项（项目名 / 客户 / 项目经理）', 'err');
       return;
+    }
+    /* M9 资格闸口：项目经理不满足证件要求时硬拦截（与投标侧 builderCheck 同口径） */
+    if (pmCheck && !pmCheck.pass) {
+      toast(`项目经理资格未通过：${pmCheck.note}`, 'err');
+      return;
+    }
+    /* 立项闸口（入口 A 与手选合同共同适用）：
+       ① 合同必须存在；② 状态必须是「已签约 / 履约中」—— 草稿、待审批、已终止的合同不可立项；
+       ③ 同一合同不可重复立项（已被其它项目占用时硬拦截）。 */
+    if (contractId) {
+      const ct = getContracts().find((c) => c.id === contractId);
+      if (!ct) { toast(`合同 ${contractId} 不存在，请重新选择`, 'err'); return; }
+      const cs = normContractStatus(ct.status);
+      if (isContractClosed(ct) || !['已签约', '履约中'].includes(cs)) {
+        toast(`合同 ${ct.id} 当前状态为「${cs}」，仅「已签约 / 履约中」的合同可立项`, 'err');
+        return;
+      }
+      if (ct.project && ct.project !== projectNo) {
+        toast(`合同 ${ct.id} 已挂接项目 ${ct.project}，同一合同不可重复立项`, 'err');
+        return;
+      }
     }
     const p: Project = {
       id: projectNo,
@@ -123,8 +183,11 @@ export default function ProjectNewPage({ go, role }: { go: (p: string) => void; 
         : [{ at: TODAY, from: '—', to: '待启动', by: owner, reason: '极简立项创建' }],
     };
     addProject(p);
+    /* 合同回写：立项后把项目编号写回合同的 project 字段，合同详情「关联项目」与项目中心的
+       溯源链据此反查上游。修复前不回写，同一合同可被无限次立项且合同侧看不到已立项。 */
+    if (contractId) patchContract(contractId, { project: projectNo });
     consumePendingProject();
-    toast(`项目「${p.name}」已创建 · 编号 ${projectNo} · 状态「待启动」`);
+    toast(`项目「${p.name}」已创建 · 编号 ${projectNo} · 状态「待启动」${contractId ? ` · 已回写合同 ${contractId}` : ''}`);
     go('project-center');
   };
 
@@ -224,6 +287,11 @@ export default function ProjectNewPage({ go, role }: { go: (p: string) => void; 
               <option value="">请选择项目经理</option>
               {DEPT_STAFF.pm.map((s) => <option key={s.name} value={s.name}>{s.name}（{s.role}）</option>)}
             </select>
+            {pmCheck && (
+              <div className={pmCheck.pass ? 'nc-field-note' : 'nc-field-err'}>
+                {pmCheck.pass ? <Ico n="check" size={14} /> : <Ico n="ban" size={14} />} {pmCheck.label}：{pmCheck.note}
+              </div>
+            )}
           </Field>
           <Field label="预计合同额（元）" note="可空 · 立项后在经营中心只读">
             <input className="nc-input" type="number" value={amt || ''} placeholder="暂不确定可留空"

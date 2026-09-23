@@ -7,20 +7,50 @@ import {
   PageHead, ListToolbar, TableFoot, Tag, Timeline, Tip, useToast, ChainBar, Check, Code, Collapse, ConfirmModal, EntityLink,
 } from '../components/ui';
 import type { OpMoreItem } from '../components/ui';
-import { QUOTES, QUOTE_STATUS, QUOTE_CATS, APPROVALS, approveLevel, calcTax, fmt, fmtWan, quoteTrigger } from '../components/data';
-import { consumeFocus, getBizStatus, subscribeStore } from '../components/store';
+import { QUOTE_STATUS, QUOTE_CATS, APPROVALS, CUSTOMERS, TODAY, approveLevel, calcTax, fmt, fmtWan, quoteTrigger } from '../components/data';
+import type { Quote } from '../components/data';
+import {
+  addQuote, consumeFocus, getApprovals, getBids, getBizStatus, getOpps, getQuotes, patchQuote, pushApproval,
+  setBizStatus, setFocus, setPendingQuote, subscribeStore,
+} from '../components/store';
 import { Ico } from '../components/icons';
 
 const ST_TONE: Record<string, 'gray' | 'blue' | 'green' | 'red' | 'gold'> = {
   草稿: 'gray', 待审批: 'blue', 已审批: 'green', 已转化: 'gold', 作废: 'red', 审批中: 'blue',
 };
-type Q = (typeof QUOTES)[number];
+type Q = Quote;
+
+/** 报价单号：BJ + 6 位流水（取现有最大流水 + 1） */
+const nextQuoteNo = () => {
+  const max = getQuotes()
+    .filter((q) => /^BJ\d{6}$/.test(q.id))
+    .map((q) => Number(q.id.slice(2)))
+    .reduce((a, b) => Math.max(a, b), 0);
+  return `BJ${String(max + 1).padStart(6, '0')}`;
+};
+
+/** 生成报价审批单（提交审批 → 审批中心可见，形成正向闭环） */
+const makeQuoteApproval = (ref: string, ver: string, obj: string, amt: number, level: string) => {
+  const [y, m, d] = TODAY.split('-');
+  return {
+    id: `SP-${y}-${m}${d}-${String(getApprovals().length + 1).padStart(2, '0')}`,
+    ap: '蓝峰', type: '报价审批', obj, ref: `${ref} 报价单 ${ver}`,
+    amt, time: `${TODAY} 14:00`, status: '待审批',
+    level: level === '—' ? '部门负责人' : level, node: 0, reason: '', cc: ['李思敏'],
+  } as Parameters<typeof pushApproval>[0];
+};
 
 export default function QuotePage({ go, role, nav }: { go: (p: string) => void; role: string; nav?: number }) {
   const toast = useToast();
-  /* 审批中心通过 / 退回后回写的状态覆盖层：优先取覆盖值，无覆盖时回落 data.ts 原状态 */
-  const [, forceRender] = useState(0);
-  useEffect(() => subscribeStore(() => forceRender((n) => n + 1)), []);
+  /* 报价台账读共享 store：新建 / 提交 / 撤回 / 作废后本列表即时刷新 */
+  const [tick, setTick] = useState(0);
+  useEffect(() => subscribeStore(() => setTick((n) => n + 1)), []);
+  const quotes = useMemo(() => getQuotes(), [tick, nav]);
+  /**
+   * 状态口径：一律走审批回写覆盖层 getBizStatus(单号, 原状态)。
+   * 修复前状态列 / 筛选 / 计数 / 操作分支读的是 data.ts 原值，审批中心通过后列表仍显示「待审批」，
+   * 且 `q.status === '已审批'` 的「转合同」入口永远不出现 —— 报价 → 合同主线在 UI 上走不通。
+   */
   const st = (q: Q) => getBizStatus(q.id, q.status);
   const [status, setStatus] = useState('全部');
   const [kw, setKw] = useState('');
@@ -36,7 +66,7 @@ export default function QuotePage({ go, role, nav }: { go: (p: string) => void; 
   useEffect(() => {
     const id = consumeFocus('quote');
     if (!id) return;
-    const hit = QUOTES.find((q) => q.id === id);
+    const hit = quotes.find((q) => q.id === id);
     if (hit) setDetail(hit);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nav]);
@@ -53,48 +83,69 @@ export default function QuotePage({ go, role, nav }: { go: (p: string) => void; 
   const [fCustomer, setFCustomer] = useState('');
   const [fType, setFType] = useState('新建');
   const [fTax, setFTax] = useState('9');
+  const [fOpp, setFOpp] = useState('');
   const [errs, setErrs] = useState<Record<string, string>>({});
+  /* 客户 / 商机下拉一律读真实数据源：原先硬编码 6 个客户名 + 写死一条商机，
+     新建的报价挂不到真实客户与商机上，下游「关联商机」列与漏斗回写全部失真。 */
+  const custOptions = useMemo(() => CUSTOMERS.map((c) => ({ id: c.id, name: c.name })), []);
+  const oppOptions = useMemo(
+    () => getOpps().filter((o) => !['赢单', '输单'].includes(o.status)).map((o) => ({ id: o.id, name: o.name })),
+    [tick, nav],
+  );
 
   const counts = useMemo(() => {
-    const m: Record<string, number> = { 全部: QUOTES.length };
-    QUOTE_STATUS.forEach((s) => { m[s] = QUOTES.filter((q) => q.status === s).length; });
+    const m: Record<string, number> = { 全部: quotes.length };
+    QUOTE_STATUS.forEach((s) => { m[s] = quotes.filter((q) => st(q) === s).length; });
     return m;
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quotes, tick]);
 
-  const rows = useMemo(() => QUOTES.filter((q) => {
-    if (status !== '全部' && q.status !== status) return false;
+  const rows = useMemo(() => quotes.filter((q) => {
+    if (status !== '全部' && st(q) !== status) return false;
     if (type && !q.name.includes(type) && !(type === '维护保养' && q.taxRate === 6)) return false;
     if (owner && q.owner !== owner) return false;
     if (kw) { const s = q.id + q.name + q.customer; if (!s.includes(kw)) return false; }
     return true;
-  }), [status, kw, type, owner]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [quotes, status, kw, type, owner, tick]);
 
   const paged = rows.slice((page - 1) * pageSize, page * pageSize);
 
-  /* 概览统计（报价管理口径） */
-  const owners = [...new Set(QUOTES.map((q) => q.owner))];
-  const ongoing = QUOTES.filter((q) => ['草稿', '待审批', '已审批'].includes(q.status));
+  /* 概览统计（报价管理口径）—— 一律按状态覆盖层 st(q) 统计，与列表筛选结果保持一致 */
+  const owners = [...new Set(quotes.map((q) => q.owner))];
+  const ongoing = quotes.filter((q) => ['草稿', '待审批', '已审批'].includes(st(q)));
   const ongoingAmt = ongoing.reduce((s, q) => s + q.total, 0);
-  const monthNew = QUOTES.filter((q) => q.update >= '2026-09-01').length;
-  const winCnt = QUOTES.filter((q) => q.status === '已转化').length;
-  const winRate = QUOTES.length ? (winCnt / QUOTES.length) * 100 : 0;
-  const inFlight = QUOTES.filter((q) => ['草稿', '待审批', '已审批'].includes(st(q))).length;
+  const monthNew = quotes.filter((q) => q.update >= '2026-09-01').length;
+  const winCnt = quotes.filter((q) => st(q) === '已转化').length;
+  const winRate = quotes.length ? (winCnt / quotes.length) * 100 : 0;
+  const inFlight = ongoing.length;
 
   // 双触发判定 —— 口径统一由 data.ts 的 quoteTrigger 提供（单一事实源），
   // 修正前此处为 markup < 15%，而报价工作台写的是 grossMarkup >= 30%，两者方向相反。
   const trig = (q: Q) => quoteTrigger(q, role).need;
   const trigText = (q: Q) => quoteTrigger(q, role).why;
 
+  /** 提交审批（落库）：写状态 + 推审批单，保证审批中心能看到待办 */
   const submit = () => {
+    if (!submitOpen) return;
     const e: Record<string, string> = {};
-    if (!fCustomer) e.customer = '客户必填';
-    if (!fName) e.name = '报价名称必填';
     if (!reason.trim()) e.reason = '变更原因必填';
     if (reason.length > 200) e.reason = '变更原因 ≤200 字';
     setErrs(e);
     if (Object.keys(e).length) return;
-    toast('已提交审批 · 审批中不可改价，驳回后回草稿修订产生新版本');
+    const q = submitOpen;
+    const lvl = trig(q) ? approveLevel(q.total) : '—';
+    patchQuote(q.id, { status: '待审批', update: TODAY, approveLevel: lvl });
+    pushApproval(makeQuoteApproval(q.id, q.ver, q.name, q.total, lvl));
+    toast(`已提交审批 · ${q.id} · 审批中不可改价，驳回后回草稿修订产生新版本`);
     setSubmitOpen(null); setReason('');
+  };
+
+  /** 撤回审批（落库）：回「草稿」，可修改后重新提交 */
+  const withdraw = (q: Q) => {
+    patchQuote(q.id, { status: '草稿', update: TODAY });
+    setBizStatus(q.id, '草稿');
+    toast(`${q.id} 已撤回审批，回到「草稿」状态`);
   };
 
   const cols = [
@@ -120,7 +171,7 @@ export default function QuotePage({ go, role, nav }: { go: (p: string) => void; 
     },
     { key: 'taxRate', title: '税率', width: 70, align: 'right' as const, render: (q: Q) => `${q.taxMode} ${q.taxRate}%` },
     { key: 'base', title: '来源', width: 90, render: (q: Q) => q.base },
-    { key: 'status', title: '状态', width: 84, render: (q: Q) => <Tag tone={ST_TONE[q.status]}>{q.status}</Tag> },
+    { key: 'status', title: '状态', width: 84, render: (q: Q) => <Tag tone={ST_TONE[st(q)] ?? 'gray'}>{st(q)}</Tag> },
     {
       /* 参考《报价管理》121 行「审批级（按金额自动）」列：按金额自动分级路由，未命中触发条件 = 免审 */
       key: 'approveLevel', title: '审批级（按金额自动）', width: 130,
@@ -133,22 +184,24 @@ export default function QuotePage({ go, role, nav }: { go: (p: string) => void; 
     {
       /* 操作列收口：每行恒定 3 个槽位 —— ① 按状态的主操作（终态留占位）② 详情 ③ 更多 ⋯。
          原实现把 详情 / 编辑 / 提交审批 / 作废 / 版本管理 / 打印 全内联，最多 7 个按钮且随状态增减，
-         竖着扫视找不到固定位置；现按「常用外露 ≤3 + 其余收进更多」统一。 */
+         竖着扫视找不到固定位置；现按「常用外露 ≤3 + 其余收进更多」统一。
+         状态一律取 st(q)（审批回写覆盖层），否则审批通过后「转合同」入口永不出现。 */
       key: 'op', title: '操作', width: 200, align: 'right' as const,
       render: (q: Q) => {
+        const s = st(q);
         const more: OpMoreItem[] = [];
-        if (q.status === '草稿') more.push({ label: '提交审批', onClick: () => setSubmitOpen(q) });
-        if (q.status === '待审批') more.push({ label: '撤回审批', danger: true, onClick: () => toast('已撤回审批，回到「草稿」状态') });
-        if (q.status === '已审批' || q.status === '草稿') more.push({ label: '作废', danger: true, onClick: () => setVoidOpen(q) });
-        if (q.status !== '作废') more.push({ label: '版本管理', onClick: () => setVerOpen(q) });
+        if (s === '草稿') more.push({ label: '提交审批', onClick: () => setSubmitOpen(q) });
+        if (s === '待审批') more.push({ label: '撤回审批', danger: true, onClick: () => withdraw(q) });
+        if (s === '已审批' || s === '草稿') more.push({ label: '作废', danger: true, onClick: () => setVoidOpen(q) });
+        if (s !== '作废') more.push({ label: '版本管理', onClick: () => setVerOpen(q) });
         more.push({ label: '打印', onClick: () => toast('已调起打印预览（报价单 A4）') });
         return (
           <div className="nc-ops" onClick={(e) => e.stopPropagation()}>
-            {q.status === '草稿' && <Op gold onClick={() => go('quote-edit')}>编辑</Op>}
-            {q.status === '待审批' && <Op onClick={() => toast('已撤回审批，回到「草稿」状态')}>撤回</Op>}
-            {q.status === '已审批' && <Op gold onClick={() => go('contract-new')}>转合同</Op>}
-            {q.status === '已转化' && <OpNone title="已转化 = 终态，不可再编辑 / 作废" />}
-            {q.status === '作废' && <OpNone title="作废为终态，不可再编辑 / 审批；可「复制新版本」重新发起" />}
+            {s === '草稿' && <Op gold onClick={() => { setFocus('quote-edit', q.id); go('quote-edit'); }}>编辑</Op>}
+            {s === '待审批' && <Op onClick={() => withdraw(q)}>撤回</Op>}
+            {s === '已审批' && <Op gold onClick={() => { setPendingQuote({ quoteId: q.id }); go('contract-new'); }}>转合同</Op>}
+            {s === '已转化' && <OpNone title="已转化 = 终态，不可再编辑 / 作废" />}
+            {s === '作废' && <OpNone title="作废为终态，不可再编辑 / 审批；可「复制新版本」重新发起" />}
             <Op onClick={() => setDetail(q)}>详情</Op>
             <OpMore items={more} />
           </div>
@@ -185,7 +238,7 @@ export default function QuotePage({ go, role, nav }: { go: (p: string) => void; 
         <div className="nc-tile">
           <div className="nc-tile-label">近 90 天成交率</div>
           <div className="nc-tile-value num nc-v-green">{winRate.toFixed(0)}%</div>
-          <div className="nc-tile-sub">已转化 {winCnt} / 全部 {QUOTES.length} 单</div>
+          <div className="nc-tile-sub">已转化 {winCnt} / 全部 {quotes.length} 单</div>
         </div>
       </div>
 
@@ -223,7 +276,7 @@ export default function QuotePage({ go, role, nav }: { go: (p: string) => void; 
              且多行铺红会互相淹没。是否需审批由「审批级（按金额自动）」列（免审 / 分级）单独承担。 */
           rowClass={(q) => (st(q) === '作废' ? 'is-muted' : '')}
           onRowClick={(q) => setDetail(q)}
-          foot={<TableFoot total={QUOTES.length} filtered={rows.length} page={page} pageSize={pageSize} onPage={setPage} onPageSize={(n) => { setPageSize(n); setPage(1); }} />}
+          foot={<TableFoot total={quotes.length} filtered={rows.length} page={page} pageSize={pageSize} onPage={setPage} onPageSize={(n) => { setPageSize(n); setPage(1); }} />}
         />
       </Card>
 
@@ -232,15 +285,20 @@ export default function QuotePage({ go, role, nav }: { go: (p: string) => void; 
         open={!!detail} onClose={() => setDetail(null)} width={800}
         title={<span>报价单详情 {detail && <Code>{detail.id}</Code>}</span>}
         sub={detail && <>{detail.customer} · {detail.ver} · 负责人 {detail.owner} · 末次更新 {detail.update}</>}
-        foot={detail && (
-          <div className="nc-ops">
-            {detail.status === '草稿' && <><Btn kind="primary" size="sm" onClick={() => { setDetail(null); setSubmitOpen(detail); }}>提交审批</Btn><Btn size="sm" onClick={() => { setDetail(null); go('quote-edit'); }}>编辑</Btn></>}
-            {detail.status === '待审批' && <><Btn size="sm" danger onClick={() => { toast('已撤回审批'); setDetail(null); }}>撤回审批</Btn><Btn size="sm" onClick={() => go('approval')}>查看审批进度</Btn></>}
-            {detail.status === '已审批' && <Btn kind="primary" size="sm" onClick={() => { setDetail(null); go('contract-new'); }}>转合同（同步生成项目 + 合同草稿）</Btn>}
-            <Btn size="sm" onClick={() => { setDetail(null); setVerOpen(detail); }}>版本管理</Btn>
-            <Btn size="sm" onClick={() => toast('已调起打印预览')}>打印</Btn>
-          </div>
-        )}
+        foot={detail && (() => {
+          /* 状态一律取覆盖层 st(detail)：修复前读 detail.status 原值，审批中心通过后
+             详情页永远停在「待审批」，`=== '已审批'` 的「转合同」按钮永不出现 —— 主线在详情页断链。 */
+          const s = st(detail);
+          return (
+            <div className="nc-ops">
+              {s === '草稿' && <><Btn kind="primary" size="sm" onClick={() => { setSubmitOpen(detail); setDetail(null); }}>提交审批</Btn><Btn size="sm" onClick={() => { setFocus('quote-edit', detail.id); setDetail(null); go('quote-edit'); }}>编辑</Btn></>}
+              {s === '待审批' && <><Btn size="sm" danger onClick={() => { withdraw(detail); setDetail(null); }}>撤回审批</Btn><Btn size="sm" onClick={() => go('approval')}>查看审批进度</Btn></>}
+              {s === '已审批' && <Btn kind="primary" size="sm" onClick={() => { setPendingQuote({ quoteId: detail.id }); setDetail(null); go('contract-new'); }}>转合同（同步生成项目 + 合同草稿）</Btn>}
+              <Btn size="sm" onClick={() => { setVerOpen(detail); setDetail(null); }}>版本管理</Btn>
+              <Btn size="sm" onClick={() => toast('已调起打印预览')}>打印</Btn>
+            </div>
+          );
+        })()}
       >
         {detail && (
           <>
@@ -271,7 +329,7 @@ export default function QuotePage({ go, role, nav }: { go: (p: string) => void; 
               { date: detail.date, text: `创建报价单 ${detail.ver}（成本参考价快照已留痕）`, tone: 'ok' },
               { date: detail.date, text: `明细组价完成 · ${detail.items} 行 · 整体浮率 ${detail.markup}%`, tone: 'ok' },
               ...(detail.approveLevel !== '—' ? [{ date: detail.update, text: `命中触发条件 → 进入待审批 · 路由至${detail.approveLevel}`, tone: 'gold' as const }] : []),
-              { date: detail.update, text: `当前状态：${detail.status}`, tone: detail.status === '作废' ? 'red' as const : 'gray' as const },
+              { date: detail.update, text: `当前状态：${st(detail)}`, tone: st(detail) === '作废' ? 'red' as const : 'gray' as const },
             ]} />
           </>
         )}
@@ -286,15 +344,32 @@ export default function QuotePage({ go, role, nav }: { go: (p: string) => void; 
           if (!fName) e.name = '报价名称必填';
           setErrs(e);
           if (Object.keys(e).length) return;
-          toast('报价单已创建（草稿）· 进入报价工作台组价');
-          setNewOpen(false); go('quote-edit');
+          /* 落库：修复前仅 toast 后跳转，报价单从未写进共享 store ——
+             返回台账看不到新单，工作台也拿不到 id（编辑态为空），整条主线凭空断掉。 */
+          const no = nextQuoteNo();
+          const custId = custOptions.find((c) => c.name === fCustomer)?.id ?? '';
+          const tax = Number(fTax);
+          addQuote({
+            id: no, ver: 'V1', customer: fCustomer, customerId: custId,
+            opp: fOpp, name: fName.trim(), total: 0,
+            taxRate: tax, taxMode: '含税',
+            status: '草稿', owner: '当前用户', date: TODAY, update: TODAY,
+            approveLevel: '—', markup: 0, region: '昆明', uplift: 0,
+            items: 0, base: '其他', costSqm: 0,
+            lines: [],
+          });
+          toast(`报价单 ${no} 已创建（草稿）· 进入报价工作台组价`);
+          setNewOpen(false);
+          setFName(''); setFCustomer(''); setFOpp(''); setErrs({});
+          setFocus('quote-edit', no);
+          go('quote-edit');
         }}>创建并进入工作台</Btn></>}
       >
         <div className="nc-form-grid">
           <Field label="客户" req err={errs.customer}>
             <select className="nc-input" value={fCustomer} onChange={(e) => setFCustomer(e.target.value)}>
               <option value="">请选择客户</option>
-              {['昆明市第一人民医院', '文山三七产业园管委会', '昆明万达广场商业管理有限公司', '楚雄州人民医院', '云南师大附中', '柳州钢铁集团'].map((c) => <option key={c} value={c}>{c}</option>)}
+              {custOptions.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
             </select>
           </Field>
           <Field label="项目类型" req>
@@ -313,14 +388,17 @@ export default function QuotePage({ go, role, nav }: { go: (p: string) => void; 
               <option value="3">含税 3%</option>
             </select>
           </Field>
-          <Field label="关联商机">
-            <select className="nc-input"><option>SJ000475 · 文山三七产业园智慧消防平台</option><option value="">暂不关联</option></select>
+          <Field label="关联商机" note="关联后报价金额回写商机加权金额，推进商机阶段">
+            <select className="nc-input" value={fOpp} onChange={(e) => setFOpp(e.target.value)}>
+              <option value="">暂不关联</option>
+              {oppOptions.map((o) => <option key={o.id} value={o.id}>{o.id} · {o.name}</option>)}
+            </select>
           </Field>
         </div>
       </Modal>
 
       {/* ============ 材料库·价格档案 ============ */}
-      <Drawer open={libOpen} onClose={() => setLibOpen(false)} width={640} title="材料库 · 价格档案" sub="报价的唯一成本价来源（成本参考价锁死，改动留痕）">
+      <Drawer open={libOpen} onClose={() => setLibOpen(false)} width={960} title="材料库 · 价格档案" sub="报价的唯一成本价来源（成本参考价锁死，改动留痕）">
         <div className="nc-sec-title">8 目录体系与默认上浮率</div>
         <table className="nc-tbl" style={{ minWidth: 560 }}>
           <thead><tr><th>目录</th><th>覆盖品类</th><th className="is-num">默认上浮率</th></tr></thead>
@@ -376,13 +454,31 @@ export default function QuotePage({ go, role, nav }: { go: (p: string) => void; 
         )}
       </Modal>
 
-      {/* ============ 作废（评审 I1：统一二次确认 + 原因必填校验） ============ */}
+      {/* ============ 作废（评审 I1：统一二次确认 + 原因必填校验；H8：列出引用方） ============ */}
       <ConfirmModal
         open={!!voidOpen} onClose={() => setVoidOpen(null)} okText="确认作废"
         title={`作废报价单 ${voidOpen?.id ?? ''}`}
         reason reasonLabel="作废原因"
-        impact={voidOpen && <>将作废报价单 <b>{voidOpen.id} {voidOpen.name}</b>（金额 {fmt(voidOpen.total)}）。<br />作废后<b>不可恢复</b>，已转化 = 终态不可编辑亦不可作废。若该报价已关联投标保证金或成本核算，需同步作废关联记录。</>}
-        onOk={(r) => { toast(`报价单 ${voidOpen?.id} 已作废，原因：${r}`); setVoidOpen(null); }}
+        impact={voidOpen && (() => {
+          /* H8 上游作废阻断：列出引用该报价单的下游单据（投标按 BIDS.quoteId 外键），
+             避免「报价已作废、投标仍挂着它」的失效引用无人处理。 */
+          const refBids = getBids().filter((b) => b.quoteId === voidOpen.id);
+          return (
+            <>
+              将作废报价单 <b>{voidOpen.id} {voidOpen.name}</b>（金额 {fmt(voidOpen.total)}）。<br />
+              作废后<b>不可恢复</b>，已转化 = 终态不可编辑亦不可作废。
+              {refBids.length > 0
+                ? <>当前有 <b>{refBids.length}</b> 张投标单引用本报价（{refBids.map((b) => b.id).join('、')}），作废后其「关联报价」将变为失效引用，请同步处理。</>
+                : <>未发现引用本报价单的投标 / 合同，可直接作废。</>}
+            </>
+          );
+        })()}
+        onOk={(r) => {
+          patchQuote(voidOpen!.id, { status: '作废', update: TODAY });
+          setBizStatus(voidOpen!.id, '作废');
+          toast(`报价单 ${voidOpen?.id} 已作废，原因：${r}`);
+          setVoidOpen(null);
+        }}
       />
 
       {/* ============ 版本管理 ============ */}

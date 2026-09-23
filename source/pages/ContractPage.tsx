@@ -11,7 +11,7 @@ import {
 import type { OpMoreItem } from '../components/ui';
 import { Ico } from '../components/icons';
 import { CONTRACTS, CONTRACT_STATUS_TONE, CUSTOMERS, PROJECTS, fmtWan, normContractStatus, signStatusOf, SIGN_STATUS_TONE, TODAY } from '../components/data';
-import { getContracts, consumeFocus, patchContract, setBizStatus, subscribeStore, getBizStatus, setFocus, setFocusTab, recomputeProjectExecAmt } from '../components/store';
+import { getContracts, consumeFocus, patchContract, setBizStatus, setPendingRenew, subscribeStore, getBizStatus, setFocus, setFocusTab, recomputeProjectExecAmt } from '../components/store';
 
 /** 状态色调：与详情抽屉 / 驾驶舱共用 data.ts 的唯一事实源 */
 const ST_TONE = CONTRACT_STATUS_TONE;
@@ -242,7 +242,7 @@ export default function ContractPage({ go, role, nav }: { go: (p: string) => voi
           { label: '合同文件', onClick: () => openDetail(c, 'doc') },
           { label: '借阅记录', onClick: () => openDetail(c, 'borrow') },
           { label: '操作日志', onClick: () => openDetail(c, 'log') },
-          { label: '续签', disabled: done, title: done ? '终态合同不可续签' : '生成续签合同草稿', onClick: () => { toast(`已按《${c.name}》发起续签：来源选「复制历史」`); go('contract-new'); } },
+          { label: '续签', disabled: done, title: done ? '终态合同不可续签' : '生成续签合同草稿', onClick: () => { setPendingRenew({ contractId: c.id }); go('contract-new'); } },
           { label: '终止 / 中止 / 解除 / 作废', danger: true, disabled: done, title: done ? '终态合同无可执行的终止类操作' : '终止类动作落态均为「已终止」，方式记入 terminateType', onClick: () => { openDetail(c); toast('请在抽屉右上角【更多操作 ⋯】办理终止（含中止 / 解除）/ 作废'); } },
         ];
 

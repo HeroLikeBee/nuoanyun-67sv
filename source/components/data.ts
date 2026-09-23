@@ -204,26 +204,73 @@ export const OPPS = [
 /* ============================ 报价（BJ + 6 位流水，5 状态机） ============================ */
 // 状态机：草稿 → 待审批 → 已审批 → 已转化；旁支：作废（终态，可复制新版本）
 export const QUOTE_STATUS = ['草稿', '待审批', '已审批', '已转化', '作废'] as const;
-export const QUOTES = [
+
+/**
+ * 报价明细行。
+ * 计价口径与报价工作台一致：报价单价（不含税）= 不含税成本价 × (1 + 上浮率%)。
+ * 保留 cost / markup 两个原始字段而非只存 price，是为了「台账 → 编辑」能无损往返：
+ * 只存 price 的话回到工作台无法还原上浮率，批量调价与浮率红线判定都会失真。
+ * matId 有值 = 引用物料主数据（Item.code）；无值 = 手输行 / 安装工程费行。
+ */
+export type QuoteLine = {
+  /** 物料编码（引用 ITEMS.code） */
+  matId?: string;
+  /** 所属报价目录（消防水 / 消防电 / 防排烟 / …，对应 QUOTE_CATS.name） */
+  cat: string;
+  name: string;
+  spec?: string;
+  unit: string;
+  qty: number;
+  /** 不含税成本单价（成本参考价） */
+  cost: number;
+  /** 上浮率（%）：报价单价 = cost × (1 + markup/100) */
+  markup: number;
+  /** 报价单价（不含税），= cost × (1 + markup/100)；写入时由 cost / markup 重算 */
+  price: number;
+  note?: string;
+};
+
+/**
+ * 报价单实体。
+ * lines 为落库的明细行（工作台提交时写入）；bidId 为「报价 → 投标」外键（发起投标时回写）。
+ * 显式类型是「按 id 局部 patch」的前提：靠字面量数组推断会得到联合类型，Partial<Quote> 会报 excess property。
+ */
+export type Quote = {
+  id: string; ver: string; customer: string; customerId: string;
+  /** 关联商机 */
+  opp: string; name: string; total: number; taxRate: number; taxMode: string;
+  status: string; owner: string; date: string; update: string;
+  approveLevel: string; markup: number; region: string; uplift: number;
+  /** 明细行数（展示用；真实明细见 lines） */
+  items: number; base: string; costSqm: number;
+  /** 报价明细行（落库） */
+  lines?: QuoteLine[];
+  /** 关联投标单ID（报价 → 投标外键） */
+  bidId?: string;
+  /** 关联项目ID（报价 → 项目外键，立项 / 转合同时回写） */
+  projectId?: string;
+};
+
+export const QUOTES: Quote[] = [
   { id: 'BJ000011', ver: 'V2', customer: '昆明市第一人民医院', customerId: 'KH20260418003', opp: 'SJ000470', name: '昆明市第一人民医院住院楼消防升级报价', total: 4800000, taxRate: 9, taxMode: '含税', status: '待审批', owner: '王志海', date: '2026-09-12', update: '2026-09-20', approveLevel: '总经理', markup: 22, region: '昆明', uplift: 0, items: 7, base: '医院', costSqm: 386, bidId: 'TB000045',
     lines: [
-      { matId: 'CL000123', name: '镀锌钢管', spec: 'DN100', unit: '米', qty: 8000, price: 85 },
-      { matId: 'CL000145', name: '喷淋头（上喷）', spec: '68℃ / DN15', unit: '个', qty: 2000, price: 28 },
-      { matId: 'EQ000002', name: '感烟探测器', spec: 'JTY-GM-GST101', unit: '只', qty: 1500, price: 68 },
-      { matId: 'EQ000001', name: '火灾报警控制器', spec: 'JB-QB-GST5000', unit: '台', qty: 3, price: 6800 },
-      { matId: 'CL000158', name: '消火栓箱', spec: 'SG24A65', unit: '台', qty: 100, price: 460 },
-      { matId: 'CL000201', name: '应急照明灯具', spec: 'ZF-JCZ', unit: '套', qty: 600, price: 95 },
-      { name: '安装工程费（人工+机械+辅材）', unit: '项', qty: 1, price: 3848900 },
+      { matId: 'CL000123', cat: '消防水', name: '镀锌钢管', spec: 'DN100', unit: '米', qty: 8000, cost: 70, markup: 22, price: 85.4 },
+      { matId: 'CL000145', cat: '消防水', name: '喷淋头（上喷）', spec: '68℃ / DN15', unit: '个', qty: 2000, cost: 23, markup: 22, price: 28.06 },
+      { matId: 'EQ000002', cat: '消防电', name: '感烟探测器', spec: 'JTY-GM-GST101', unit: '只', qty: 1500, cost: 56, markup: 22, price: 68.32 },
+      { matId: 'EQ000001', cat: '消防电', name: '火灾报警控制器', spec: 'JB-QB-GST5000', unit: '台', qty: 3, cost: 5574, markup: 22, price: 6800.28 },
+      { matId: 'CL000158', cat: '消防水', name: '消火栓箱', spec: 'SG24A65', unit: '台', qty: 100, cost: 377, markup: 22, price: 459.94 },
+      { matId: 'CL000201', cat: '应急照明', name: '应急照明灯具', spec: 'ZF-JCZ', unit: '套', qty: 600, cost: 78, markup: 22, price: 95.16 },
+      { cat: '服务费', name: '安装工程费（人工+机械+辅材）', unit: '项', qty: 1, cost: 3143204, markup: 22, price: 3834708.88 },
     ] },
   { id: 'BJ000017', ver: 'V1', customer: '文山三七产业园管委会', customerId: 'KH20260506005', opp: 'SJ000475', name: '文山三七产业园智慧消防平台报价', total: 0, taxRate: 9, taxMode: '含税', status: '草稿', owner: '刘宇', date: '2026-09-19', update: '2026-09-19', approveLevel: '—', markup: 0, region: '文山', uplift: 0, items: 8, base: '园区', costSqm: 0 },
-  { id: 'BJ000007', ver: 'V3', customer: '昆明万达广场商业管理有限公司', customerId: 'KH20260312001', opp: 'SJ000456', name: '昆明万达广场消防设施改造报价', total: 3200000, taxRate: 9, taxMode: '含税', status: '已转化', owner: '蓝峰', date: '2026-09-08', update: '2026-09-16', approveLevel: '分管副总', markup: 20, region: '昆明', uplift: 0, items: 6, base: '商业综合体', costSqm: 412, bidId: 'TB000038',
+  { id: 'BJ000007', ver: 'V3', customer: '昆明万达广场商业管理有限公司', customerId: 'KH20260312001', opp: 'SJ000456', name: '昆明万达广场消防设施改造报价', total: 3200000, taxRate: 9, taxMode: '含税', status: '已转化', owner: '蓝峰', date: '2026-09-08', update: '2026-09-16', approveLevel: '分管副总', markup: 20, region: '昆明', uplift: 0, items: 6, base: '商业综合体', costSqm: 412, bidId: 'TB000038', projectId: 'XM000123',
     lines: [
-      { matId: 'CL000123', name: '镀锌钢管', spec: 'DN100', unit: '米', qty: 5000, price: 85 },
-      { matId: 'CL000145', name: '喷淋头（上喷）', spec: '68℃ / DN15', unit: '个', qty: 1200, price: 28 },
-      { matId: 'EQ000002', name: '感烟探测器', spec: 'JTY-GM-GST101', unit: '只', qty: 800, price: 68 },
-      { matId: 'EQ000001', name: '火灾报警控制器', spec: 'JB-QB-GST5000', unit: '台', qty: 2, price: 6800 },
-      { matId: 'CL000158', name: '消火栓箱', spec: 'SG24A65', unit: '台', qty: 60, price: 460 },
-      { name: '安装工程费（人工+机械+辅材）', unit: '项', qty: 1, price: 2753200 },
+      { matId: 'CL000123', cat: '消防水', name: '镀锌钢管', spec: 'DN100', unit: '米', qty: 5000, cost: 71, markup: 20, price: 85.2 },
+      { matId: 'CL000145', cat: '消防水', name: '喷淋头（上喷）', spec: '68℃ / DN15', unit: '个', qty: 1200, cost: 23, markup: 20, price: 27.6 },
+      { matId: 'EQ000002', cat: '消防电', name: '感烟探测器', spec: 'JTY-GM-GST101', unit: '只', qty: 800, cost: 57, markup: 20, price: 68.4 },
+      { matId: 'EQ000001', cat: '消防电', name: '火灾报警控制器', spec: 'JB-QB-GST5000', unit: '台', qty: 2, cost: 5667, markup: 20, price: 6800.4 },
+      { matId: 'CL000158', cat: '消防水', name: '消火栓箱', spec: 'SG24A65', unit: '台', qty: 60, cost: 383, markup: 20, price: 459.6 },
+      { cat: '服务费', name: '安装工程费（人工+机械+辅材）', unit: '项', qty: 1, cost: 2204153, markup: 20, price: 2644983.6 },
     ] },
   { id: 'BJ000004', ver: 'V1', customer: '楚雄州人民医院', customerId: 'KH20250902004', opp: 'SJ000495', name: '楚雄州人民医院消防维护保养报价（2027 年度）', total: 960000, taxRate: 6, taxMode: '含税', status: '已审批', owner: '赵薇', date: '2026-09-05', update: '2026-09-14', approveLevel: '部门负责人', markup: 25, region: '楚雄', uplift: 0, items: 12, base: '医疗', costSqm: 0 },
   { id: 'BJ000002', ver: 'V1', customer: '云南师大附中', customerId: 'KH20260312002', opp: 'SJ000461', name: '云南师大附中消防系统升级报价', total: 2100000, taxRate: 9, taxMode: '含税', status: '待审批', owner: '李思敏', date: '2026-08-25', update: '2026-09-18', approveLevel: '分管副总', markup: 22, region: '昆明', uplift: 0, items: 29, base: '教育', costSqm: 358 },
@@ -500,6 +547,8 @@ export type Contract = {
   signStatus?: string;
   /** 中标通知/投标单ID（投标→合同外键） */
   bidId?: string;
+  /** 来源报价单ID（报价→合同外键） */
+  quoteId?: string;
 };
 export const CONTRACTS: Contract[] = [
   /* XM000123 主合同：合同额冻结为签约价 180 万（立项锚点）；执行额 195 万 = 180 + 已生效价格调整补充 +15 万。
@@ -691,6 +740,10 @@ export type Project = {
   start: string; end: string; profit: number;
   /** 立项来源合同（合同立项路径写入；历史数据缺省） */
   contractId?: string;
+  /** 中标来源投标单ID（项目 → 投标反查外键） */
+  bidId?: string;
+  /** 来源报价单ID（项目 → 报价反查外键） */
+  quoteId?: string;
   /** 目标成本（立项预算）：从报价单成本明细带入或手工编制 */
   budget?: number;
   /** 无合同施工标记（应急工程） */

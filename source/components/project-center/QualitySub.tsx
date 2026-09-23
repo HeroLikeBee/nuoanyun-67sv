@@ -28,6 +28,24 @@ const SAFE_ROWS = [
 ];
 /** 验收状态机：未申报 → 已申报 → 整改中（可多轮）→ 已通过 → 已备案 */
 const ACCEPT_FLOW = ['未申报', '已申报', '整改中', '已通过', '已备案'];
+/** 整改轮次：已申报后由第三方检测 / 备案机关提出，逐条闭环方可复验；历史轮次全留痕 */
+const RECTIFY_ROUNDS = [
+  {
+    round: '第 1 轮', check: '2026-10-12',复查: '—', owner: '张工', state: '整改中', tone: 'orange' as const,
+    items: [
+      { n: '三层末端试水装置压力表量程不匹配（0.6MPa，应为 1.0MPa）', pos: '三层 · 喷淋系统', done: true },
+      { n: '消控室报警主机备用电源未按规范做放电试验记录', pos: '一层 · 消控室', done: false },
+      { n: '地下车库防火阀手动复位机构标识缺失（共 6 处）', pos: '负一层 · 防排烟', done: false },
+    ],
+  },
+  {
+    round: '第 0 轮（自检）', check: '2026-10-08',复查: '2026-10-09', owner: '张工', state: '已闭环', tone: 'green' as const,
+    items: [
+      { n: '喷头间距局部超出规范上限（两处，已调整）', pos: '一区 · 喷淋支管', done: true },
+      { n: '报警总线端子压接不规范，存在松动风险', pos: '二区 · 报警总线', done: true },
+    ],
+  },
+];
 /** 检测报告与验收结论的占位信息（本项目尚未完工，故为空壳直到申报） */
 const CHECK_INFO = {
   org: '云南××消防检测有限公司', no: 'JC2027-0219', date: '—', res: '—',
@@ -189,24 +207,44 @@ function Acceptance({ C }: { C: PjCtx }) {
       </div>
 
       <Card style={{ marginTop: 16 }} hd={<span>整改轮次记录</span>}
-        extra={<span className="nc-cell-sub">整改项须逐条闭环后方可复验</span>}>
-        <table className="nc-tbl" style={{ minWidth: 760 }}>
-          <thead><tr>
-            <th style={{ width: 80 }}>轮次</th><th style={{ width: 120 }}>检查日期</th>
-            <th>整改项（数量 / 摘要）</th><th style={{ width: 130 }}>复验日期</th><th style={{ width: 120 }}>责任人</th>
-          </tr></thead>
-          <tbody>
-            <tr>
-              <td>第 1 轮</td>
-              <td className="num">—</td>
-              <td className="nc-cell-sub">—</td>
-              <td className="num">—</td>
-              <td>—</td>
-            </tr>
-          </tbody>
-        </table>
+        extra={<span className="nc-cell-sub">共 {RECTIFY_ROUNDS.length} 轮 · 整改项须逐条闭环后方可复验</span>}>
+        {RECTIFY_ROUNDS.map((r) => {
+          const doneN = r.items.filter((i) => i.done).length;
+          const openN = r.items.length - doneN;
+          return (
+            <div key={r.round} style={{ marginBottom: 14 }}>
+              <div className="nc-ledhd">
+                <span style={{ marginRight: 8 }}>{r.round}</span>
+                <Tag tone={r.tone}>{r.state}</Tag>
+                <span style={{ marginLeft: 'auto' }} className="nc-cell-sub">
+                  {r.items.length} 项 · 已闭环 {doneN}{openN > 0 && ` · 待整改 ${openN}`}
+                </span>
+              </div>
+              <table className="nc-tbl" style={{ minWidth: 760 }}>
+                <thead><tr>
+                  <th>整改项</th><th style={{ width: 150 }}>部位</th>
+                  <th style={{ width: 110 }}>检查日期</th><th style={{ width: 110 }}>复验日期</th>
+                  <th style={{ width: 100 }}>责任人</th><th style={{ width: 100 }}>闭环</th>
+                </tr></thead>
+                <tbody>
+                  {r.items.map((i) => (
+                    <tr key={i.n}>
+                      <td>{i.n}</td>
+                      <td className="nc-cell-sub">{i.pos}</td>
+                      <td className="num">{r.check}</td>
+                      <td className="num">{r.复查}</td>
+                      <td>{r.owner}</td>
+                      <td><Tag tone={i.done ? 'green' : 'orange'}>{i.done ? '已闭环' : '待整改'}</Tag></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          );
+        })}
         <div className="nc-cell-sub" style={{ marginTop: 8 }}>
-          当前 {C.P.acceptStatus ? `已申报（${C.P.acceptStatus}）` : '尚未申报'} —— 完工并通过自检后申报第三方检测，检测合格方可申报消防验收备案。
+          第 1 轮仍有 {RECTIFY_ROUNDS[0].items.filter((i) => !i.done).length} 项待整改 ——
+          全部闭环后方可提交复验；完工并通过自检后申报第三方检测，检测合格方可申报消防验收备案。
         </div>
       </Card>
     </PjSection>
