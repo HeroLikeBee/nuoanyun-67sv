@@ -3,7 +3,7 @@
 // 设计：模块级可变数组 + 订阅广播；各台账页用 useState(getXxx) 播种并 useEffect 订阅，
 //      保证 A 页写入后 B 页挂载 / 已挂载都能拿到最新数据（不引入第三方状态库）。
 // 说明：BIDS / QUOTES / INVOICES 等在下方「实体关系图」处二次导入，此处不重复声明。
-import { APPROVALS, BIDS, CERT_OCCUPANCY, CERT_OCCUPANCY_SEED, CONTRACTS, CUSTOMERS, INVOICES, ITEMS, OPP_STAGE_TPL, OPPS, PROJECTS, QUOTES, SIGN_CHAINS, TODAY, normContractStatus, verNo } from './data';
+import { APPROVALS, BIDS, CERT_OCCUPANCY, CERT_OCCUPANCY_SEED, CONTRACTS, CUSTOMERS, ID_MARK_FLOWS, ID_MARK_FLOWS_SEED, ID_MARK_RANGES, ID_MARK_RANGES_SEED, INVOICES, ITEMS, OPP_STAGE_TPL, OPPS, PROJECTS, PUSH_BATCHES, PUSH_BATCHES_SEED, QUOTES, SIGN_CHAINS, TODAY, normContractStatus, verNo } from './data';
 import type { Item, OppStageTpl, Quote, QuoteVersion, SignConfig } from './data';
 
 type C = (typeof CONTRACTS)[number];
@@ -208,6 +208,24 @@ export function recomputeProjectExecAmt(projectId: string): number | null {
 }
 
 /**
+ * 框架协议执行额度汇总（§9）：框架已执行额度 = Σ 其下执行单
+ *   （contractRole='supplement_service'、parentId 指向本框架、状态已签约/履约中）的执行金额。
+ * 框架额度 amt 冻结；Σ 超出框架额度 → exceeded=true 且不写入（调用方拦截，须先签补充协议提高额度）。
+ */
+export function recomputeFrameworkExecAmt(frameworkId: string): { used: number; limit: number; exceeded: boolean } | null {
+  const fw = contracts.find((c) => c.id === frameworkId && c.type === '框架协议');
+  if (!fw) return null;
+  const used = contracts
+    .filter((c) => c.parentId === frameworkId && c.contractRole === 'supplement_service' && (c.status === '已签约' || c.status === '履约中'))
+    .reduce((s, c) => s + c.execAmt, 0);
+  const limit = fw.amt;
+  if (limit > 0 && used > limit) return { used, limit, exceeded: true };
+  contracts = contracts.map((c) => (c.id === frameworkId ? { ...c, execAmt: used } : c));
+  emit();
+  return { used, limit, exceeded: false };
+}
+
+/**
  * 变更录入确认（双模式换算后调用）：把增量计入执行额，合同额保持冻结不动。
  * 多轮变更基准 = 当前 execAmt；changeNo 标记变更单为「已生效」。负增量（核减）由调用方校验核减原因后传入。
  */
@@ -264,10 +282,15 @@ export function signOneParty(id: string, partyName: string, by = '蓝峰'): { ok
   const done = parties.every((p) => p.st === '已签');
   // 电子签全部完成：signStatus 转「已签」；业务 status 同步转「已签约」（原审批中/待签状态）
   patchContract(id, { signStatus: done ? '已签' : '签署中', ...(done ? { status: '已签约' } : {}) });
-  // 价格调整类补充协议全部签署完成 → 联动重算关联项目执行额（合同额冻结不动）
+  // 补充协议全部签署完成 → 联动重算（合同额冻结不动）：
+  //   价格调整补充 → 重算关联项目执行额；框架执行单 → 重算框架协议已执行额度
   if (done) {
     const c = contracts.find((x) => x.id === id);
     if (c && c.contractRole === 'supplement_price' && c.parentId && c.project) recomputeProjectExecAmt(c.project);
+    if (c && c.contractRole === 'supplement_service' && c.parentId) {
+      const parent = contracts.find((x) => x.id === c.parentId);
+      if (parent && parent.type === '框架协议') recomputeFrameworkExecAmt(parent.id);
+    }
   }
   return { ok: true, msg: done ? `${partyName} 已签署 · 电子签全部完成，合同可转「已签约」` : `${partyName} 已签署` };
 }
@@ -759,6 +782,11 @@ export function resetStore() {
   items = ITEMS.map((i) => ({ ...i }));
   /* 证书占用改归属是就地改写，按种子快照还原（保持数组引用不变，读取方零改写） */
   CERT_OCCUPANCY.splice(0, CERT_OCCUPANCY.length, ...CERT_OCCUPANCY_SEED.map((o) => ({ ...o })));
+  /* 消防产品身份标识：号段采录账 + 流向账，同为就地数组，按种子快照还原 */
+  ID_MARK_RANGES.splice(0, ID_MARK_RANGES.length, ...ID_MARK_RANGES_SEED.map((r) => ({ ...r })));
+  ID_MARK_FLOWS.splice(0, ID_MARK_FLOWS.length, ...ID_MARK_FLOWS_SEED.map((f) => ({ ...f })));
+  /* 厂家号段推送：确认 / 驳回是就地改写，且确认会连带写号段账，一并回到待确认的初始态 */
+  PUSH_BATCHES.splice(0, PUSH_BATCHES.length, ...PUSH_BATCHES_SEED.map((b) => ({ ...b })));
   oppLogs = {};
   oppClose = {};
   bizStatus = {};

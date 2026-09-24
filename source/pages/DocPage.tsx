@@ -3,13 +3,14 @@
 // 筛选维度：业务维（行业 · 项目类型 · 项目金额 · 具体项目）× 文档维（阶段 · 状态 · 类型 · 上传人 · 时间 · 必备）
 //   业务维来自「项目 → 客户行业 / 项目类型 / 合同额」，可组合出「化工行业 + 100 万以上 + 检测项目」这类跨项目口径
 //   已选条件统一回显为可删除标签，避免多层筛选后用户不知道当前筛了什么
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import {
   Banner, Btn, Card, Code, DataTable, Drawer, Field, KvGrid, Modal, Money, Op, OpSep,
   PageHead, TableFoot, Tabs, Tag, Timeline, Tip, useToast, Check, Progress, EntityLink, WatermarkModal, type TagTone, ConfirmModal, pressProps,
 } from '../components/ui';
 import {
   DOCS, DOC_CATS, DOC_STATUS, DOC_STAGES, DOC_VERSIONS, DOC_LOGS, PROJECTS, CUSTOMERS, TODAY,
+  idMarkFlowsOfProj, idMarkVersion, subscribeIdMark,
 } from '../components/data';
 import { setFocus } from '../components/store';
 import { Ico, StatusIco, type IconName } from '../components/icons';
@@ -41,8 +42,12 @@ const SUB_TONE: Record<string, TagTone> = {
 /** 状态 → 徽标色（语义色板，与分类色板互斥） */
 const STATUS_TONE: Record<string, TagTone> = { 已归档: 'green', 待审核: 'orange', 已作废: 'red' };
 
-/** 消防验收资料清单（硬拦截校验依据） */
-const ACCEPT_CHECKLIST = ['检测报告', '合格证', '图纸', '隐蔽验收记录'];
+/**
+ * 消防验收资料清单（硬拦截校验依据）。
+ * 末项「产品身份标识」= B 签清单：强制性认证目录内产品竣工验收必备，
+ * 由物料域领用回写的号段自动生成（项目详情 · 质量验收子页可导出），缺它竣工资料完整度不成立。
+ */
+const ACCEPT_CHECKLIST = ['检测报告', '合格证', '图纸', '隐蔽验收记录', '产品身份标识'];
 
 /** 热搜词（点击即搜） */
 const HOT_KW = ['万达', '竣工图', '检测报告', '强制性认证', '验收查验记录', '维护保养'];
@@ -95,6 +100,8 @@ const sizeKb = (s: string) => {
 
 export default function DocPage({ go, role, nav }: { go: (p: string) => void; role: string; nav?: number }) {
   const toast = useToast();
+  /* 身份标识流向账同源订阅：物料域领用回写后，本页完整度与清单即时刷新 */
+  useSyncExternalStore(subscribeIdMark, idMarkVersion, idMarkVersion);
 
   /* ---------- 分类导航 ---------- */
   const [dirMode, setDirMode] = useState<'cat' | 'proj' | 'contract' | 'stage'>('cat');
@@ -274,7 +281,10 @@ export default function DocPage({ go, role, nav }: { go: (p: string) => void; ro
   };
 
   const doUpload = () => {
-    const miss = ACCEPT_CHECKLIST.filter((c) => !DOCS.some((d) => d.type === c && d.proj === upProj));
+    /* 「产品身份标识」由物料域号段回写产生，不参与上传类资料校验（传 PDF 也补不了） */
+    const miss = ACCEPT_CHECKLIST
+      .filter((c) => c !== '产品身份标识')
+      .filter((c) => !DOCS.some((d) => d.type === c && d.proj === upProj));
     const newMiss = upType === '检测报告' ? miss.filter((m) => !DOCS.some((d) => d.type === m)) : [];
     setMissList(newMiss);
     if (newMiss.length) { toast(`资料清单校验未通过：缺少「${newMiss.join('、')}」，请补齐后上传`); return; }
@@ -327,12 +337,18 @@ export default function DocPage({ go, role, nav }: { go: (p: string) => void; ro
       : DOC_STAGES.map((s) => ({ key: s, label: s + '阶段', sub: '', n: DOCS.filter((d) => d.stage === s).length }));
 
   /* ---------- 项目资料完整度 ---------- */
+  /**
+   * 「产品身份标识（B 签）」不算文档：它由物料域领用回写的号段自动产生，
+   * 不能靠上传 PDF 补齐，因此单独判定后并入同一份完整度 —— 与下方清单格数一致（5 项）。
+   */
+  const idMarkDone = (pid: string) => idMarkFlowsOfProj(pid).filter((f) => f.status !== '已领未装');
   const completeness = (pid: string) => {
-    const all = DOCS.filter((d) => d.proj === pid);
-    const need = all.filter((d) => d.need);
+    const need = DOCS.filter((d) => d.proj === pid && d.need);
     const done = need.filter((d) => d.status === '已归档');
-    const pct = need.length ? Math.round((done.length / need.length) * 100) : 0;
-    return { pct, done: done.length, total: need.length };
+    const total = need.length + 1;
+    const ok = done.length + (idMarkDone(pid).length ? 1 : 0);
+    const pct = total ? Math.round((ok / total) * 100) : 0;
+    return { pct, done: ok, total };
   };
 
   /* ---------- 列表列 ---------- */
@@ -646,15 +662,23 @@ export default function DocPage({ go, role, nav }: { go: (p: string) => void; ro
                 <div className="nc-completeness">
                   <Progress value={pct} tone={pct >= 90 ? 'green' : pct >= 60 ? 'orange' : 'red'} />
                   <b className="num">{pct}%</b>
-                  <span className="nc-cell-sub">必备 {done}/{total} 已归档</span>
+                  <span className="nc-cell-sub">必备 {done}/{total} 已具备</span>
                 </div>
                 <div className="nc-check-grid">
                   {ACCEPT_CHECKLIST.map((c) => {
-                    const ok = DOCS.some((d) => d.proj === activeDir && d.type === c);
+                    const isMark = c === '产品身份标识';
+                    const marks = idMarkDone(activeDir);
+                    const ok = isMark ? marks.length > 0 : DOCS.some((d) => d.proj === activeDir && d.type === c);
                     return (
                       <div key={c} className={`nc-check-cell${ok ? ' is-ok' : ' is-miss'}`}>
                         <StatusIco kind={ok ? 'ok' : 'ban'} /> {c}
-                        <span className="nc-cell-sub">{ok ? `已归集 ${DOCS.filter((d) => d.proj === activeDir && d.type === c).length} 份` : '缺失'}</span>
+                        <span className="nc-cell-sub">
+                          {ok
+                            ? (isMark
+                              ? `物料域已回写 ${marks.length} 段（${marks.reduce((s, f) => s + f.qty, 0)} 件）`
+                              : `已归集 ${DOCS.filter((d) => d.proj === activeDir && d.type === c).length} 份`)
+                            : (isMark ? '缺失 · 须在物料域领用回写' : '缺失')}
+                        </span>
                       </div>
                     );
                   })}

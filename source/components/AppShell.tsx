@@ -42,7 +42,9 @@ export default function AppShell({ page, onNavigate, role, onRoleChange, pending
   const [menuKw, setMenuKw] = useState('');
   const [tabs, setTabs] = useState<string[]>(['dashboard', 'customer']);
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; id: string } | null>(null);
-  const cur = ROLES.find((r) => r.id === role) || ROLES[6];
+  /* 兜底不再用下标 ROLES[6] —— 角色数组一扩（7 → 10）下标就会静默指向别的角色。
+     改为按 id 显式取，并最终回落到数组首项。 */
+  const cur = ROLES.find((r) => r.id === role) || ROLES.find((r) => r.id === 'sysadmin') || ROLES[0];
   const activeMenu = PAGE_PARENT[page] || page;
 
   // 页面变化时累加页签（首页固定 + 最多 8 个）
@@ -321,18 +323,22 @@ export default function AppShell({ page, onNavigate, role, onRoleChange, pending
                     <span className="nc-group-label">{g.group}</span>
                     <span className="nc-caret">▾</span>
                   </button>
-                  {!folded && g.items.map((it) => (
-                    <button
-                      key={it.id}
-                      className={`nc-menu-item${activeMenu === it.id ? ' is-active' : ''}`}
-                      title={it.label}
-                      onClick={() => { onNavigate(it.id); setMOpen(false); }}
-                    >
-                      <span className="nc-menu-ico"><Ico n={it.icon as IconName} size={16} /></span>
-                      <span className="nc-menu-label">{it.label}</span>
-                      {sideBadge(badgeOf(it.badgeKey))}
-                    </button>
-                  ))}
+                  {!folded && g.items.map((it) => {
+                    /* 全站统一二级：一级项本身就是终点页，不再有 children 折叠层 */
+                    return (
+                      <React.Fragment key={it.id}>
+                        <button
+                          className={`nc-menu-item${activeMenu === it.id ? ' is-active' : ''}`}
+                          title={it.label}
+                          onClick={() => { onNavigate(it.id); setMOpen(false); }}
+                        >
+                          <span className="nc-menu-ico"><Ico n={it.icon as IconName} size={16} /></span>
+                          <span className="nc-menu-label">{it.label}</span>
+                          {sideBadge(badgeOf(it.badgeKey))}
+                        </button>
+                      </React.Fragment>
+                    );
+                  })}
                 </div>
               );
             })}

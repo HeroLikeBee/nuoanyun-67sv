@@ -182,7 +182,9 @@ export default function DashboardPage({ go, role, nav }: { go: (p: string) => vo
     .filter((a) => a.type === '付款申请' && (a.status === '待审批' || a.status === '审批中'))
     .reduce((s, a) => s + a.amt, 0);
   /** 回款执行率 = Σ实收 ÷ Σ执行金额（收款类合同，同期可比） */
-  const recvBase = saleContracts.reduce((s, c) => s + c.execAmt, 0);
+  /* 分母排除价格调整补充（增量已并入主合同 execAmt，避免重复）；框架执行单为真实执行额照常计入，
+     框架额度本身不在 saleContracts 内；已续签旧合同 type=综合合同本就不在内。 */
+  const recvBase = saleContracts.filter((c) => c.contractRole !== 'supplement_price').reduce((s, c) => s + c.execAmt, 0);
   const recvRate = recvBase ? inflow / recvBase : 0;
 
   /* ---------------- 项目经营派生指标 ---------------- */
@@ -781,7 +783,7 @@ export default function DashboardPage({ go, role, nav }: { go: (p: string) => vo
             {blockAlert([
               { tone: 'orange', title: `${noContract.length} 个项目无销售合同在途 > 30 天`, sub: noContract.map((p) => `${p.id} · ${p.name}`).join(' / ') || '无', act: '补签合同', page: 'contract-new' },
               { tone: 'orange', title: '上月 2 个项目未登记成本', sub: '登记纪律兜底 · 附录 D', act: '去登记成本', page: 'project-center', tab: 'cost' },
-              { tone: 'orange', title: `${lowStock.length} 种材料低于安全库存线`, sub: lowStock.map((m) => `${m.name}（${m.stock}/${m.safe}）`).slice(0, 3).join(' · ') || '—', act: lowStock.length ? '查看最缺材料' : '一键询价', page: 'material', focusId: lowStock[0]?.code },
+              { tone: 'orange', title: `${lowStock.length} 种材料低于安全库存线`, sub: lowStock.map((m) => `${m.name}（${m.stock}/${m.safe}）`).slice(0, 3).join(' · ') || '—', act: lowStock.length ? '查看最缺材料' : '一键询价', page: 'material-list', focusId: lowStock[0]?.code },
             ])}
             {blockApproval(approvalTabs, approvalTabs.length)}
           </div>

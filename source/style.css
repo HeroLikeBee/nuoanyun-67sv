@@ -269,6 +269,24 @@ h1, h2, h3, h4 { margin: 0; font-weight: 600; }
   font-size: 11px; line-height: 18px; text-align: center;
 }
 
+/* 侧栏二级菜单（一级项可展开）：一级项跳首个二级页，展开后逐项直达 */
+.nc-menu-item.has-kids .nc-menu-caret {
+  flex: none; font-size: 11px; color: var(--ink-3);
+  transition: transform .15s;
+}
+.nc-menu-item.has-kids .nc-menu-caret.is-open { transform: rotate(180deg); }
+.nc-subnav { display: block; margin: 0 8px 2px 26px; }
+.nc-subitem {
+  display: block; width: 100%; padding: 6px 10px;
+  border-radius: var(--r-sm); font-size: 13px; color: var(--ink-2);
+  text-align: left; transition: background .15s, color .15s;
+}
+.nc-subitem:hover { background: var(--c-surface-hover); color: var(--ink); }
+.nc-subitem.is-on { background: var(--c-primary-weak); color: var(--c-primary); font-weight: 600; }
+.nc-subitem .nc-subitem-label { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 迷你侧栏不展示二级项（无文字标签时展开无意义） */
+.nc-side.is-mini .nc-subnav { display: none; }
+
 .nc-side.is-mini { width: var(--side-w-mini); overflow: visible; }
 .nc-side.is-mini .nc-side-search,
 .nc-side.is-mini .nc-group-title .nc-group-label,
@@ -777,7 +795,7 @@ h1, h2, h3, h4 { margin: 0; font-weight: 600; }
 
 /* 步骤条 */
 .nc-steps { display: flex; margin: 4px 0 14px; overflow-x: auto; padding: 4px 2px 0; }
-.nc-step { flex: 1; min-width: 86px; display: flex; flex-direction: column; align-items: center; position: relative; }
+.nc-step { flex: 1; min-width: 86px; display: flex; flex-direction: column; align-items: center; position: relative; border: 0; background: none; cursor: pointer; }
 .nc-step::before {
   content: ""; position: absolute; top: 13px; left: calc(-50% + 16px); right: calc(50% + 16px);
   height: 2px; background: var(--c-hairline);
@@ -1150,9 +1168,6 @@ h1, h2, h3, h4 { margin: 0; font-weight: 600; }
 
 /* 键值对三列 */
 
-/* 步骤条按钮态 */
-.nc-step { border: 0; background: none; cursor: pointer; }
-
 /* ---------- 侧栏菜单搜索标签 ---------- */
 .nc-side-search-lbl { font-size: 12px; color: var(--ink-3); flex: none; }
 .nc-side-nav { padding-bottom: 8px; }
@@ -1303,6 +1318,11 @@ h1, h2, h3, h4 { margin: 0; font-weight: 600; }
 .nc-cell-main > .nc-tag { vertical-align: middle; }
 .nc-cell-main > .nc-cell-sub { display: block; margin-top: 2px; }
 .nc-cell-sub { font-size: 12px; line-height: 16px; color: var(--ink-3); }   /* 66 · 备注 12（行高锁定 16，表格行高不变） */
+/* 维保 / 检测行的计价入口：口径下拉 + 计量基数 + 算式，挂在名称列下方一行内 */
+.nc-rate-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.nc-rate-row .nc-cell-in { width: 108px; flex: 0 0 auto; }
+.nc-rate-row select.nc-cell-in { width: 96px; }
+.nc-rate-row > .nc-tiny { max-width: 100%; word-break: break-all; }
 .nc-ops { display: inline-flex; align-items: center; gap: 2px; flex-wrap: wrap; justify-content: flex-end; }
 .nc-ops .nc-op-sep { color: var(--c-border); }
 
@@ -2592,6 +2612,10 @@ font-size: 12px; border: 1px solid transparent; white-space: nowrap;
 .nc-ledgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: stretch; }
 .nc-ledhd { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--ink); margin-bottom: 8px; }
 .nc-ledhd > *:last-child { margin-left: auto; }
+/* 末位靠右是为「标题 …… Tip / 操作按钮」设计的。若末位是计数徽标（标题 <b>N</b>，后面没有 Tip），
+   在左右分栏里会被推到栏位右缘，紧贴邻栏标题 —— 左栏的「1」与右栏的「付款类 · 采购 / 分包合同」
+   挨在一起，读起来像右栏的一部分。计数属于标题，留在标题旁即可。 */
+.nc-2col .nc-ledhd > b:last-child { margin-left: 0; }
 .nc-typebars { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
 .nc-typebar { display: grid; grid-template-columns: 62px minmax(0, 1fr) 68px; align-items: center; gap: 8px; font-size: 11.5px; color: var(--ink-2); }
 .nc-typebar > span:last-child { text-align: right; font-size: 11.5px; color: var(--ink); }
@@ -3305,7 +3329,7 @@ tr.is-warn-row td, tr.is-danger-row td, tr.trig-hit td,
 .nc-att-empty { padding: 16px; text-align: center; font-size: 13px; color: var(--ink-3); }
 
 /* ---- ⑥ 审批链：节点等宽，连线等长，杜绝「前紧后松」 ---- */
-.nc-chain2 { flex-wrap: nowrap; align-items: center; margin: 12px 0 6px; }
+.nc-chain2 { display: flex; align-items: center; flex-wrap: nowrap; margin: 12px 0 6px; }
 .nc-chain2 .nc-cnode { flex: 1 1 0; min-width: 0; }
 .nc-chain2 .nc-cline { flex: 0 0 24px; margin: 0 2px; }
 .nc-chain2 .nc-clbl { margin-left: 6px; padding-right: 0; white-space: nowrap; }
@@ -3645,13 +3669,9 @@ button.nc-ovcell:hover .nc-drill, button.nc-ovcell:focus-visible .nc-drill { opa
 .nc-detail-page .nc-crumbs .nc-link { cursor: pointer; }
 .nc-detail-page .nc-crumbs-sep { opacity: .5; }
 
-/* ---- 弹窗内表格自适应：去掉 min-width:720px，避免横向滚动条 ---- */
-.nc-modal-bd .nc-tbl { min-width: 0; }
-.nc-modal-bd { overflow-x: hidden; }
-
-/* ---- 抽屉内表格自适应：避免横向滚动条 ---- */
-.nc-drawer-bd .nc-tbl { min-width: 0; }
-.nc-drawer-bd { overflow-x: hidden; }
+/* ---- 弹窗 / 抽屉内表格自适应：去掉 min-width，避免横向滚动条 ---- */
+.nc-modal-bd .nc-tbl, .nc-drawer-bd .nc-tbl { min-width: 0; }
+.nc-modal-bd, .nc-drawer-bd { overflow-x: hidden; }
 
 /* ==========================================================================
    项目详情 · 分层重构（概览页 + 5 个子页）

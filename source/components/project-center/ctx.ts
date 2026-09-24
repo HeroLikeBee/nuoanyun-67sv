@@ -8,8 +8,18 @@
 // 子页返回结构：多个 <section className="nc-pjsection">，由外壳统一放进内容区。
 import React from 'react';
 import type { PROJECTS } from '../data';
+import type {
+  PjArrivalRow, PjChangeRow, PjCheckInfo, PjHiddenRow, PjOpRow, PjPartyGroup,
+  PjRectifyRound, PjSafeRow, PjScene, PjSiteLog, PjVisaRow,
+} from './seed';
 
 export type Project = typeof PROJECTS[number];
+
+/* 子页数据行类型统一由 seed.ts 定义并在此转出，避免子页各自声明同名类型 */
+export type {
+  PjArrivalRow, PjChangeRow, PjCheckInfo, PjHiddenRow, PjOpRow, PjPartyGroup,
+  PjRectifyRound, PjSafeRow, PjScene, PjSiteLog, PjVisaRow,
+};
 
 /** 子页统一 props：go 用于跨页穿透，pj 用于回到项目自身子页 */
 export type PjSubProps = { C: PjCtx };
@@ -35,6 +45,11 @@ export type PjCtx = {
   /** 项目全景（跨模块全链路，长内容 → 抽屉） */
   openPanorama: () => void;
 
+  /** 按业务类型动态裁剪：false 的模块在子页隐藏（避免维保 / 检测项目出现机械 / 材料 / 分包空表） */
+  feature: { machine: boolean; material: boolean; subcontract: boolean };
+  /** 场景文案：施工 / 维保 / 检测 / 平台 / 抢修各自的标题与空态，子页不再写死施工口径 */
+  scene: PjScene;
+
   /* ---------- 经营口径（唯一事实源 · 与概览页同源，不重复取数） ---------- */
   /** 合同额 = 主合同签约价（立项锚点，冻结） */
   CONTRACT_NOW: number;
@@ -50,8 +65,6 @@ export type PjCtx = {
   PAY_PROGRESS: number;
   /** 质保金 = 合同额 × 3% */
   WARRANTY: number;
-  /** 目标成本（立项预算） */
-  TARGET_COST: number;
   /** 目标成本为「未录入 · 按执行额估算」而非立项实录 */
   BUDGET_EST: boolean;
   /** 目标成本来源：手工编制 / 从关联报价成本明细带入（未录入时为空） */
@@ -81,15 +94,10 @@ export type PjCtx = {
   CHG_PENDING: number;
   /** 我方缴纳未退保证金 */
   depIn: { id: string; type: string; amt: number; due: string }[];
-  depInAmt: number;
 
-  /* ---------- 台账数据（缩放 / 派生后） ---------- */
+  /* ---------- 台账数据（全部由 seed.ts 的 buildPjDemo 按本项目派生） ---------- */
   costRows: PjCostRow[];
-  planRows: { type: string; amt: number; note: string }[];
   groupedPlan: { g: string; rows: { type: string; amt: number; note: string }[]; sum: number }[];
-  /** 9 个成本类别的 实际 vs 计划（用于对比条） */
-  bars: { t: string; act: number; pln: number; max: number }[];
-  barMax: number;
   /** 现场投入：人工 / 机械 / 材料 */
   laborRows: PjLaborRow[];
   laborSum: number;
@@ -97,12 +105,17 @@ export type PjCtx = {
   machSum: number;
   matRows: PjMatRow[];
   matSum: number;
-  /** 收支明细 */
+  /** 收支明细（已按资金域筛选器过滤） */
   payRows: PjPayRow[];
+  /** 收支明细全集 —— 与资金域筛选器无关。
+      收入类口径（回款四段、无合同付款挂账）必须用它，否则资金域一筛选就把别处的账清空。 */
+  payRowsAll: PjPayRow[];
   payFilter: string;
   setPayFilter: (v: string) => void;
   SUM_IN: number;
   SUM_OUT: number;
+  /** 应收账龄（已开票未到账）最长天数 */
+  overdueDays: number;
   /** 保证金台账（含质保金义务行） */
   depositRows: PjDepositRow[];
   /** 团队与证书 */
@@ -116,12 +129,33 @@ export type PjCtx = {
   attach: PjAttachGroup[];
   attCnt: number;
   mileRows: PjMileRow[];
+  /** 里程碑轴（概览与全链路血缘共用） */
+  mileAxis: PjMileAxis[];
   curMile: PjMileAxis | undefined;
   curReq: string[];
   curFiles: { name: string; size: string; by: string; date: string }[];
   curMiss: string[];
-  /** 督办条目数（与右栏渲染条目一一对应，不硬编码） */
-  dunCount: number;
+  /** 工序产值清单（进度 = Σ(doneQty×unitPrice) ÷ Σ(totalQty×unitPrice)） */
+  workItems: { name: string; totalQty: number; doneQty: number; unitPrice: number; unit: string }[];
+
+  /* ---------- 商务域台账（单一事实源：商务合同与成本台账共用同一份变更） ---------- */
+  changes: PjChangeRow[];
+  visas: PjVisaRow[];
+
+  /* ---------- 质量域台账 ---------- */
+  arrivals: PjArrivalRow[];
+  hidden: PjHiddenRow[];
+  /** 安全检查（HSE）—— 归执行履约域，不属质量验收 */
+  safeRows: PjSafeRow[];
+  rectifyRounds: PjRectifyRound[];
+  checkInfo: PjCheckInfo;
+  /** 质量待办：报验缺件批数 + 整改未闭环项数（KPI 与质量域同源） */
+  qualityTodo: number;
+
+  /* ---------- 现场与协作 ---------- */
+  siteLogs: PjSiteLog[];
+  parties: PjPartyGroup[];
+  ops: PjOpRow[];
 };
 
 /* ---------- 子页共用的行类型（放在 ctx 内，避免子页各自声明同名类型） ---------- */

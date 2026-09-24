@@ -25,7 +25,19 @@
       "kind": "source"
     },
     {
+      "path": "components/entityPreview.tsx",
+      "kind": "source"
+    },
+    {
+      "path": "components/entityPreviewState.ts",
+      "kind": "source"
+    },
+    {
       "path": "components/icons.tsx",
+      "kind": "source"
+    },
+    {
+      "path": "components/IdMarkVerify.tsx",
       "kind": "source"
     },
     {
@@ -45,6 +57,10 @@
       "kind": "source"
     },
     {
+      "path": "components/project-center/FundSub.tsx",
+      "kind": "source"
+    },
+    {
       "path": "components/project-center/MembersSub.tsx",
       "kind": "source"
     },
@@ -58,6 +74,14 @@
     },
     {
       "path": "components/project-center/QualitySub.tsx",
+      "kind": "source"
+    },
+    {
+      "path": "components/project-center/seed.ts",
+      "kind": "source"
+    },
+    {
+      "path": "components/quoteDiff.tsx",
       "kind": "source"
     },
     {

@@ -4,14 +4,18 @@
 //   · 服务与套件共享同一套「配方 / 成本构成」编辑器；
 //   · 配方行只能引用主数据（材料 / 设备 / 服务 / 子套件），人工费只能来自工种单价主数据；
 //   · 台账徽标、合规证书、价格库、批次账全部由同一份主数据派生，杜绝两页说法不一。
-// 四个工作域（顶部指标卡即域切换器）：
-//   主数据（物料与服务 / 配方与成本）· 库存作业（库存与领用 / 作业流水）
-//   采购寻源（询比价 / 材料价格库）· 合规资质（认证与报告 / 服务资质 / 操作日志）
+// 信息架构（M-IA 重构）：「供应链管理」组下 5 个二级菜单平铺，各自就是终点页，鼠标点即到 ——
+//   物料主数据 material-list · 套件与配方 material-kit · 库存管理 material-stock
+//   采购寻源 material-src（询比价 / 材料价格库）· 认证与报告 material-cert
+// 全站统一二级：不再有「物料与资源」一级折叠层；本组件由路由驱动决定展示哪一域，
+// 顶部 4 张指标瓦片只做「跳到对应二级菜单页」，不另起一套域切换状态（消口径两套账）。
+// 原「服务资质」独立 Tab 已取消：其行 = 全部服务主数据，与主数据列表重复，资质要求改为主数据字段；
+// 原「操作日志」已从业务域移出，改为页面级抽屉（页头「日志」按钮）。
 // 链路闭环：库存预警 → 发起询价（带物料与缺口）→ 比价选定 → 生成采购订单 → 入库回写订单。
 import React, { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import {
   Alert, Banner, Btn, Card, Check, DataTable, Drawer, EntityLink, Field, IdCell, KvGrid, ListToolbar, Modal,
-  Op, OpSep, PageHead, TableFoot, Tag, Tabs, Tile, Tip, useToast, type Col, type TagTone, pressProps,
+  Op, OpSep, PageHead, TableFoot, Tag, Tabs, Tip, useToast, type Col, type TagTone, pressProps,
 } from '../components/ui';
 import CategoryTree from '../components/CategoryTree';
 import {
@@ -19,13 +23,18 @@ import {
   LABOR_RATES, LOCATIONS as LOC, MAIN_WH, MAT_AUDIT_ROWS as AUDIT_SEED, PRICE_LIB, PROJ_WH, RECIPES,
   RFQ_ROWS as RFQ_SEED, RFQ_TONE, SUPPLIERS, TODAY, UNITS, UNIT_DESC, WAREHOUSES as WH, WH_STOCK_SEED,
   catOptions, catPath, catSubtreeIds, catVersion, daysLeft, fmt, fmtWan, inheritsMand, isStocked, itemBatches,
-  laborRate, matPriceTrend, matSupQuotes, opNo, poNo, priceHistory, recipeCost, serviceCost, suggestSale,
-  can, subscribeCats,
+  itemTaxRate, laborRate, matPriceTrend, matSupQuotes, opNo, poNo, priceHistory, recipeCost, serviceCost, suggestSale,
+  can, subscribeCats, certRuleCn, certRuleOf, itemCertMiss, itemNeedCCC, listCodeOf,
+  ID_MARK_FLOWS, ID_MARK_RANGES, PROJECTS, PUSH_BATCHES, arrivalReqOf, fmtMark, idMarkAddFlow, idMarkAddRange, idMarkAlloc,
+  idMarkCheck, idMarkFlowsOfRange, idMarkRuleOf, idMarkStockOf, idMarkVersion, itemNeedIdMark, subscribeIdMark, shiftMark,
+  pushConfirm, pushReject, itemByCode,
+  BILL_BASIS_CN, srvRateOf, tierPriceOf,
   FLOW_ROWS as FLOW_SEED, FLOW_TONE,
   type CertRow, type ConsumableLine, type FlowRow, type Item, type ItemKind, type LaborLine, type MatAuditRow,
   type RecipeLine, type RfqRow,
 } from '../components/data';
 import { Ico } from '../components/icons';
+import IdMarkVerify from '../components/IdMarkVerify';
 import { getFocus, getItems, subscribeStore, updateItems } from '../components/store';
 
 /* ============ 类型色板 ============ */
@@ -34,28 +43,50 @@ const KIND_DESC: Record<ItemKind, string> = {
   材料: '纯物料 · 有库存（仓库分账 + 安全线）· 成本 = 采购价',
   设备: '消防设备 · 有库存 · 需 CCCF / 型式检验 · 成本 = 采购价',
   服务: '无实物库存 · 成本 = 人工构成（工种 × 工日 × 单价）+ 可挂耗材行',
-  套件: '成套交付 · 成本 = 配方行（引用主数据，可嵌子套件）自动合计',
+  套件: '成套交付 · 成本 = 配置行（引用主数据，可嵌子套件）自动合计',
 };
 /** 配方行可选类型（套件配方 = 材料 / 设备 / 服务行混合，可嵌子套件） */
 const LINE_KINDS: ItemKind[] = ['材料', '设备', '服务', '套件'];
 
+/**
+ * 路由 → 域 / Tab 映射（模块作用域常量）。
+ * 物料域已压平为左侧二级菜单（供应链管理组 6 项平铺），5 个二级页各自就是主菜单项、
+ * **点即到**，不再需要先点开「物料与资源」再展开子树。
+ * 路由是唯一的域/页签来源：无论从左侧菜单还是顶部瓦片进入，都走同一条 `go(route)`，
+ * 由下面的 useEffect 单向写入 domain / tab —— 杜绝「菜单与瓦片两套导航各自改状态」的重叠。
+ */
+const ROUTE_VIEW: Record<string, { domain: 'master' | 'wh' | 'src' | 'cmp'; tab: string }> = {
+  'material-list': { domain: 'master', tab: 'list' },
+  /** 套件与配方：独立二级页（原「配方与成本」Tab） —— 套件 = 多个材料的构成关系 + 成本展开 */
+  'material-kit': { domain: 'master', tab: 'kit' },
+  'material-stock': { domain: 'wh', tab: 'stock' },
+  'material-src': { domain: 'src', tab: 'rfq' },
+  'material-cert': { domain: 'cmp', tab: 'cert' },
+};
+
 type EditLine = { kind: ItemKind; code: string; qty: number; loss: number; locked?: number };
 
-export default function MaterialPage({ go, role }: { go: (p: string) => void; role: string; nav?: number }) {
+export default function MaterialPage({ go, role, nav, pageId }: {
+  go: (p: string) => void; role: string; nav?: number;
+  /** 路由 id（material-list / material-kit / material-stock / material-src / material-cert） */
+  pageId?: string;
+}) {
   const toast = useToast();
   /* 分类树同源订阅：树上新增 / 重命名 / 删除后，面包屑「当前分类」、分类目录列与表单下拉即时刷新 */
   useSyncExternalStore(subscribeCats, catVersion, catVersion);
+  /* 号段 / 流向账同源订阅：入库采录、领用回写后，台账与批次账即时刷新（跨页共享同一份数组） */
+  useSyncExternalStore(subscribeIdMark, idMarkVersion, idMarkVersion);
 
   /**
-   * 主数据写入权限（M10）：统一走 `can(role, 'material')` —— 与左侧菜单「角色 × 模块」矩阵同源，
-   * 不再本页自留一份角色白名单（两套口径迟早打架：本页原先只放 4 个角色，而菜单对「物料与服务」
+   * 主数据写入权限（M10）：统一走 `can(role, 'material-list')` —— 与左侧「物料主数据」菜单的
+   * 「角色 × 模块」矩阵同源，不再本页自留一份角色白名单（两套口径迟早打架：本页原先只放 4 个角色，而菜单对「物料与服务」
    * 还开放了财务，改一处忘一处就会出现「菜单进得来、按钮点不动」或反之）。
    * 无权时不静默失效，而是明确告知当前角色无权限 —— 原型可切换角色演示。
    */
-  const canWrite = can(role, 'material');
+  const canWrite = can(role, 'material-list');
   const guardWrite = (fn: () => void) => () => {
     if (canWrite) { fn(); return; }
-    toast(`当前角色（${role}）无主数据写入权限 · 需 项目经理 / 分管副总 / 总经理 / 超级管理员`, 'err');
+    toast(`当前角色（${role}）无主数据写入权限 · 可写角色见「物料主数据」菜单授权范围`, 'err');
   };
 
   /* ============ 可写主数据 ============
@@ -83,6 +114,15 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
   const [catTree, setCatTree] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  /** 操作日志抽屉（页面级入口：关键操作审计不属于任何业务域） */
+  const [auditOpen, setAuditOpen] = useState(false);
+  /* 身份标识验真抽屉（页面级入口：验真是「对着实物问真伪」，不属于某个业务域，
+     与日志抽屉同层；型号明细里带入的明码通过 verifyMark 传入） */
+  const [verifyOpen, setVerifyOpen] = useState(false);
+  const [verifyMark, setVerifyMark] = useState('');
+  /** 厂家号段推送 · 驳回原因弹窗（驳回必填原因，供厂家侧追溯） */
+  const [pushRj, setPushRj] = useState<string | null>(null);
+  const [pushWhy, setPushWhy] = useState('');
 
   /* ============ 详情 / 配方编辑器 ============ */
   const [detail, setDetail] = useState<Item | null>(null);
@@ -125,12 +165,21 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
   const [inDate, setInDate] = useState(TODAY);
   const [inBy, setInBy] = useState('张仓');
   const [inErr, setInErr] = useState('');
+  /** 消防产品身份标识：入库采录的起止明码（仅强制认证产品必填） */
+  const [inMarkFrom, setInMarkFrom] = useState('');
+  const [inMarkTo, setInMarkTo] = useState('');
+  /** 领用流向回写：关联项目 + 安装部位 */
+  const [outProj, setOutProj] = useState('XM000123');
+  const [outPart, setOutPart] = useState('');
   const [batchFor, setBatchFor] = useState<string | null>(null);
   const [whStock, setWhStock] = useState<Record<string, Record<string, number>>>(WH_STOCK_SEED);
   const [flow, setFlow] = useState<FlowRow[]>(FLOW_SEED);
   const [audit, setAudit] = useState<MatAuditRow[]>(AUDIT_SEED);
 
-  const resetOpForm = () => { setInErr(''); setInQty(''); setInBatch(''); setInPrice(''); setInPo(''); };
+  const resetOpForm = () => {
+    setInErr(''); setInQty(''); setInBatch(''); setInPrice(''); setInPo('');
+    setInMarkFrom(''); setInMarkTo(''); setOutPart('');
+  };
   const whOf = (code: string) => whStock[code] || {};
   /** 当前仓库视图口径下的库存：全部 = 总账，否则 = 该仓实存 */
   const scopeStock = (code: string, total: number) => (whView === '全部' ? total : (whOf(code)[whView] || 0));
@@ -230,16 +279,31 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
   useEffect(() => { if (!inCode && stocked.length) setInCode(stocked[0].code); }, [inCode, stocked]);
   useEffect(() => { if (!cuMat && stocked.length) setCuMat(stocked[0].code); }, [cuMat, stocked]);
 
-  /** 外部下钻：EntityLink target="material" → 打开该物料详情 */
+  /**
+   * 路由 → 域 / Tab：由左侧二级菜单驱动。
+   * 声明在「外部下钻」之前 —— 后者声明在后、执行在后，能把域强制拉回主数据列表，
+   * 保证从别处下钻进来的物料详情一定可见。
+   */
   useEffect(() => {
-    const code = getFocus('material');
+    const v = ROUTE_VIEW[pageId ?? 'material-list'];
+    if (!v) return;
+    setDomain(v.domain); setTab(v.tab); setPage(1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pageId, nav]);
+
+  /**
+   * 外部下钻：驾驶舱「低于安全库存」等卡片 → 打开该物料详情。
+   * focus key 固定为 'material'（历史深链键），与本页路由名压平后不再同名，故两个键都认。
+   */
+  useEffect(() => {
+    const code = getFocus('material') || getFocus('material-list');
     if (!code) return;
     const hit = items.find((x) => x.code === code);
     if (!hit) return;
     setDomain('master'); setTab('list'); setTyF('全部'); setCatTree(''); setPage(1);
     setDetail(hit);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [getFocus('material')]);
+  }, [getFocus('material'), getFocus('material-list')]);
 
   const supName = (id: string) => SUPPLIERS.find((s) => s.id === id)?.name || id;
   const supOf = (id: string) => SUPPLIERS.find((s) => s.id === id);
@@ -253,9 +317,10 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
   const filtered = useMemo(() => base.filter((m) =>
     (stF === '全部' || m.status === stF)
     && (certF === '全部'
-      || (certF === '强制' ? m.mand
+      || (certF === '强制' ? itemNeedCCC(m)
         : certF === 'CCCF' ? m.ccc
-          : certF === '继承' ? (!isStocked(m.ty) && inheritsMand(m.code)) : true))
+          : certF === '缺证' ? itemCertMiss(m)
+            : certF === '继承' ? (!isStocked(m.ty) && inheritsMand(m.code)) : true))
     && (!kw || m.name.includes(kw) || m.code.includes(kw) || m.spec.includes(kw))), [base, stF, certF, kw]);
   const paged = filtered.slice((page - 1) * pageSize, page * pageSize);
 
@@ -266,57 +331,43 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
   /* ============ 工作域与 Tab（徽标一律为「行数」语义） ============ */
   const openRfq = rfqs.filter((r) => r.status === '询价中' || r.status === '已报价').length;
   const expSoon = certs.filter((c) => { const d = daysLeft(c.validTo); return d !== Infinity && d <= 30; }).length;
+  /** 套件 = 多个材料 / 设备 / 服务的构成关系；服务 = 人工 + 耗材构成。两者共用同一套配方与成本口径 */
   const recipeItems = items.filter((i) => i.ty === '服务' || i.ty === '套件');
+  const kitItems = items.filter((i) => i.ty === '套件');
 
   const DOMAIN_TABS: Record<typeof domain, { key: string; label: string; cnt: number }[]> = {
+    /* 「套件与配方」已升为独立二级页（material-kit），不再作为主数据下的第二个 Tab ——
+       否则同一份内容会有「左侧菜单」与「列表页页签」两个入口（双入口重叠）。 */
     master: [
       { key: 'list', label: '物料与服务', cnt: items.length },
-      { key: 'recipe', label: '配方与成本', cnt: recipeItems.length },
     ],
     wh: [
       { key: 'stock', label: '库存与领用', cnt: stocked.length },
       { key: 'flow', label: '作业流水', cnt: flow.length },
+      /* 厂家号段推送：货未到、号段先到，确认入库才写入企业号段账 —— 放在库存域，与「作业流水」同级 */
+      { key: 'push', label: '厂家号段推送', cnt: PUSH_BATCHES.filter((b) => b.status === '待确认').length },
     ],
     src: [
       { key: 'rfq', label: '询比价', cnt: rfqs.length },
       { key: 'plib', label: '材料价格库', cnt: PRICE_LIB.length },
     ],
+    /* 原「服务资质」「操作日志」两项已移出本域：
+       服务资质 = 全部服务主数据的重复视图（资质要求已是主数据字段，见列表「资质要求」列与详情抽屉）；
+       操作日志 = 页面级审计，不属于任何业务域（改为页头「日志」抽屉）。 */
     cmp: [
       { key: 'cert', label: '认证与报告', cnt: certs.length },
-      { key: 'qual', label: '服务资质', cnt: recipeItems.filter((i) => i.ty === '服务').length },
-      { key: 'audit', label: '操作日志', cnt: audit.length },
     ],
   };
 
-  /* 顶部指标卡即域切换器：每张卡的「标题 = 口径」，杜绝标题与内容错位 */
-  const DOMAINS: { key: typeof domain; label: string; value: React.ReactNode; sub: string; tone?: 'red' | 'orange' | 'green' | 'blue'; tip: string }[] = [
-    {
-      key: 'master', label: '物料与服务', value: items.length, tone: 'blue',
-      sub: `材料 ${items.filter((i) => i.ty === '材料').length} · 设备 ${items.filter((i) => i.ty === '设备').length} · 服务 ${items.filter((i) => i.ty === '服务').length} · 套件 ${items.filter((i) => i.ty === '套件').length}`,
-      tip: `统一主数据条目总数（材料 / 设备 / 服务 / 套件同表）· 写入权限：项目经理 / 分管副总 / 总经理 / 超级管理员（当前 ${role}${canWrite ? ' · 可写' : ' · 只读'}）`,
-    },
-    {
-      key: 'wh', label: '库存预警', value: lowItems.length, tone: 'red',
-      sub: lowItems.length ? lowItems.map((i) => i.name).slice(0, 2).join(' · ') : '库存充足',
-      tip: '结余低于安全线的物料条数（只统计材料 / 设备，服务与套件不建库存账）',
-    },
-    {
-      key: 'src', label: '待处理寻源', value: openRfq, tone: 'orange',
-      sub: `询价中 ${rfqs.filter((r) => r.status === '询价中').length} · 已报价 ${rfqs.filter((r) => r.status === '已报价').length}`,
-      tip: '进行中的询比价单数（询价中 + 已报价）',
-    },
-    {
-      key: 'cmp', label: '合规证书', value: certs.length, tone: 'green',
-      sub: expSoon ? `${expSoon} 项 30 天内到期` : '均在有效期内',
-      tip: '证书台账条数（由主数据的证书属性派生，另有服务资质要求不占证书位）',
-    },
-  ];
-
-  const enterDomain = (d: typeof domain) => {
-    setDomain(d);
-    setTab(DOMAIN_TABS[d][0].key);
-    setCatTree(''); setPage(1);
+  /* 顶部指标卡 = 口径概览 + 穿透入口；导航只有一个来源：左侧二级菜单（本页由路由驱动） */
+  const DOMAIN_TITLE: Record<typeof domain, string> = {
+    master: tab === 'kit' ? '套件与配置' : '物料主数据',
+    wh: '库存管理',
+    src: '采购寻源',
+    cmp: '认证与报告',
   };
+
+
 
   /* ============ 配方编辑器 ============ */
   const openRecipe = (code: string) => {
@@ -386,15 +437,15 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
         R.versions.forEach((v) => { v.st = '历史'; });
         R.versions.unshift({ v: nv, st: '生效', lines, created: TODAY, refs: cur.refs });
         R.cur = nv;
-        toast(`配方已升版至 ${nv}（被报价引用 ${cur.refs} 次，旧版快照保留）`);
+        toast(`配置已升版至 ${nv}（被报价引用 ${cur.refs} 次，旧版快照保留）`);
       } else {
         cur.lines = lines;
-        toast(`配方已就地更新（未被报价引用，不产生新版本）`);
+        toast(`配置已就地更新（未被报价引用，不产生新版本）`);
       }
       return next;
     });
     if (draftSale !== it.sale) setItems((rs) => rs.map((x) => (x.code === recipeFor ? { ...x, sale: draftSale, price: draftSale } : x)));
-    auditOnly(it.owner, '主数据管理员', `配方调整 · ${it.name}（${draftLines.length} 行）`);
+    auditOnly(it.owner, '主数据管理员', `配置调整 · ${it.name}（${draftLines.length} 行）`);
     closeRecipe();
   };
 
@@ -420,7 +471,10 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
           <div>
             {m.name}
             {m.ccc && <Tag tone="red">CCCF</Tag>}
-            {m.mand && <Tag tone="orange">强制</Tag>}
+            {/* 「要求」由目录派生（品目决定要不要证），不再由人工勾选；缺证即红标 —— 报价 / 采购环节可见 */}
+            {itemNeedCCC(m) && !m.ccc && <span title={`${catPath(m.cat)} 要求 ${certRuleCn(m.cat)}，该条目暂无 CCCF 证书`}><Tag tone="red">缺证</Tag></span>}
+            {itemNeedCCC(m) && !m.mand && <span title="由所属目录派生的强制要求"><Tag tone="orange">强制（派生）</Tag></span>}
+            {m.mand && <span title="人工收紧：该型号确属强制性产品目录"><Tag tone="orange">强制（收紧）</Tag></span>}
             {!isStocked(m.ty) && inheritsMand(m.code) && <Tag tone="orange">强制（继承）</Tag>}
           </div>
           <div className="nc-tiny nc-muted">规格型号：{m.spec}</div>
@@ -431,6 +485,9 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
     { key: 'cat', title: '分类目录', width: 140, render: (m) => <span className="nc-tiny" title={catPath(m.cat)}>{catPath(m.cat)}</span> },
     { key: 'unit', title: '单位', width: 62, align: 'center', render: (m) => <b>{m.unit}</b> },
     { key: 'price', title: '参考单价', width: 96, align: 'right', render: (m) => <b className="num">{fmt(m.price)}</b> },
+    { key: 'tax', title: '税率', width: 62, align: 'center', render: (m) => <Tag tone="gray">{itemTaxRate(m)}%</Tag> },
+    /* 「服务资质」Tab 取消后，资质要求在此列可见（服务行显示，其余留空） */
+    { key: 'qual', title: '资质要求', width: 200, render: (m) => (m.ty === '服务' ? <Tag tone="blue">{m.qualReq || '—'}</Tag> : <span className="nc-muted nc-tiny">—</span>) },
     {
       key: 'stock', title: '库存概要', width: 176, render: (m) => {
         if (!isStocked(m.ty)) return <span className="nc-muted nc-tiny">—（{m.ty}不持实物库存）</span>;
@@ -463,7 +520,7 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
           <Op onClick={() => setDetail(m)}>详情</Op>
           <OpSep />
           {!isStocked(m.ty)
-            ? <Op gold onClick={() => openRecipe(m.code)}>配方</Op>
+            ? <Op gold onClick={() => openRecipe(m.code)}>配置</Op>
             : <Op onClick={() => openRecipe(m.code)}>成本构成</Op>}
           <OpSep />
           <Op onClick={guardWrite(() => {
@@ -488,7 +545,7 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
       key: 'lines', title: '构成', width: 150,
       render: (m) => (m.ty === '服务'
         ? <span className="nc-tiny">人工 {m.labor?.length ?? 0} 行{(m.consumables?.length ?? 0) > 0 ? ` · 耗材 ${m.consumables!.length} 行` : ''}</span>
-        : <span className="nc-tiny">配方 {recipes[m.code]?.versions.find((v) => v.v === recipes[m.code].cur)?.lines.length ?? 0} 行 · 版本 {recipes[m.code]?.cur ?? '—'}</span>),
+        : <span className="nc-tiny">配置 {recipes[m.code]?.versions.find((v) => v.v === recipes[m.code].cur)?.lines.length ?? 0} 行</span>),
     },
     {
       key: 'mat', title: '材料小计', width: 100, align: 'right',
@@ -525,7 +582,7 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
     {
       key: 'op', title: '操作', width: 150, render: (m) => (
         <>
-          <Op gold onClick={() => openRecipe(m.code)}>编辑配方</Op>
+          <Op gold onClick={() => openRecipe(m.code)}>编辑配置</Op>
           {m.ty === '套件' && costOf(m.code).gross < 20 && <><OpSep /><Op onClick={guardWrite(() => { setPriceOpen(m.code); setPriceVal(String(suggestSale(costOf(m.code).total))); })}>调价</Op></>}
         </>
       ),
@@ -535,8 +592,8 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
   return (
     <>
       <PageHead
-        crumbs={['供应链管理', '物料与服务']}
-        title="物料与服务"
+        crumbs={['供应链管理', DOMAIN_TITLE[domain]]}
+        title={DOMAIN_TITLE[domain]}
         badges={<>
           <Tag tone="blue">材料 {items.filter((i) => i.ty === '材料').length}</Tag>
           <Tag tone="blue">设备 {items.filter((i) => i.ty === '设备').length}</Tag>
@@ -546,7 +603,8 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
         </>}
         actions={<>
           <Btn onClick={() => setGSearch(true)} title="本页检索 Ctrl+K"><Ico n="search" size={16} /> 搜索 Ctrl+K</Btn>
-          <Btn onClick={() => { setDomain('cmp'); setTab('audit'); setPage(1); }} title="操作日志（关键操作审计）"><Ico n="clipboard" size={16} /> 日志</Btn>
+          <Btn onClick={() => { setVerifyMark(''); setVerifyOpen(true); }} title="消防产品身份标识（A / B 签）验真：外部备案核对 + 本企业流向回查"><Ico n="shield" size={16} /> 身份验真</Btn>
+          <Btn onClick={() => setAuditOpen(true)} title="操作日志（关键操作审计 · 页面级入口）"><Ico n="clipboard" size={16} /> 日志</Btn>
           <Btn onClick={() => go('settings')} title="分类 / 单位 / 认证标记 / 人工工种单价等公共基线维护"><Ico n="gear" size={16} /> 系统设置</Btn>
           <Btn onClick={() => setImportOpen(true)}>批量导入</Btn>
           <Btn kind="primary" disabled={!canWrite} title={canWrite ? undefined : `当前角色（${role}）无主数据维护权限`}
@@ -554,17 +612,14 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
         </>}
       />
 
-      {/* 域切换器：卡标题 = 口径，卡数值 = 该口径下的行数 */}
-      <div className="nc-tiles nc-tiles-4">
-        {DOMAINS.map((d) => (
-          <Tile key={d.key} label={d.label} value={d.value} sub={d.sub} tone={d.tone} tip={d.tip}
-            active={domain === d.key} onClick={() => enterDomain(d.key)} />
-        ))}
-      </div>
+
 
       <Card flush>
         <div style={{ padding: '12px 16px 0' }}>
-          <Tabs value={tab} onChange={(k) => { setTab(k); setPage(1); }} items={DOMAIN_TABS[domain]} />
+          {/* 单 Tab 的域不再渲染页签条（认证与报告只剩 1 项），避免「只有一个选项的切换器」 */}
+          {DOMAIN_TABS[domain].length > 1 && (
+            <Tabs value={tab} onChange={(k) => { setTab(k); setPage(1); }} items={DOMAIN_TABS[domain]} />
+          )}
         </div>
 
         {/* ==================== 主数据 · 统一列表 ==================== */}
@@ -606,8 +661,9 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
                     label: '认证', value: certF, onChange: (k) => { setCertF(k); setPage(1); },
                     items: [
                       { key: '全部', label: '全部', cnt: base.length },
-                      { key: '强制', label: '强制认证', cnt: cntBy((m) => m.mand) },
+                      { key: '强制', label: '强制认证', cnt: cntBy((m) => itemNeedCCC(m)) },
                       { key: 'CCCF', label: 'CCCF', cnt: cntBy((m) => m.ccc) },
+                      { key: '缺证', label: '缺证风险', cnt: cntBy((m) => itemCertMiss(m)) },
                       { key: '继承', label: '套件继承', cnt: cntBy((m) => !isStocked(m.ty) && inheritsMand(m.code)) },
                     ],
                   },
@@ -626,7 +682,7 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
               </ListToolbar>
               <DataTable cols={cols} rows={paged} rowKey={(m) => m.id} minWidth={1400}
                 onRowClick={(m) => (!isStocked(m.ty) ? openRecipe(m.code) : setDetail(m))}
-                empty="没有符合筛选条件的条目；材料 / 设备需库存，服务 / 套件需配方，均可在此新建"
+                empty="没有符合筛选条件的条目；材料 / 设备需库存，服务 / 套件需配置，均可在此新建"
                 emptyCta={<Btn size="sm" kind="primary" disabled={!canWrite} onClick={() => { if (!canWrite) { toast('当前角色无主数据维护权限', 'err'); return; } setNewOpen(true); }}>＋ 新增主数据</Btn>}
                 foot={<TableFoot total={base.length} filtered={filtered.length} page={page} pageSize={pageSize} onPage={setPage} onPageSize={(n) => { setPageSize(n); setPage(1); }} />} />
               </Card>
@@ -634,15 +690,13 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
           </div>
         )}
 
-        {/* ==================== 主数据 · 配方与成本 ==================== */}
-        {tab === 'recipe' && (
+        {/* ==================== 套件与配方（独立二级页 material-kit） ==================== */}
+        {tab === 'kit' && (
           <div style={{ padding: 16 }}>
-            <Banner tone="info">
-              服务与套件共用同一套<b>成本构成</b>：配方行只能引用主数据，<b>人工费只能来自「工种 × 工日 × 单价」主数据</b>（如 综合工日-电工 ¥300/工日），
-              不允许手工填数字；套件成本 = 材料小计 + 人工小计，由引用自动合计。
-            </Banner>
+
             <div className="nc-tiny nc-muted" style={{ margin: '10px 0 8px' }}>
-              共 {recipeItems.length} 条需维护成本（服务 {recipeItems.filter((i) => i.ty === '服务').length} · 套件 {recipeItems.filter((i) => i.ty === '套件').length}）· 毛利率低于 20% 标红并提供「调价」（按目标毛利率反算对外价）。
+              共 {recipeItems.length} 条需维护成本（套件 {kitItems.length} · 服务 {recipeItems.length - kitItems.length}）·
+              毛利率低于 20% 标红并提供「调价」（按目标毛利率反算对外价）。
             </div>
             <DataTable minWidth={1240} rows={recipeItems} rowKey={(m) => m.code} cols={recipeCols}
               /* 条目背景色统一：套件毛利率低于 20% 不再整行铺红底，改由毛利率列的红色数值承担 */
@@ -734,6 +788,62 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
           </div>
         )}
 
+        {/* ==================== 库存作业 · 厂家号段推送（货未到、号段先到） ==================== */}
+        {tab === 'push' && (
+          <div style={{ padding: 16 }}>
+            <Banner tone="info">
+              厂家在备案平台登记一批新号段后推送给本企业：确认 = 到货核验通过并写入企业号段账，
+              与手工入库采录走同一本账（此后的领用 → 安装 → 报验链路完全一致）；抽检不符要求的驳回并写明原因，退回厂家侧。
+            </Banner>
+            <DataTable
+              minWidth={1220}
+              rows={PUSH_BATCHES}
+              rowKey={(b) => b.id}
+              empty="暂无厂家推送；厂家在备案平台登记新号段后会推送至此"
+              cols={[
+                { key: 'id', title: '推送单号', width: 100, render: (b) => <span className="num">{b.id}</span> },
+                { key: 'sup', title: '推送方（备案生产厂）', width: 240, render: (b) => <span className="nc-tiny">{b.supplier}</span> },
+                {
+                  key: 'item', title: '型号', width: 240,
+                  render: (b) => {
+                    const it = itemByCode(b.code);
+                    return <><b>{it?.name ?? b.code}</b> <span className="nc-tiny nc-muted">{it?.spec ?? ''}</span>
+                      <div className="nc-tiny nc-muted num">{b.code}</div></>;
+                  },
+                },
+                { key: 'batch', title: '生产批号', width: 130, render: (b) => <span className="num nc-tiny">{b.batch}</span> },
+                {
+                  key: 'range', title: '号段（14 位明码）', width: 230,
+                  render: (b) => <span className="num nc-tiny">{fmtMark(b.from)} ~ {fmtMark(b.to)}</span>,
+                },
+                { key: 'qty', title: '数量', width: 96, align: 'right', render: (b) => <b className="num">{b.qty}{itemByCode(b.code)?.unit ?? ''}</b> },
+                { key: 'at', title: '推送日', width: 106, render: (b) => <span className="num nc-tiny">{b.at}</span> },
+                {
+                  key: 'status', title: '状态', width: 96,
+                  render: (b) => <Tag tone={b.status === '已入库' ? 'green' : b.status === '已驳回' ? 'red' : 'orange'}>{b.status}</Tag>,
+                },
+                {
+                  key: 'op', title: '操作', width: 168, sticky: 'right',
+                  render: (b) => (b.status === '待确认' ? (
+                    <>
+                      <Op gold onClick={() => {
+                        const msg = pushConfirm(b.id, '张仓');
+                        if (msg.startsWith('入库校验未通过')) { toast(msg, 'err'); return; }
+                        toast(msg, 'ok');
+                      }}>确认入库</Op>
+                      <OpSep />
+                      <Op danger onClick={() => { setPushRj(b.id); setPushWhy(''); }}>驳回</Op>
+                    </>
+                  ) : <span className="nc-tiny nc-muted">{b.note ?? '—'}</span>),
+                },
+              ]}
+            />
+            <div className="nc-tiny nc-muted" style={{ marginTop: 8 }}>
+              号段一旦落入企业账，即可按「每樘一件」下发到项目部位；未经本页确认的推送不产生任何可报验的号码资源。
+            </div>
+          </div>
+        )}
+
         {/* ==================== 采购寻源 · 询比价 ==================== */}
         {tab === 'rfq' && (
           <div style={{ padding: 16 }}>
@@ -784,7 +894,7 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
           <div style={{ padding: 16 }}>
             <Banner tone="info">
               已入库采购合同明细自动沉淀 · 与询比价 / 历史报价同源 · CNY <b>含税</b>；覆盖范围 = 可采购硬件（材料 + 设备），
-              服务与套件不在此库（服务按人工构成、套件按配方成本）。<b>参考用途，不强制校验</b>。询比价「历史参照」取自本库。
+              服务与套件不在此库（服务按人工构成、套件按配置成本）。<b>参考用途，不强制校验</b>。询比价「历史参照」取自本库。
             </Banner>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
               <Check checked={plibRev} onChange={setPlibRev} label="仅看需复核调价（偏离 ≥ ±10%）" />
@@ -859,52 +969,25 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
           </div>
         )}
 
-        {/* ==================== 合规资质 · 服务资质 ==================== */}
-        {tab === 'qual' && (
-          <div style={{ padding: 16 }}>
-            <Banner tone="info">服务不发产品证书，只维护<b>资质要求</b>字段；投标 / 派工时按此校验承包资质与人员持证。</Banner>
-            <DataTable
-              minWidth={900}
-              rows={items.filter((i) => i.ty === '服务')}
-              rowKey={(m) => m.code}
-              empty="暂无服务型主数据"
-              cols={[
-                { key: 'code', title: '服务编码', width: 110, render: (m) => <span className="num">{m.code}</span> },
-                { key: 'name', title: '服务名称', render: (m) => <><b>{m.name}</b> <span className="nc-tiny nc-muted">{m.spec}</span></> },
-                { key: 'unit', title: '计价单位', width: 90, align: 'center', render: (m) => m.unit },
-                { key: 'qual', title: '资质要求', width: 240, render: (m) => <Tag tone="blue">{m.qualReq || '—'}</Tag> },
-                {
-                  key: 'labor', title: '人工构成', width: 260,
-                  render: (m) => <span className="nc-tiny">{(m.labor || []).map((l) => `${l.trade} ${l.days} 工日 × ${fmt(laborRate(l.trade))}`).join('；') || '—'}</span>,
-                },
-                { key: 'price', title: '参考单价', width: 110, align: 'right', render: (m) => <b className="num">{fmt(svcCostOf(m.code).total)}</b> },
-                { key: 'op', title: '操作', width: 100, render: (m) => <Op onClick={() => openRecipe(m.code)}>编辑成本构成</Op> },
-              ]}
-            />
-          </div>
-        )}
-
-        {/* ==================== 合规资质 · 操作日志 ==================== */}
-        {tab === 'audit' && (
-          <div style={{ padding: 16 }}>
-            <div className="nc-listhint">
-              <span>操作审计<Tip w={380} text="关键操作审计：入库 / 领用 / 退料 / 盘点 / 调拨 / 调价 / 询价 / 采购订单 / 安全线调整 / 配方调整 / 认证附件查看，全部留痕可追溯。" /></span>
-            </div>
-            <DataTable
-              minWidth={900}
-              rows={audit}
-              rowKey={(a) => `${a.t}-${a.who}-${a.act.slice(0, 8)}`}
-              empty="暂无操作审计记录；关键操作会自动留痕"
-              cols={[
-                { key: 't', title: '时间', width: 140, render: (a) => <span className="num nc-tiny">{a.t}</span> },
-                { key: 'who', title: '操作人', width: 90, render: (a) => a.who },
-                { key: 'role', title: '角色', width: 130, render: (a) => <Tag tone="gray">{a.role}</Tag> },
-                { key: 'act', title: '动作', render: (a) => a.act },
-              ]}
-            />
-          </div>
-        )}
       </Card>
+
+      {/* ==================== 操作日志（页面级入口 · 不属于任何业务域） ==================== */}
+      <Drawer open={auditOpen} width={900} onClose={() => setAuditOpen(false)} title="操作日志"
+        sub="关键操作审计：入库 / 领用 / 退料 / 盘点 / 调拨 / 调价 / 询价 / 采购订单 / 安全线调整 / 配置调整 / 认证附件查看，全部留痕可追溯"
+        foot={<Btn onClick={() => setAuditOpen(false)}>关闭</Btn>}>
+        <DataTable
+          minWidth={860}
+          rows={audit}
+          rowKey={(a) => `${a.t}-${a.who}-${a.act.slice(0, 8)}`}
+          empty="暂无操作审计记录；关键操作会自动留痕"
+          cols={[
+            { key: 't', title: '时间', width: 140, render: (a) => <span className="num nc-tiny">{a.t}</span> },
+            { key: 'who', title: '操作人', width: 90, render: (a) => a.who },
+            { key: 'role', title: '角色', width: 130, render: (a) => <Tag tone="gray">{a.role}</Tag> },
+            { key: 'act', title: '动作', render: (a) => a.act },
+          ]}
+        />
+      </Drawer>
 
       {/* ==================== 详情抽屉 ==================== */}
       <Drawer open={!!detail} width={800} onClose={() => setDetail(null)} title={detail?.name || ''}
@@ -917,7 +1000,7 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
             toast(`${detail.code} 已${detail.status === '启用' ? '停用' : '启用'}`);
             setDetail(null);
           }} danger>{detail?.status === '启用' ? '停用' : '启用'}</Btn>
-          {detail && !isStocked(detail.ty) && canWrite && <Btn onClick={() => { const c = detail.code; setDetail(null); openRecipe(c); }} kind="primary">编辑配方 / 成本构成</Btn>}
+          {detail && !isStocked(detail.ty) && canWrite && <Btn onClick={() => { const c = detail.code; setDetail(null); openRecipe(c); }} kind="primary">编辑配置 / 成本构成</Btn>}
           <Btn onClick={() => setDetail(null)}>关闭</Btn>
         </>}>
         {detail && <>
@@ -928,7 +1011,7 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
             { k: '规格型号', v: detail.spec },
             { k: '分类目录', v: catPath(detail.cat) },
             { k: '计量单位', v: `${detail.unit}${UNIT_DESC[detail.unit] ? ` · ${UNIT_DESC[detail.unit]}` : ''}` },
-            { k: '参考单价', v: fmt(detail.price) },
+            { k: '参考单价', v: `${fmt(detail.price)} · 适用税率 ${itemTaxRate(detail)}%` },
             { k: '责任维护人', v: detail.owner || '—' },
             ...(isStocked(detail.ty)
               ? [
@@ -941,14 +1024,16 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
                 { k: '资质要求', v: detail.qualReq || '—' },
               ]),
             { k: '状态', v: detail.status },
-            { k: 'CCCF 认证', v: detail.ccc ? '已取得' : '未涉及' },
-            { k: '强制性目录', v: detail.mand ? '在目录内' : (!isStocked(detail.ty) && inheritsMand(detail.code) ? '继承所含硬件' : '不在目录内') },
+            { k: '投标清单编码', v: listCodeOf(detail.cat) || '不在安装工程清单体系内' },
+            /* 认证要求由所属目录派生（品目决定要不要证），人工只能在更高要求上收紧 */
+            { k: '认证要求', v: `${certRuleCn(detail.cat)}${detail.mand && certRuleOf(detail.cat) !== 'cccf' ? ' · 人工收紧至强制' : ''}` },
+            { k: 'CCCF 认证', v: detail.ccc ? '已取得' : (itemNeedCCC(detail) ? '未取得（缺证）' : '未涉及') },
             { k: '证书', v: detail.certType ? `${detail.certType} · ${detail.certNo || '—'} · 有效期至 ${detail.certValidTo || '—'}` : (isStocked(detail.ty) ? '未涉及' : '不发产品证书（由所含硬件持证）') },
           ]} />
 
-          {detail.mand && (
+          {itemNeedCCC(detail) && (
             <div className="nc-warnbox is-danger">
-              <b><Ico n="warning" size={16} /> 该条目列入强制性产品目录</b>
+              <b><Ico n="warning" size={16} /> {itemCertMiss(detail) ? '目录要求强制性认证，该条目暂无 CCCF 证书' : '该条目列入强制性产品目录'}</b>
               <div>无有效 CCCF 证书的批次不得用于工程；采购入库与报价选用时将校验证书编号与有效期。当前证书：{detail.certNo || '—'}（有效期至 {detail.certValidTo || '—'}）。</div>
             </div>
           )}
@@ -956,7 +1041,7 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
           {!isStocked(detail.ty) && (() => {
             const c = detail.ty === '服务' ? svcCostOf(detail.code) : costOf(detail.code);
             return (
-              <Field label={detail.ty === '服务' ? '成本构成（人工 + 耗材）' : '配方（引用主数据，自动合计）'} span={4}>
+              <Field label={detail.ty === '服务' ? '成本构成（人工 + 耗材）' : '配置（引用主数据，自动合计）'} span={4}>
                 <div className="nc-money-row" style={{ marginBottom: 10 }}>
                   {[
                     { k: '材料小计', v: fmt(c.mat) },
@@ -1003,6 +1088,81 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
             );
           })()}
 
+          {detail.ty === '服务' && srvRateOf(detail.code) && (() => {
+            const rate = srvRateOf(detail.code)!;
+            return (
+              <Field label="维保 / 检测计价口径" span={4}
+                tip="消防维保不按「数量」计价，按服务对象的规模算：建筑面积（元/㎡·年，面积越大单价越低）、设施点位（元/点·年）、或设施造价百分比。报价时可切换口径对比。" tipW={340}>
+                <div className="nc-cell-sub" style={{ marginBottom: 10 }}>
+                  默认口径 <b>{BILL_BASIS_CN[rate.basis]}</b> · 计费周期 <b>{rate.period}</b>
+                  {rate.minFee ? <> · 最低限价 <b className="num">{fmt(rate.minFee)}</b> 元/{rate.period}</> : null}
+                  {rate.note ? <div className="nc-tiny nc-muted" style={{ marginTop: 4 }}>{rate.note}</div> : null}
+                </div>
+                {rate.tiers && rate.tiers.length > 0 && (
+                  <>
+                    <div className="nc-tiny nc-muted" style={{ marginBottom: 6 }}>按建筑面积 · 阶梯单价（元/㎡·{rate.period}）</div>
+                    <table className="nc-tbl" style={{ minWidth: 460, marginBottom: 12 }}>
+                      <thead><tr>
+                        <th>面积区间（㎡）</th>
+                        <th style={{ width: 110, textAlign: 'right' }}>单价</th>
+                      </tr></thead>
+                      <tbody>
+                        {rate.tiers.map((t) => (
+                          <tr key={t.to}>
+                            <td className="num">{t.from.toLocaleString('en-US')} ~ {t.to === Infinity ? '以上' : t.to.toLocaleString('en-US')}</td>
+                            <td className="is-num num"><b>{t.price}</b></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </>
+                )}
+                {rate.pointRates && rate.pointRates.length > 0 && (
+                  <>
+                    <div className="nc-tiny nc-muted" style={{ marginBottom: 6 }}>按设施点位 · 点位单价（元/{rate.period}）</div>
+                    <table className="nc-tbl" style={{ minWidth: 460 }}>
+                      <thead><tr>
+                        <th>点位类别</th><th style={{ width: 80 }}>计量单位</th>
+                        <th style={{ width: 100, textAlign: 'right' }}>单价</th>
+                      </tr></thead>
+                      <tbody>
+                        {rate.pointRates.map((pr) => (
+                          <tr key={pr.kind}>
+                            <td>{pr.kind}</td>
+                            <td className="nc-tiny">{pr.unit}</td>
+                            <td className="is-num num"><b>{fmt(pr.price)}</b></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </>
+                )}
+                {rate.assetTiers && rate.assetTiers.length > 0 && (
+                  <>
+                    <div className="nc-tiny nc-muted" style={{ marginBottom: 6 }}>按设施造价 · 投资额分档费率（%/{rate.period}）</div>
+                    <table className="nc-tbl" style={{ minWidth: 460 }}>
+                      <thead><tr>
+                        <th>设施总投资</th>
+                        <th style={{ width: 110, textAlign: 'right' }}>费率</th>
+                      </tr></thead>
+                      <tbody>
+                        {rate.assetTiers.map((t) => (
+                          <tr key={t.to}>
+                            <td className="num">{t.from / 10000} 万 ~ {t.to === Infinity ? '以上' : `${t.to / 10000} 万`}</td>
+                            <td className="is-num num"><b>{t.pct}%</b></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <div className="nc-cell-sub" style={{ marginTop: 8 }}>
+                      按全额累进：命中档后 <b>总投资 × 该档费率</b>，投资额越大费率越低。
+                    </div>
+                  </>
+                )}
+              </Field>
+            );
+          })()}
+
           {isStocked(detail.ty) && (
             <>
               <Field label="供应商报价对比（三源比价）" span={4}>
@@ -1044,6 +1204,60 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
                   </tbody>
                 </table>
               </Field>
+              {itemNeedIdMark(detail) && (() => {
+                const rule = idMarkRuleOf(detail.code);
+                const rs = ID_MARK_RANGES.filter((r) => r.code === detail.code);
+                const st = idMarkStockOf(detail.code);
+                const flows = rs.flatMap((r) => idMarkFlowsOfRange(r.id));
+                return (
+                  <Field label="消防产品身份标识（A / B 签）" span={4}>
+                    <div className="nc-cell-sub" style={{ marginBottom: 8 }}>
+                      标志类型 <b>{rule?.type === 'I' ? 'I 型 33×22mm' : 'II 型 45×40mm'}</b> ·
+                      厂家备案号段 <b className="num">{rule?.prefix ?? '—'}</b> ·
+                      已采录 <b className="num">{st.inQty}</b>{detail.unit} · 已流向 <b className="num">{st.outQty}</b>{detail.unit} ·
+                      可报验 <b className="num">{st.free}</b>{detail.unit}
+                    </div>
+                    <table className="nc-tbl" style={{ minWidth: 700 }}>
+                      <thead><tr>
+                        <th style={{ width: 118 }}>批次</th><th>号段（14 位明码）</th>
+                        <th style={{ width: 74, textAlign: 'right' }}>数量</th><th style={{ width: 150 }}>流向</th><th style={{ width: 78 }}>状态</th>
+                        <th style={{ width: 62 }}>操作</th>
+                      </tr></thead>
+                      <tbody>
+                        {rs.map((r) => {
+                          const fs = idMarkFlowsOfRange(r.id);
+                          if (!fs.length) {
+                            return (
+                              <tr key={r.id}>
+                                <td className="num">{r.batch}</td>
+                                <td className="num nc-tiny">{fmtMark(r.from)} ~ {fmtMark(r.to)}</td>
+                                <td className="is-num num">{r.qty}</td>
+                                <td className="nc-tiny nc-muted">在库（{r.wh}）</td>
+                                <td><Tag tone="gray">未流向</Tag></td>
+                                <td><Op onClick={() => { setVerifyMark(r.from); setVerifyOpen(true); }}>验真</Op></td>
+                              </tr>
+                            );
+                          }
+                          return fs.map((f, i) => (
+                            <tr key={f.id}>
+                              {i === 0 && <td className="num" rowSpan={fs.length}>{r.batch}</td>}
+                              <td className="num nc-tiny">{fmtMark(f.from)} ~ {fmtMark(f.to)}</td>
+                              <td className="is-num num">{f.qty}</td>
+                              <td className="nc-tiny">{f.proj} · {f.part}</td>
+                              <td><Tag tone={f.status === '已报验' ? 'green' : f.status === '已安装' ? 'blue' : 'orange'}>{f.status}</Tag></td>
+                              <td><Op onClick={() => { setVerifyMark(f.from); setVerifyOpen(true); }}>验真</Op></td>
+                            </tr>
+                          ));
+                        })}
+                      </tbody>
+                    </table>
+                    <div className="nc-tiny nc-muted" style={{ marginTop: 8 }}>
+                      A 签贴于产品本体（防转移），B 签由本表按号段生成报验清单；竣工验收要求流向单位与采购单位一致。点行内「验真」可核对这樘产品的外部备案与本企业流向。
+                      {st.free === 0 && rs.length > 0 && <b className="nc-v-red"> 当前已无未流向号段，新增领用前须先入库采录。</b>}
+                    </div>
+                  </Field>
+                );
+              })()}
             </>
           )}
         </>}
@@ -1051,14 +1265,14 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
 
       {/* ==================== 配方 / 成本构成 编辑器（服务与套件共用） ==================== */}
       <Drawer open={!!recipeFor} width={840} onClose={closeRecipe}
-        title={recipeFor ? `${byCode(recipeFor)?.name || recipeFor} · ${byCode(recipeFor)?.ty === '服务' ? '成本构成' : '配方'}` : ''}
-        sub={recipeFor ? `${recipeFor} · 类型 ${byCode(recipeFor)?.ty} · 配方行只能引用主数据` : ''}
+        title={recipeFor ? `${byCode(recipeFor)?.name || recipeFor} · ${byCode(recipeFor)?.ty === '服务' ? '成本构成' : '配置'}` : ''}
+        sub={recipeFor ? `${recipeFor} · 类型 ${byCode(recipeFor)?.ty} · 配置行只能引用主数据` : ''}
         foot={<>
           <Btn onClick={closeRecipe}>取消</Btn>
           {recipeFor && byCode(recipeFor)?.ty === '套件' && draftCost && draftCost.gross < 20 && (
             <Btn onClick={() => { setPriceOpen(recipeFor); setPriceVal(String(suggestSale(draftCost.total))); }}>调价</Btn>
           )}
-          <Btn kind="primary" disabled={!canWrite} onClick={saveRecipe}>保存配方</Btn>
+          <Btn kind="primary" disabled={!canWrite} onClick={saveRecipe}>保存配置</Btn>
         </>}>
         {recipeFor && (
           <>
@@ -1143,7 +1357,7 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
                 </Field>
               </>
             ) : (
-              <Field label="配方行（材料 / 设备 / 服务 / 子套件 混合）" req span={4}>
+              <Field label="配置行（材料 / 设备 / 服务 / 子套件 混合）" req span={4}>
                 <table className="nc-tbl" style={{ minWidth: 820 }}>
                   <thead><tr>
                     <th style={{ width: 44 }}>序</th>
@@ -1194,7 +1408,7 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
                     })}
                   </tbody>
                 </table>
-                <button className="nc-addrow" onClick={() => setDraftLines((v) => [...v, { kind: '材料', code: '', qty: 1, loss: 0 }])}>＋ 添加配方行</button>
+                <button className="nc-addrow" onClick={() => setDraftLines((v) => [...v, { kind: '材料', code: '', qty: 1, loss: 0 }])}>＋ 添加配置行</button>
                 <div className="nc-tiny nc-muted" style={{ marginTop: 8 }}>
                   单价自动从主数据带出；锁价修改会标记（偏离主数据参考价）。服务行的人工费来自该服务的「工种 × 工日 × 单价」，不再单独手填「人工 / 其他」。
                 </div>
@@ -1220,7 +1434,7 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
         }}>应用调价</Btn></>}>
         <div className="nc-warnbox is-info">
           <b>调价依据</b>
-          <div>成本由配方自动合计；目标毛利率按 25% 反算建议价，可手工覆盖（会写入操作日志）。</div>
+          <div>成本由配置自动合计；目标毛利率按 25% 反算建议价，可手工覆盖（会写入操作日志）。</div>
         </div>
         <div className="nc-form-grid">
           <Field label="当前成本"><input className="nc-input" disabled value={priceOpen ? fmt(costOf(priceOpen).total) : ''} /></Field>
@@ -1263,15 +1477,28 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
         foot={<><Btn onClick={() => setOpIn(false)}>取消</Btn><Btn kind="primary" onClick={() => {
           const m = byCode(inCode);
           if (!m) { setInErr('请选择物料'); return; }
-          if (m.ccc || m.mand) { if (!inBatch.trim()) { setInErr('消防产品批次号必填（强制性产品认证目录内产品）'); return; } }
+          if (m.ccc || itemNeedCCC(m)) { if (!inBatch.trim()) { setInErr('消防产品批次号必填（强制性产品认证目录内产品）'); return; } }
           if (!(Number(inQty) > 0)) { setInErr('入库数量须 > 0'); return; }
           if (!(Number(inPrice) > 0)) { setInErr('入库单价须 > 0'); return; }
           const q = Number(inQty);
+          /* 身份标识采录：强制认证产品须录明码号段，且长度必须等于入库数量 —— 「货到了但身份没录」等于验收无证可查 */
+          const needMark = itemNeedIdMark(m);
+          if (needMark) {
+            const err = idMarkCheck(inCode, inMarkFrom.trim(), inMarkTo.trim(), q, ID_MARK_RANGES);
+            if (err) { setInErr(err); return; }
+          }
+          if (needMark && inMarkFrom.trim()) {
+            idMarkAddRange({
+              code: inCode, batch: inBatch.trim(), from: inMarkFrom.trim(), to: inMarkTo.trim(), qty: q,
+              wh: inWh, date: inDate, po: inPo || undefined, by: inBy,
+            });
+          }
           setOpIn(false); resetOpForm();
+          const markTxt = needMark && inMarkFrom.trim() ? ` · 身份标识 ${fmtMark(inMarkFrom.trim())} ~ ${fmtMark(inMarkTo.trim())}` : '';
           commitOp({
             type: '入库', code: inCode, wh: inWh, qty: q, by: inBy,
-            msg: `已入库 ${m.name} ${q}${m.unit}（批次 ${inBatch || '—'}）至「${inWh}」，金额 ¥${fmt(q * Number(inPrice))} 计入项目成本 · 结余 ${m.stock + q}${m.unit}`,
-            act: `${m.name} +${q}${m.unit} · 批次 ${inBatch || '—'} · 金额 ¥${fmt(q * Number(inPrice))} 计入项目成本${inPo ? ` · 关联采购订单 ${inPo}` : ''}`,
+            msg: `已入库 ${m.name} ${q}${m.unit}（批次 ${inBatch || '—'}）至「${inWh}」，金额 ¥${fmt(q * Number(inPrice))} 计入项目成本 · 结余 ${m.stock + q}${m.unit}${markTxt ? ` · 已采录身份标识 ${q} 件` : ''}`,
+            act: `${m.name} +${q}${m.unit} · 批次 ${inBatch || '—'} · 金额 ¥${fmt(q * Number(inPrice))} 计入项目成本${markTxt}${inPo ? ` · 关联采购订单 ${inPo}` : ''}`,
           });
           /* 入库回写采购订单，闭合「询价 → 采购订单 → 入库」链路 */
           if (inPo) {
@@ -1279,6 +1506,12 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
             toast(`采购订单 ${inPo} 已回写为「已入库」`);
           }
         }}>确认入库</Btn></>}>
+        {itemNeedIdMark(byCode(inCode)) && (
+          <div className="nc-warnbox is-warn"><b>本品须采录身份标识（A / B 签）</b><div>
+            该物料所属目录要求强制性认证，须按厂家号段采录 14 位明码区间，长度与入库数量一致。
+            A 签随货贴于产品本体，B 签由本系统按号段生成报验清单 —— 未采录则竣工验收无 B 签可交。
+          </div></div>
+        )}
         <div className="nc-warnbox is-info"><b>成本口径</b><div>金额自动计入项目合同成本（关联项目时）；消防产品批次必填，批次账与证书关联批次呼应。</div></div>
         {inErr && <Alert icon={<Ico n="warning" size={16} />} tone="danger" title={inErr} />}
         <div className="nc-form-grid">
@@ -1295,9 +1528,29 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
           </Field>
           <Field label="仓库" req><select className="nc-input" value={inWh} onChange={(e) => setInWh(e.target.value)}>{WH.map((w) => <option key={w}>{w}</option>)}</select></Field>
           <Field label="库位" req><select className="nc-input" value={inLoc} onChange={(e) => setInLoc(e.target.value)}>{LOC.map((l) => <option key={l}>{l}</option>)}</select></Field>
-          <Field label="批次号" req={byCode(inCode)?.ccc || byCode(inCode)?.mand} err={inErr.includes('批次') ? inErr : undefined} note="消防产品批次必填，如 PC20260921-A">
+          <Field label="批次号" req={itemNeedCCC(byCode(inCode)) || byCode(inCode)?.ccc} err={inErr.includes('批次') ? inErr : undefined} note="消防产品批次必填，如 PC20260921-A">
             <input className="nc-input" value={inBatch} onChange={(e) => setInBatch(e.target.value)} placeholder="PC20260921-A" />
           </Field>
+          {itemNeedIdMark(byCode(inCode)) && (() => {
+            const rule = idMarkRuleOf(inCode);
+            const q = Number(inQty) || 0;
+            return (
+              <>
+                <Field label="身份标识起始明码" req span={2}
+                  note={`14 位 · 厂家备案号段 ${rule?.prefix ?? '—'} 开头（${rule?.type === 'I' ? 'I 型 33×22mm' : 'II 型 45×40mm'}）`}>
+                  <input className="nc-input" inputMode="numeric" value={inMarkFrom}
+                    onChange={(e) => setInMarkFrom(e.target.value.replace(/\D/g, '').slice(0, 14))}
+                    placeholder={rule ? `${rule.prefix}000001` : '14 位明码'} />
+                </Field>
+                <Field label="身份标识截止明码" req
+                  note={q > 0 && /^\d{14}$/.test(inMarkFrom) ? `预计截止 ${fmtMark(shiftMark(inMarkFrom, q - 1))}（${q} 件）` : '按数量自动推算，可手改'}>
+                  <input className="nc-input" inputMode="numeric" value={inMarkTo}
+                    onChange={(e) => setInMarkTo(e.target.value.replace(/\D/g, '').slice(0, 14))}
+                    placeholder={q > 0 && /^\d{14}$/.test(inMarkFrom) ? shiftMark(inMarkFrom, q - 1) : '14 位明码'} />
+                </Field>
+              </>
+            );
+          })()}
           <Field label="数量" req><input className="nc-input" type="number" value={inQty} onChange={(e) => setInQty(e.target.value)} placeholder="0" /></Field>
           <Field label="单价（含税）" req><input className="nc-input" type="number" value={inPrice} onChange={(e) => setInPrice(e.target.value)} placeholder="0.00" /></Field>
           <Field label="日期"><input className="nc-input" type="date" value={inDate} onChange={(e) => setInDate(e.target.value)} /></Field>
@@ -1305,8 +1558,17 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
         </div>
       </Drawer>
 
-      {/* ==================== 领用登记 ==================== */}
-      <Modal open={opOut} title="领用登记" width={480} onClose={() => setOpOut(false)}
+      {/* ==================== 领用登记（含身份标识流向回写） ====================
+          字段超过 5 个（物料 / 出库仓 / 关联项目 / 安装部位 / 数量 / 领用人），按交互规范改用抽屉 640 */}
+      {(() => {
+        const mOut = byCode(inCode);
+        const needOut = itemNeedIdMark(mOut);
+        const qOut = Number(inQty) || 0;
+        const alloc = needOut && qOut > 0 ? idMarkAlloc(inCode, qOut, ID_MARK_RANGES, ID_MARK_FLOWS) : null;
+        const stockOut = idMarkStockOf(inCode);
+        return (
+      <Drawer open={opOut} title="领用登记" width={640} onClose={() => setOpOut(false)}
+        sub={needOut ? '领用即回写身份标识流向：号段随货发往项目现场，竣工验收据此出 B 签清单' : undefined}
         foot={<><Btn onClick={() => setOpOut(false)}>取消</Btn><Btn kind="primary" onClick={() => {
           const m = byCode(inCode);
           if (!m) { setInErr('请选择物料'); return; }
@@ -1314,14 +1576,35 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
           const whAvail = whOf(inCode)[inWh] || 0;
           if (Number(inQty) > whAvail) { setInErr(`领用数量 ${inQty}${m.unit} 超出「${inWh}」可用库存 ${whAvail}${m.unit}`); return; }
           const q = Number(inQty);
+          /* 流向回写：把一段号段绑定到「项目 + 部位」。没有可分配号段 = 货有身份没录，验收查不到，故硬拦截 */
+          if (needOut) {
+            if (!outProj) { setInErr('该物料须回写流向，请选择关联项目'); return; }
+            if (!outPart.trim()) { setInErr('该物料须回写流向，请填写安装部位（如 F2 走廊 · 点位 B-01 ~ B-40）'); return; }
+            if (!alloc) {
+              setInErr(`可用身份标识仅剩 ${stockOut.free}${m.unit}，不足以覆盖本次 ${q}${m.unit}；请先入库采录号段`);
+              return;
+            }
+          }
           setOpOut(false); resetOpForm();
+          if (needOut && alloc) {
+            idMarkAddFlow({
+              rangeId: alloc.rangeId, code: inCode, from: alloc.from, to: alloc.to, qty: q,
+              proj: outProj, part: outPart.trim(), date: inDate, by: inBy, status: '已领未装',
+            });
+          }
           commitOp({
             type: '领用', code: inCode, wh: inWh, qty: q, by: inBy,
-            msg: `已领用 ${m.name} ${q}${m.unit}（自「${inWh}」）；出库不影响项目成本（入库时已计入）· 结余 ${m.stock - q}${m.unit}`,
-            act: `${m.name} -${q}${m.unit} · 出库自「${inWh}」· 出库不重复计入成本`,
+            msg: `已领用 ${m.name} ${q}${m.unit}（自「${inWh}」）；出库不影响项目成本（入库时已计入）· 结余 ${m.stock - q}${m.unit}${alloc ? ` · 流向已回写 ${outProj} ${outPart}` : ''}`,
+            act: `${m.name} -${q}${m.unit} · 出库自「${inWh}」· 出库不重复计入成本${alloc ? ` · 身份标识 ${fmtMark(alloc.from)} ~ ${fmtMark(alloc.to)} → ${outProj} ${outPart}` : ''}`,
           });
         }}>确认领用</Btn></>}>
         <div className="nc-warnbox is-info"><b>成本口径</b><div>领用（出库）<b>不影响</b>项目成本——成本在入库时已计入，避免重复；退料自动回冲。</div></div>
+        {needOut && (
+          <div className="nc-warnbox is-warn"><b>本品须回写身份标识流向</b><div>
+            A 签随货贴于产品本体，本系统按领用号段生成 B 签清单；竣工验收要求「流向单位与采购单位一致」，
+            当前可分配存量 <b>{stockOut.free}</b>{mOut?.unit}（已采录 {stockOut.inQty} · 已流向 {stockOut.outQty}）。
+          </div></div>
+        )}
         {inErr && <Alert icon={<Ico n="warning" size={16} />} tone="danger" title={inErr} />}
         <div className="nc-form-grid">
           <Field label="物料" req span={2}>
@@ -1330,11 +1613,30 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
             </select>
           </Field>
           <Field label="出库仓" req><select className="nc-input" value={inWh} onChange={(e) => setInWh(e.target.value)}>{WH.map((w) => <option key={w}>{w}</option>)}</select></Field>
-          <Field label="关联项目"><select className="nc-input"><option>XM000123 · ××中心大厦消防改造</option><option>XM000118 · 云南省××医院住院楼</option><option>（不关联）</option></select></Field>
+          <Field label="关联项目" req={needOut}>
+            <select className="nc-input" value={outProj} onChange={(e) => setOutProj(e.target.value)}>
+              <option value="">（不关联）</option>
+              {PROJECTS.map((p) => <option key={p.id} value={p.id}>{p.id} · {p.name}</option>)}
+            </select>
+          </Field>
+          <Field label="安装部位 / 点位" req={needOut} span={2}
+            note={needOut ? '决定 B 签清单的归属，须精确到楼层与点位区间' : '可选，便于后续按部位追溯'}>
+            <input className="nc-input" value={outPart} onChange={(e) => setOutPart(e.target.value)}
+              placeholder={needOut ? '如 F2 走廊 · 点位 B-01 ~ B-40' : '如 F1 大厅'} />
+          </Field>
           <Field label="领用数量" req><input className="nc-input" type="number" value={inQty} onChange={(e) => setInQty(e.target.value)} placeholder="0" /></Field>
           <Field label="领用人"><select className="nc-input" value={inBy} onChange={(e) => setInBy(e.target.value)}><option>张仓</option><option>李工</option><option>王工</option></select></Field>
+          {needOut && qOut > 0 && (
+            <Field label="本次回写号段" span={4}>
+              {alloc
+                ? <div className="nc-cell-sub num">{fmtMark(alloc.from)} ~ {fmtMark(alloc.to)}（共 {qOut}{mOut?.unit}）· 状态 已领未装</div>
+                : <div className="nc-field-err">可分配存量不足，请先入库采录号段</div>}
+            </Field>
+          )}
         </div>
-      </Modal>
+      </Drawer>
+        );
+      })()}
 
       {/* ==================== 退料 ==================== */}
       <Drawer open={opBack} title="退料（项目 → 仓库）" width={640} onClose={() => setOpBack(false)}
@@ -1809,7 +2111,7 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
         </>}>
         <div className="nc-warnbox is-info">
           <b>导入规则</b>
-          <div>先下载模板按列填写；服务型须填「工日 + 工种」，套件型导入后到「配方与成本」补配方行。
+          <div>先下载模板按列填写；服务型须填「工日 + 工种」，套件型导入后到「套件与配置」补配置行。
             重名 / 重码逐行报错，<b>不覆盖</b>既有数据。</div>
         </div>
         <div className="nc-form-grid">
@@ -1862,7 +2164,7 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
             setNf({ ty: '材料', name: '', spec: '', cat: '', unit: UNITS[0], price: '', safe: '', ccc: false, mand: false, certType: CERT_TYPES[0], certNo: '', certValidTo: '', batch: '', notifyCh: CHANNELS[0], qualReq: '', sale: '' });
             setNfLabor([{ trade: LABOR_RATES[0].trade, days: 1 }]);
             setNfMats([]);
-            toast(`已新增 ${code} · ${item.name}（${nf.ty}）${nf.ty === '套件' ? '，请到「配方与成本」补配方行' : ''}`);
+            toast(`已新增 ${code} · ${item.name}（${nf.ty}）${nf.ty === '套件' ? '，请到「套件与配置」补配置行' : ''}`);
           }}>保存</Btn>
         </>}>
         {newErr && <Alert icon={<Ico n="warning" size={16} />} tone="danger" title={newErr} />}
@@ -1903,15 +2205,24 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
               <div className="nc-form-grid">
                 <Field label="参考单价（含税）" req><input className="nc-input" type="number" value={nf.price} onChange={(e) => setNf((f) => ({ ...f, price: e.target.value }))} placeholder="0.00" /></Field>
                 <Field label="安全库存线" note="低于安全线即进入「库存预警」，可一键发起询价"><input className="nc-input" type="number" value={nf.safe} onChange={(e) => setNf((f) => ({ ...f, safe: e.target.value }))} placeholder="0" /></Field>
-                <Field label="认证属性" span={2}>
-                  <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
-                    <Check checked={nf.ccc} onChange={(b) => setNf((f) => ({ ...f, ccc: b }))} label="CCCF 强制性认证" />
-                    <Check checked={nf.mand} onChange={(b) => setNf((f) => ({ ...f, mand: b }))} label="强制认证目录（无证不得用于工程）" />
+                <Field label="认证要求" span={2} note={nf.cat
+                  ? `由所属目录派生：${catPath(nf.cat)} → ${certRuleCn(nf.cat)}${nf.mand ? '（已人工收紧至强制）' : ''}`
+                  : '先选分类目录，认证要求自动派生'}>
+                  <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <Tag tone={itemNeedCCC({ cat: nf.cat, mand: nf.mand }) ? 'orange' : 'gray'}>
+                      {nf.cat ? certRuleCn(nf.cat) : '未选目录'}
+                    </Tag>
+                    {/* 目录只给要求基线；确属强制目录的型号可人工收紧（只能提高不能降低） */}
+                    {certRuleOf(nf.cat) !== 'cccf' && (
+                      <Check checked={nf.mand} onChange={(b) => setNf((f) => ({ ...f, mand: b }))} label="收紧为强制认证目录" />
+                    )}
+                    <Check checked={nf.ccc} onChange={(b) => setNf((f) => ({ ...f, ccc: b }))} label="已取得 CCCF 证书" />
                   </div>
                 </Field>
               </div>
             )}
-            {stockKind && (nf.ccc || nf.mand) && (
+            {/* 目录已要求强制认证时，即使还没取证也要先登记证书字段（缺证会在台账与报价侧标红） */}
+            {stockKind && (nf.ccc || itemNeedCCC({ cat: nf.cat, mand: nf.mand })) && (
               <div className="nc-form-grid">
                 <Field label="证书类型" req note="物料级唯一配置，合规台账由它派生 → 台账徽标与证书类型永远一致">
                   <select className="nc-input" value={nf.certType} onChange={(e) => setNf((f) => ({ ...f, certType: e.target.value }))}>
@@ -1985,18 +2296,42 @@ export default function MaterialPage({ go, role }: { go: (p: string) => void; ro
             </>}
             {nf.ty === '套件' && <>
               <div className="nc-form-grid">
-                <Field label="对外价" req note="套件成本由配方行自动合计（材料小计 + 人工小计），此处只定对外价">
+                <Field label="对外价" req note="套件成本由配置行自动合计（材料小计 + 人工小计），此处只定对外价">
                   <input className="nc-input" type="number" value={nf.sale} onChange={(e) => setNf((f) => ({ ...f, sale: e.target.value }))} placeholder="0.00" />
                 </Field>
               </div>
               <div className="nc-warnbox is-info">
                 <b>下一步</b>
-                <div>套件保存后到「配方与成本」维护配方行（引用材料 / 设备 / 服务 / 子套件），成本与毛利率会实时计算，负毛利会给「调价」动作。</div>
+                <div>套件保存后到「套件与配置」维护配置行（引用材料 / 设备 / 服务 / 子套件），成本与毛利率会实时计算，负毛利会给「调价」动作。</div>
               </div>
             </>}
           </>;
         })()}
       </Drawer>
+
+      {/* ==================== 身份标识验真（页面级抽屉） ====================
+          验真是「对着一件实物问真伪」，不属于任何业务域，与操作日志同层；
+          型号明细里点某批号段的「验真」会把该号段首码带进来。 */}
+      <IdMarkVerify open={verifyOpen} initMark={verifyMark} onClose={() => setVerifyOpen(false)} />
+
+      {/* ==================== 厂家号段推送 · 驳回原因 ==================== */}
+      <Modal open={!!pushRj} title={`驳回厂家推送 · ${pushRj || ''}`} width={480}
+        onClose={() => setPushRj(null)}
+        foot={<>
+          <Btn onClick={() => setPushRj(null)}>取消</Btn>
+          <Btn kind="primary" disabled={!pushWhy.trim()} onClick={() => {
+            if (pushRj) pushReject(pushRj, pushWhy);
+            toast('已驳回，原因同步至厂家侧', 'ok');
+            setPushRj(null);
+          }}>确认驳回</Btn>
+        </>}>
+        <div className="nc-form-grid">
+          <Field label="驳回原因" req span={4} note="退回厂家侧并要求重新核发号段；不写明原因无法追溯是哪一批实物不合格">
+            <input className="nc-input" autoFocus value={pushWhy} onChange={(e) => setPushWhy(e.target.value)}
+              placeholder="如 到货抽检铭牌印刷与备案号段不符，整批退回" />
+          </Field>
+        </div>
+      </Modal>
     </>
   );
 }

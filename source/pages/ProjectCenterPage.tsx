@@ -33,19 +33,19 @@ import {
 } from '../components/ui';
 import { Ico } from '../components/icons';
 import {
-  ATT_WORKERS, CUSTOMERS, EQUIPMENTS, MATERIALS,
   PROJECT_STATUS_TONE, PROJECT_TERMINAL, TODAY,
-  attCost, attDays, fmt, fmtAmt, fmtPct, fmtWan, isContractClosed, isServiceProject, laborRate, normContractStatus,
+  fmt, fmtAmt, fmtPct, fmtWan, isContractClosed, isServiceProject, normContractStatus,
   teamOfProject, occOfProject, CERTS,
 } from '../components/data';
-import type { Installment } from '../components/data';
 import { consumeFocusTab, getContracts, getFocus, getOpps, getProjects, moveProject, patchContract, patchProject, relOfProject, setFocus, setFocusTab, subscribeStore } from '../components/store';
 import OverviewSub from '../components/project-center/OverviewSub';
 import ExecSub from '../components/project-center/ExecSub';
 import QualitySub from '../components/project-center/QualitySub';
 import BizSub from '../components/project-center/BizSub';
+import FundSub from '../components/project-center/FundSub';
 import CostSub from '../components/project-center/CostSub';
 import MembersSub from '../components/project-center/MembersSub';
+import { buildPjDemo, daysBetween, groupContracts, isLegalNode, mileTplOf, nodeKey } from '../components/project-center/seed';
 import type { PjCtx } from '../components/project-center/ctx';
 
 /* ==================================================================
@@ -53,11 +53,12 @@ import type { PjCtx } from '../components/project-center/ctx';
  * ================================================================== */
 const SUBS = [
   { key: 'overview', label: '概览', comp: OverviewSub },
-  { key: 'track', label: '执行履约', comp: ExecSub },
-  { key: 'quality', label: '质量验收', comp: QualitySub },
-  { key: 'biz', label: '商务合同', comp: BizSub },
-  { key: 'cost', label: '成本台账', comp: CostSub },
-  { key: 'members', label: '团队资料', comp: MembersSub },
+  { key: 'track', label: '进度履约', comp: ExecSub },
+  { key: 'quality', label: '质量安全', comp: QualitySub },
+  { key: 'contract', label: '合同变更', comp: BizSub },
+  { key: 'fund', label: '资金台账', comp: FundSub },
+  { key: 'cost', label: '成本管控', comp: CostSub },
+  { key: 'members', label: '团队与干系人', comp: MembersSub },
 ] as const;
 type SubKey = typeof SUBS[number]['key'];
 const SUB_KEYS = SUBS.map((s) => s.key) as readonly string[];
@@ -65,174 +66,107 @@ const SUB_KEYS = SUBS.map((s) => s.key) as readonly string[];
 /** 历史深链 key → 新子页 key（DashboardPage 等处曾 setFocusTab('project-center','cost')） */
 const LEGACY_SUB: Record<string, SubKey> = {
   exec: 'track', mile: 'track', progress: 'track',
-  cost: 'cost', biz: 'biz', quality: 'quality', team: 'members',
+  cost: 'cost', biz: 'contract', quality: 'quality', team: 'members',
 };
 
 /* ==================================================================
- * 静态业务数据集
- * 说明：以下为演示用种子（里程碑轴 / 预算科目 / 成本流水 / 收支明细 / 变更 / 保证金），
- *       金额与数量在页面内按项目规模等比缩放，保证 13 个项目都能打开且数字自洽。
+ * 目标成本科目模板（本项目页唯一保留的模块级数据）
+ * 说明：科目的「占比」是与具体项目无关的行业经验值，故留在这里；金额按项目的
+ *       目标成本等比缩放后落到具体项目。除此之外，项目详情的全部台账都由
+ *       seed.ts 的 buildPjDemo(P, contracts) 按项目自身字段派生 ——
+ *       不再有跨项目共用的演示数据（改造前 17 组常量会让任何项目都显示同一个项目的数据）。
  * ================================================================== */
+/* 目标成本科目按业务线裁剪 —— 检测项目不存在「分包安装/主材」、维保项目以人工为主，
+   统一套施工模板会得到一堆 0 值科目（权重和为 1，保证「目标成本 = Σ 各科目」成立）。 */
+const BUDGET_TPL_BY_BIZ: Record<string, { g: string; rows: { type: string; w: number; note: string }[] }[]> = {
+  GC: [
+    {
+      g: '直接费', rows: [
+        { type: '材料费', w: 0.52, note: '主材 / 报警设备 / 喷淋头' },
+        { type: '分包费', w: 0.22, note: '安装劳务分包' },
+        { type: '人工费', w: 0.09, note: '班组工资' },
+        { type: '机械费', w: 0.04, note: '吊装 / 台班' },
+      ],
+    },
+    {
+      g: '间接费', rows: [
+        { type: '管理费', w: 0.05, note: '现场管理' },
+        { type: '检测费', w: 0.04, note: '第三方检测' },
+        { type: '税费', w: 0.04, note: '按适用税率计提' },
+      ],
+    },
+  ],
+  WB: [
+    {
+      g: '直接费', rows: [
+        { type: '人工费', w: 0.46, note: '巡检 / 值班班组' },
+        { type: '材料费', w: 0.22, note: '更换配件 / 耗材' },
+        { type: '机械费', w: 0.04, note: '登高作业台班' },
+      ],
+    },
+    {
+      g: '间接费', rows: [
+        { type: '管理费', w: 0.16, note: '服务站点管理' },
+        { type: '检测费', w: 0.06, note: '季度联动检测外协' },
+        { type: '税费', w: 0.06, note: '按适用税率计提' },
+      ],
+    },
+  ],
+  JC: [
+    {
+      g: '直接费', rows: [
+        { type: '人工费', w: 0.58, note: '现场检测作业' },
+        { type: '分包费', w: 0.06, note: '外协复检' },
+        { type: '机械费', w: 0.06, note: '检测仪器折旧 / 台班' },
+        { type: '材料费', w: 0.04, note: '检测耗材' },
+      ],
+    },
+    {
+      g: '间接费', rows: [
+        { type: '管理费', w: 0.20, note: '报告编制与质控' },
+        { type: '税费', w: 0.06, note: '按适用税率计提' },
+      ],
+    },
+  ],
+  RJ: [
+    {
+      g: '直接费', rows: [
+        { type: '材料费', w: 0.42, note: '网关 / 传感器硬件' },
+        { type: '分包费', w: 0.16, note: '现场实施外包' },
+        { type: '人工费', w: 0.18, note: '部署与培训人工' },
+      ],
+    },
+    {
+      g: '间接费', rows: [
+        { type: '管理费', w: 0.10, note: '项目管理' },
+        { type: '设计费', w: 0.06, note: '方案与深化设计' },
+        { type: '税费', w: 0.08, note: '按适用税率计提' },
+      ],
+    },
+  ],
+  QT: [
+    {
+      g: '直接费', rows: [
+        { type: '材料费', w: 0.38, note: '抢修用料 / 管件' },
+        { type: '人工费', w: 0.34, note: '抢修班组（含夜间）' },
+        { type: '分包费', w: 0.10, note: '土建恢复外协' },
+        { type: '机械费', w: 0.06, note: '抽水 / 试压台班' },
+      ],
+    },
+    {
+      g: '间接费', rows: [
+        { type: '管理费', w: 0.06, note: '应急响应管理' },
+        { type: '税费', w: 0.06, note: '按适用税率计提' },
+      ],
+    },
+  ],
+};
 
-/** 里程碑轴（全页唯一的轴）—— pct 为该节点对应的累计形象进度 */
-const MILE_AXIS = [
-  { name: 'M1 进场准备', date: '已完成 2026-09-20', st: 'done', pct: 5 },
-  { name: 'M2 进场施工', date: '已完成 2026-09-22', st: 'done', pct: 15 },
-  { name: 'M3 管线安装', date: '预计完成 2026-11-30', st: 'cur', pct: 40 },
-  { name: 'M4 系统联调', date: '待开始', st: '', pct: 70 },
-  { name: 'M5 竣工验收', date: '预计完成 2027-02-28', st: '', pct: 100 },
-  { name: 'M6 质保期', date: '待开始', st: '', pct: 100 },
-];
+/** 成本类别全集（登记成本弹窗的类别下拉） */
+const COST_TYPES = ['材料费', '分包费', '人工费', '机械费', '管理费', '设计费', '检测费', '税费', '其他'];
 
-const PLAN_ROWS = [
-  { type: '材料费', amt: 1320000, note: '镀锌钢管 / 报警设备 / 喷淋头' },
-  { type: '分包费', amt: 560000, note: '安装劳务分包' },
-  { type: '人工费', amt: 210000, note: '班组工资' },
-  { type: '机械费', amt: 90000, note: '吊装 / 台班' },
-  { type: '管理费', amt: 50000, note: '现场管理' },
-  { type: '检测费', amt: 30000, note: '第三方检测' },
-];
-const PLAN_BASE = PLAN_ROWS.reduce((s, r) => s + r.amt, 0); // 2,260,000
-
-const COST_ROWS: {
-  id: string; src: 'CG' | 'CB' | 'PF'; type: string; amt: number; date: string;
-  note: string; st?: string; mergedTo?: string;
-}[] = [
-  { id: 'CG000003', src: 'CG', type: '材料费', amt: 1320000, date: '2026-08-12', note: '消防设备采购合同' },
-  { id: 'CG000005', src: 'CG', type: '分包费', amt: 560000, date: '2026-08-20', note: '安装劳务分包合同' },
-  { id: 'CB000002', src: 'CB', type: '人工费', amt: 210000, date: '2026-09-02', note: '8 月班组工资' },
-  { id: 'CB000003', src: 'CB', type: '管理费', amt: 62000, date: '2026-09-06', note: '现场管理杂费' },
-  { id: 'PF000004', src: 'PF', type: '分包费', amt: 180000, date: '2026-09-05', note: '无合同付款 · 应急采购风机', mergedTo: 'CG000005' },
-  { id: 'PF000082', src: 'PF', type: '材料费', amt: 80000, date: '2026-09-19', note: '无合同付款 · 应急辅材', st: 'approving' },
-];
-const COST_BASE = COST_ROWS.reduce((s, r) => s + r.amt, 0); // 2,412,000
-const COST9 = ['材料费', '分包费', '人工费', '机械费', '管理费', '设计费', '检测费', '税费', '其他'];
-
-const PAY_ROWS: {
-  id: string; kind: string; contract: string; amt: number; use: string; st: string;
-  date: string; hc?: string; mergedTo?: string;
-}[] = [
-  /* 回款口径：仅银行已到账（paid）计入回款；已开票未到账（invoiced）挂应收账龄，不计回款 */
-  { id: 'SK000001', kind: '收入', contract: 'HT000009', amt: 540000, use: '收款期次 1 · 预付款（30%）· 银行已到账', st: 'paid', date: '2026-09-12' },
-  { id: 'SK000002', kind: '收入', contract: 'HT000009', amt: 337500, use: '收款期次 2 · 进度款（已开票未到账 · 账龄 75 天）', st: 'invoiced', date: '2026-07-20' },
-  { id: 'PF000002', kind: '采购付款', contract: 'CG000003', amt: 573000, use: '设备预付款', st: 'paid', date: '2026-08-05' },
-  { id: 'PF000004', kind: '无合同付款', contract: '—（项目级）', amt: 180000, use: '应急采购风机', st: 'paid', date: '2026-09-05', mergedTo: 'CG000005' },
-  { id: 'PF000006', kind: '采购付款', contract: 'CG000003', amt: 250000, use: '设备进度款', st: 'flushed', date: '2026-09-08', hc: 'HC000047' },
-  { id: 'PF000007', kind: '采购付款', contract: 'CG000003', amt: 45000, use: '运杂费', st: 'flushed', date: '2026-09-10', hc: 'HC000001' },
-  { id: 'HC000047', kind: '红字冲销单', contract: '冲抵 PF000006', amt: -250000, use: '红字冲销 · 发票抬头错误（财务 · 王会计）', st: 'hc', date: '2026-09-15' },
-  { id: 'HC000001', kind: '红字冲销单', contract: '冲抵 PF000007', amt: -45000, use: '红字冲销 · 重复提交（财务 · 王会计）', st: 'hc', date: '2026-09-16' },
-  { id: 'PF000009', kind: '采购付款', contract: 'CG000003', amt: 80000, use: '辅材款', st: 'approving', date: '2026-09-18' },
-  { id: 'PF000082', kind: '无合同付款', contract: '—（项目级）', amt: 80000, use: '应急辅材', st: 'approving', date: '2026-09-19' },
-];
-const PAY_FILTERS = ['全部', '收入', '采购付款', '无合同付款', '红字冲销单'];
-const SUM_IN = PAY_ROWS.filter((r) => r.kind === '收入' && r.st === 'paid').reduce((s, r) => s + r.amt, 0);
-const SUM_OUT = PAY_ROWS.filter((r) => r.kind !== '收入' && r.st === 'paid').reduce((s, r) => s + r.amt, 0);
-
-const CHANGES = [
-  { id: 'BG0001', title: '材料调差价格调整补充协议（HT000009S1）', amt: 150000, st: '已生效', by: '蓝峰', date: '2026-09-18', contract: 'HT000009', cat: '材料调差' },
-  { id: 'BG000009', title: '机房气体灭火系统增补', amt: 80000, st: '商务审批中', by: '蓝峰', date: '2026-09-12', contract: 'HT000009', cat: '材料费' },
-];
-const CHG_PENDING = CHANGES.filter((c) => c.st === '商务审批中').reduce((s, c) => s + c.amt, 0);
-const CHG_EFFECTIVE = CHANGES.filter((c) => c.st === '已生效').reduce((s, c) => s + c.amt, 0);
-const CASH_IN = SUM_IN;
-const CASH_OUT = SUM_OUT;
-const NET_IN = CASH_IN - CASH_OUT;
-
-const APPROVALS = [
-  { id: 'BG000009', type: '变更', desc: `机房气体灭火系统增补 +${fmtAmt(80000)} · 商务审批` },
-  { id: 'PF000009', type: '付款', desc: `辅材款 ${fmtAmt(80000)} · CG000003` },
-  { id: 'PF000082', type: '付款', desc: `材料费 ${fmtAmt(80000)} · 无合同付款` },
-];
-
-/** 合同状态 → 合同树徽标色（与合同台账语义色一致） */
-const CT_TONE = (s: string): 'blue' | 'orange' | 'green' =>
-  s === '履约中' ? 'blue' : (s === '已签约' || s === '已续签') ? 'green' : 'orange';
-
-/**
- * 收款期次状态（由「实收 / 应收 / 开票 / 计划日」派生，不占合同状态枚举）：
- * 已到账 / 部分到账 / 已开票·待到账 / 逾期未收 / 未到期。
- */
-const instSt = (i: Installment): string =>
-  i.got >= i.amt ? '已到账'
-    : i.got > 0 ? '部分到账'
-      : i.inv === '已开票' ? '已开票·待到账'
-        : (i.plan && i.plan < TODAY) ? '逾期未收' : '未到期';
-
-/** 我方缴纳、尚未退回的保证金台账（质保金是客户扣留的应收义务，单独派生不混算） */
-const DEPOSITS = [
-  { id: 'BZ000003', type: '履约保证金', dir: 'in', party: '云南××消防设备有限公司（CG000003）', amt: 12000, pay: '2026-09-01', due: '2026-09-15', st: '未退' },
-  { id: 'BZ000002', type: '履约保证金', dir: 'in', party: '昆明万达广场商业管理有限公司', amt: 20000, pay: '2026-06-01', due: '2027-06-30', st: '未退' },
-  { id: 'BZ000001', type: '投标保证金', dir: 'in', party: '昆明万达广场商业管理有限公司', amt: 5000, pay: '2026-05-20', due: '2026-06-10', st: '已退还' },
-];
-
-/** 档案（按里程碑归组）：reached 决定必传项缺失时的红点颜色（未到=灰 / 已到仍缺=红 / 已传=绿） */
+/** 档案文件（上传 / 删除弹窗用） */
 type AttFile = { name: string; size: string; by: string; date: string };
-const ATTACH: { mile: string; reached: boolean; req: string[]; files: AttFile[] }[] = [
-  {
-    mile: 'M1 进场准备', reached: true, req: ['施工方案报审', '开工令'],
-    files: [
-      { name: '施工方案报审表.pdf', size: '2.1MB', by: '陈工', date: '2026-09-18' },
-      { name: '开工令.pdf', size: '0.8MB', by: '蓝峰', date: '2026-09-20' },
-    ],
-  },
-  {
-    mile: 'M2 进场施工', reached: true, req: ['进场报审表', '进场人员名单'],
-    files: [
-      { name: '进场报审表.pdf', size: '1.2MB', by: '陈工', date: '2026-09-22' },
-      { name: '进场人员名单.xlsx', size: '0.3MB', by: '陈工', date: '2026-09-22' },
-    ],
-  },
-  { mile: 'M3 管线安装（预计完成 2026-11-30）', reached: true, req: ['隐蔽工程验收记录', '影像资料'], files: [] },
-  { mile: 'M4 系统联调（进行中 72%）', reached: true, req: ['联调报告', '影像资料'], files: [] },
-  { mile: 'M5 竣工验收（预计完成 2027-02-28）', reached: false, req: ['验收查验记录', '竣工资料', '影像资料', '签字件'], files: [] },
-  {
-    mile: '项目级（合同 / 立项 / 其他）', reached: true, req: [],
-    files: [
-      { name: '消防改造合同-盖章版.pdf', size: '4.2MB', by: '李商务', date: '2026-09-12' },
-      { name: '项目立项审批单.pdf', size: '0.6MB', by: '蓝峰', date: '2026-09-20' },
-    ],
-  },
-];
-const ATT_CNT = ATTACH.reduce((s, g) => s + g.files.length, 0);
-
-/** 里程碑节点表（对齐《产品设计文档》§9.2 执行域） */
-const MILE_ROWS = [
-  { n: 'M1 进场准备', plan: '2026-09-20', act: '2026-09-20', st: '已完成', owner: '张工' },
-  { n: 'M2 材料进场报验', plan: '2026-09-24', act: '2026-09-24', st: '已完成', owner: '陈工' },
-  { n: 'M3 隐蔽工程验收', plan: '2026-10-08', act: '2026-10-08', st: '已完成', owner: '何监理' },
-  { n: 'M4 管线安装', plan: '2026-11-30', act: '—', st: '进行中', owner: '张工' },
-  { n: 'M5 设备安装', plan: '2026-12-20', act: '—', st: '待开始', owner: '张工' },
-  { n: 'M6 系统调试', plan: '2027-01-15', act: '—', st: '待开始', owner: '王工' },
-  { n: 'M7 第三方消防检测', plan: '2027-02-10', act: '—', st: '待开始', owner: '杨工' },
-  { n: 'M8 消防验收备案', plan: '2027-02-28', act: '—', st: '待开始', owner: '李工' },
-  { n: 'M9 竣工资料', plan: '2027-03-15', act: '—', st: '待开始', owner: '陈静' },
-  { n: 'M10 结算', plan: '2027-03-31', act: '—', st: '待开始', owner: '王会计' },
-];
-
-/** 现场投入：机械台班计划 + 材料设备领用 */
-const MACH_ROWS = [
-  { name: '25T 汽车吊', unit: '台班', qty: 12, price: 2400, date: '2026-09-24' },
-  { name: '高空作业车', unit: '台班', qty: 18, price: 1600, date: '2026-10-02' },
-  { name: '电焊机（含耗材）', unit: '台班', qty: 26, price: 320, date: '2026-10-15' },
-  { name: '管道试压泵', unit: '台班', qty: 6, price: 580, date: '2026-10-28' },
-];
-const MAT_USE = [
-  { code: 'CL000123', qty: 1860, date: '2026-09-23' },
-  { code: 'CL000145', qty: 420, date: '2026-09-26' },
-  { code: 'CL000188', qty: 640, date: '2026-09-28' },
-  { code: 'EQ000002', qty: 260, date: '2026-09-30' },
-  { code: 'CL000177', qty: 34, date: '2026-10-06' },
-  { code: 'EQ000001', qty: 2, date: '2026-10-09' },
-];
-
-/** 操作记录（抽屉全文） */
-const OPS = [
-  { t: '2026-09-19 17:42', w: '系统', tag: '自动', d: `无合同付款 PF000082 提交审批（材料费 ${fmtAmt(80000)} · 暂计入成本流水）` },
-  { t: '2026-09-19 18:00', w: '蓝峰', tag: '手动', d: 'PF000004 归并 → CG000005（原行保留并置灰）' },
-  { t: '2026-09-16 10:18', w: '财务 · 王会计', tag: '手动', d: '红字冲销 PF000007 → HC000001' },
-  { t: '2026-09-15 15:03', w: '财务 · 王会计', tag: '手动', d: '红字冲销 PF000006 → HC000047' },
-  { t: '2026-09-12 11:05', w: '蓝峰', tag: '手动', d: `合同侧发起变更 BG000009（+${fmtAmt(80000)}）· 商务审批中` },
-];
 
 /** 出处与去向链（项目全景抽屉用）：每个数字都能指回它的来源单据 */
 function Panorama({ C, open, onClose }: { C: PjCtx; open: boolean; onClose: () => void }) {
@@ -246,6 +180,16 @@ function Panorama({ C, open, onClose }: { C: PjCtx; open: boolean; onClose: () =
       quote: r.quotes[0], contract: r.contracts[0], bid: r.bids[0],
     };
   }, [P.id]);
+
+  /* 抽屉里的构成信息只取笔数与最近单据，不重复金额 */
+  const costMix = useMemo(() => {
+    const m = new Map<string, number>();
+    C.costRows.forEach((r) => m.set(r.type, (m.get(r.type) ?? 0) + 1));
+    return [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([t, n]) => `${t} ${n} 笔`);
+  }, [C.costRows]);
+  const inCnt = C.payRowsAll.filter((r) => r.kind === '收入').length;
+  const outCnt = C.payRowsAll.length - inCnt;
+  const lastPay = [...C.payRowsAll].sort((a, b) => (a.date < b.date ? 1 : -1))[0];
 
   return (
     <Drawer
@@ -262,7 +206,7 @@ function Panorama({ C, open, onClose }: { C: PjCtx; open: boolean; onClose: () =
           { k: '报价', v: tr.quote ? `${tr.quote.id} · ${tr.quote.status}` : '—', go: () => C.go('quote') },
           { k: '投标', v: tr.bid ? `${tr.bid.id} · ${tr.bid.stage}` : '—', go: () => C.go('bid') },
           { k: '合同', v: tr.contract ? `${tr.contract.id} · ${tr.contract.status}` : '—', go: () => C.go('contract-detail') },
-          { k: '立项审批', v: '已通过 · 2026-09-18 · 蓝峰', go: null },
+          { k: '立项', v: `来源 ${P.source} · 立项日 ${P.start}${P.noContract ? ` · 无合同施工（补签期限 ${P.backfillBy ?? '—'}）` : ''}`, go: null },
         ].map((r) => (
           <div key={r.k} className="nc-gate-row">
             <span className="nc-gate-n">{r.k} <div className="nc-cell-sub">{r.v}</div></span>
@@ -271,14 +215,14 @@ function Panorama({ C, open, onClose }: { C: PjCtx; open: boolean; onClose: () =
         ))}
       </div>
 
+      {/* 「去向」只讲链路与单据构成：金额 / 比率各自归属业务域子页（回款率归资金域、成本偏差归成本域），
+          抽屉不再复述一遍，避免同一个数字在全景与子页两处出现。 */}
       <div className="nc-ledhd" style={{ marginTop: 18 }}>去向（钱与货流到哪去）</div>
       <div className="nc-gate">
         {[
-          { k: '合同树', v: `${C.saleCt.length} 收款类 / ${C.buyCt.length} 付款类`, sub: `合同额 ${fmtAmt(C.CONTRACT_NOW)} · 执行额 ${fmtAmt(C.EXEC_AMT)}` },
-          { k: '成本流水', v: `${C.costRows.length} 笔 · ${C.COST_SUM.toLocaleString()} 元`, sub: `目标成本 ${C.PLAN_SUM.toLocaleString()} 元 · ${C.dev > 0 ? '超支' : '结余'} ${Math.abs(C.dev).toLocaleString()}` },
-          { k: '收支明细', v: `收入 ${C.SUM_IN.toLocaleString()} / 支出 ${C.SUM_OUT.toLocaleString()}`, sub: `净现金流 ${C.NET_IN.toLocaleString()} 元` },
-          { k: '未回款', v: `${C.UNRECV.toLocaleString()} 元`, sub: `已回款率 ${C.PAY_PROGRESS.toFixed(1)}% · 应收账龄 ${C.overdueAmt.toLocaleString()} 元` },
-          { k: '质保金', v: `${C.WARRANTY.toLocaleString()} 元`, sub: '结算时客户扣留 · 合同额 × 3%' },
+          { k: '合同树', v: `${C.saleCt.length} 收款类 / ${C.buyCt.length} 付款类`, sub: (C.saleCt[0]?.code ?? '—') + (C.saleCt.length > 1 ? ` 等 ${C.saleCt.length} 份` : '') },
+          { k: '成本流水', v: `${C.costRows.length} 笔`, sub: costMix.length > 0 ? costMix.join(' / ') : '尚未发生成本' },
+          { k: '收支明细', v: `收入 ${inCnt} 笔 / 支出 ${outCnt} 笔`, sub: lastPay ? `最近一笔 ${lastPay.date} · ${lastPay.id}` : '暂无收支' },
           { k: '档案', v: `${C.attCnt} 份已归档`, sub: C.curMiss.length > 0 ? `当前节点仍缺 ${C.curMiss.length} 项` : '当前节点资料齐备' },
         ].map((r) => (
           <div key={r.k} className="nc-gate-row">
@@ -293,12 +237,12 @@ function Panorama({ C, open, onClose }: { C: PjCtx; open: boolean; onClose: () =
       <KvGrid cols={2} rows={[
         { k: '销售负责人', v: P.owner },
         { k: '项目经理', v: P.pm },
-        { k: '客户对接人', v: (P as { clientContact?: string }).clientContact ?? '刘经理 138****6601' },
-        { k: '监理单位', v: '云南××工程监理有限公司 · 何监理' },
+        { k: '客户对接人', v: (P as { clientContact?: string }).clientContact ?? '—' },
+        { k: '监理单位', v: C.parties.find((g) => g.key === 'sup')?.rows.map((r) => `${r.org} · ${r.name}`).join('、') ?? '—' },
       ]} />
 
       <div className="nc-ledhd" style={{ marginTop: 18 }}>操作记录</div>
-      <Timeline items={OPS.map((o) => ({ date: o.t.slice(0, 10), tone: o.tag === '自动' ? 'gray' as const : 'ok' as const, text: <><Tag tone={o.tag === '自动' ? 'gray' : 'blue'}>{o.tag}</Tag> <b>{o.w}</b> · {o.d}</> }))} />
+      <Timeline items={C.ops.map((o) => ({ date: o.t.slice(0, 10), tone: o.tag === '自动' ? 'gray' as const : 'ok' as const, text: <><Tag tone={o.tag === '自动' ? 'gray' : 'blue'}>{o.tag}</Tag> <b>{o.w}</b> · {o.d}</> }))} />
     </Drawer>
   );
 }
@@ -339,10 +283,7 @@ export default function ProjectCenterPage({ go, role, nav }: { go: (p: string) =
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nav]);
 
-  const [costSub, setCostSub] = useState('ledger');   // 成本子页 · 子视图（保留原有深链能力）
-  const [paySub, setPaySub] = useState('flow');
   const [payFilter, setPayFilter] = useState('全部');
-  const [drill, setDrill] = useState<string | null>(null);
   const [m, setM] = useState<string | null>(null);
   /** 关联合同弹窗选中项（挂接后双向落库：合同记 project，项目回写合同额并解除无合同标记） */
   const [linkCt, setLinkCt] = useState('');
@@ -351,16 +292,30 @@ export default function ProjectCenterPage({ go, role, nav }: { go: (p: string) =
   const [flushId, setFlushId] = useState('');
   const [depRelId, setDepRelId] = useState<string | null>(null);
   const [delFile, setDelFile] = useState<AttFile | null>(null);
-  const [rejA, setRejA] = useState<(typeof APPROVALS)[number] | null>(null);
-  const [progEdit, setProgEdit] = useState<number>(P.progressActual ?? 0);
+  const [rejA, setRejA] = useState<{ id: string; desc: string } | null>(null);
+  const [progEdit, setProgEdit] = useState<number>(P.progressActual ?? P.milestone);
+
+  /* ---------- 项目合同树 + 全套台账：一次性由项目级工厂派生 ----------
+     改造前这里有 17 组模块级常量（收支明细 / 成本流水 / 变更 / 保证金 / 施工日志 / 报验 /
+     隐蔽验收 / 安全检查 / 整改轮次 / 相关方 / 机械 / 材料领用 / 操作记录 / 里程碑 / 准入资料 /
+     工程量），点开任何项目看到的都是「昆明万达」的那一套 —— 项目 A 的页面显示项目 B 的钱。
+     现在按 project === P.id 过滤合同后交给 buildPjDemo 派生，做到一个项目一套数。 */
+  const projContracts = useMemo(
+    () => getContracts().filter((c) => c.project === P.id),
+    [P.id, tick],
+  );
+  const { saleCt, buyCt } = useMemo(() => groupContracts(projContracts), [projContracts]);
+  const D = useMemo(() => buildPjDemo(P, projContracts), [P, projContracts, tick]);
 
   /* ---------- 经营口径（唯一事实源 · 由子页共享，不在子页重算） ---------- */
-  const REV = P.contractAmt;
-  const CONTRACT_NOW = REV;
+  const CONTRACT_NOW = P.contractAmt;
   const EXEC_AMT = P.execAmt;
   const BAD_DEBT = 0;
-  const UNRECV = EXEC_AMT - CASH_IN - BAD_DEBT;
+  /** 已回款 = 已到账收入合计（与「收款期次」同源，不再读跨项目的模块级常量） */
+  const CASH_IN = D.cashIn;
+  const UNRECV = Math.max(0, EXEC_AMT - CASH_IN - BAD_DEBT);
   const PAY_PROGRESS = EXEC_AMT > 0 ? (CASH_IN / EXEC_AMT) * 100 : 0;
+  const NET_IN = CASH_IN - D.sumOut;
   const WARRANTY = Math.round(CONTRACT_NOW * 0.03);
 
   /**
@@ -371,130 +326,121 @@ export default function ProjectCenterPage({ go, role, nav }: { go: (p: string) =
   const BUDGET_RATE = 0.72;
   const BUDGET_EST = !P.budget && P.execAmt > 0;
   const TARGET_COST = P.budget ?? (BUDGET_EST ? Math.round(P.execAmt * BUDGET_RATE) : 0);
-  const planScale = PLAN_BASE > 0 ? TARGET_COST / PLAN_BASE : 0;
-  /* 实际成本为 0 时不再回落到模板基数（否则作废 / 未开工项目会凭空显示 241 万成本） */
-  const costScale = P.cost > 0 ? P.cost / COST_BASE : 0;
-  const planRows = useMemo(() => PLAN_ROWS.map((r) => ({ ...r, amt: Math.round(r.amt * planScale) })), [planScale]);
-  const costRows = useMemo(() => COST_ROWS.map((r) => ({ ...r, amt: Math.round(r.amt * costScale) })), [costScale]);
+  /* 科目金额按目标成本等比缩放；「占比」是按业务线裁剪的行业经验值，故模板留在页面内 */
   const groupedPlan = useMemo(() => {
-    const G: { g: string; types: string[] }[] = [
-      { g: '直接费', types: ['材料费', '分包费', '人工费', '机械费'] },
-      { g: '间接费', types: ['管理费', '检测费', '设计费', '税费'] },
-    ];
-    return G.map((x) => {
-      const rows = planRows.filter((r) => x.types.includes(r.type));
+    const tpl = BUDGET_TPL_BY_BIZ[P.biz] ?? BUDGET_TPL_BY_BIZ.GC;
+    return tpl.map((x) => {
+    const rows = x.rows.map((r) => ({ type: r.type, amt: Math.round(TARGET_COST * r.w), note: r.note }));
       return { g: x.g, rows, sum: rows.reduce((a, r) => a + r.amt, 0) };
     }).filter((x) => x.rows.length > 0);
-  }, [planRows]);
-  const PLAN_SUM = planRows.reduce((s, r) => s + r.amt, 0);
-  const COST_SUM = costRows.reduce((s, r) => s + r.amt, 0);
+  }, [TARGET_COST, P.biz]);
+  const PLAN_SUM = groupedPlan.reduce((s, g) => s + g.sum, 0);
+  const COST_SUM = D.costRows.reduce((s, r) => s + r.amt, 0);
   const dev = COST_SUM - PLAN_SUM;
   const devPct = PLAN_SUM > 0 ? (dev / PLAN_SUM) * 100 : 0;
   const COST_PROGRESS = PLAN_SUM > 0 ? (COST_SUM / PLAN_SUM) * 100 : 0;
   const planProfit = CONTRACT_NOW > 0 ? ((CONTRACT_NOW - PLAN_SUM) / CONTRACT_NOW) * 100 : 0;
   const actProfit = CONTRACT_NOW > 0 ? ((CONTRACT_NOW - COST_SUM) / CONTRACT_NOW) * 100 : 0;
 
-  const overdue = PAY_ROWS.filter((r) => r.st === 'invoiced');
-  const overdueAmt = overdue.reduce((s, r) => s + r.amt, 0);
-
+  /* ---------- 进度：实际取项目形象进度，计划由工厂按项目工期与计划曲线派生 ---------- */
   const progActual = progEdit;
-  const progPlan = P.progressPlan ?? 0;
+  const progPlan = D.progPlan;
   const progDev = Math.round((progActual - progPlan) * 10) / 10;
   const progLevel: 'red' | 'yellow' | 'ok' = progDev <= -20 ? 'red' : progDev <= -10 ? 'yellow' : 'ok';
-  const progTag = progLevel === 'red' ? '红警' : progLevel === 'yellow' ? '黄警' : '正常';
+  const progTag = progLevel === 'red' ? '红警' : progLevel === 'yellow' ? '黄警' : progDev > 10 ? '超前' : '正常';
 
-  const depIn = DEPOSITS.filter((d) => d.dir === 'in' && d.st === '未退');
-  const depInAmt = depIn.reduce((s, d) => s + d.amt, 0);
+  const depIn = D.deposits.filter((d) => d.dir === 'in' && d.st === '未退');
   const depositRows = [
-    ...DEPOSITS,
+    ...D.deposits,
     {
       id: `ZB-${P.id}`, type: '质保金（结算时客户扣留）', dir: 'out',
       party: `${P.customer}（${P.id}）`, amt: WARRANTY, pay: '—', due: '结算后 12 个月', st: '待扣留',
     },
   ];
 
-  const curMile = MILE_AXIS.find((x) => x.st === 'cur');
-  const curGroup = ATTACH.find((g) => g.mile.startsWith(curMile?.name.slice(0, 2) || '##'));
-  const curReq = curGroup?.req || [];
-  const curFiles = curGroup?.files || [];
-  const curMiss = curReq.filter((r) => !curFiles.some((f) => f.name.includes(r.slice(0, 4))));
+  const curMile = D.mileAxis.find((x) => x.st === 'cur');
+  const curReq = D.curReq;
+  const curFiles = D.curFiles;
+  const curMiss = D.curMiss;
 
-  const laborRows = useMemo(() => {
-    const hit = ATT_WORKERS.filter((w) => w.proj === P.id);
-    const list = hit.length ? hit : ATT_WORKERS.slice(0, 4);
-    return list.map((w) => ({
-      id: w.id, name: w.name, trade: w.trade, team: w.team,
-      days: attDays(w, 21), rate: laborRate(w.trade), cost: attCost(w, 21),
-    }));
-  }, [P.id]);
-  const laborSum = laborRows.reduce((a, b) => a + b.cost, 0);
-  const machRows = useMemo(() => MACH_ROWS.map((r) => ({ ...r, amt: r.qty * r.price })), []);
-  const machSum = machRows.reduce((a, r) => a + r.amt, 0);
-  const matRows = useMemo(() => MAT_USE.map((u) => {
-    const it = MATERIALS.find((x) => x.code === u.code) || EQUIPMENTS.find((x) => x.code === u.code);
-    return {
-      code: u.code, date: u.date, qty: u.qty,
-      name: it?.name || '—', spec: it?.spec || '—', unit: it?.unit || '—',
-      ty: it?.ty || '材料', price: it?.price || 0, stock: it?.stock ?? 0,
-      amt: Math.round((it?.price || 0) * u.qty),
-    };
-  }), []);
-  const matSum = matRows.reduce((a, r) => a + r.amt, 0);
+  /**
+   * 节点确认 / 进度保存的统一落库：把形象进度写回项目（刷新 / 重进后节点仍「已完成」），
+   * 并在关键法定 / 末节点联动项目状态。moveProject 内部校验状态机，非法流转自动不生效。
+   * 返回需要追加到 toast 的状态联动说明。
+   */
+  const commitProgress = (newPct: number): string => {
+    /* 节点状态 / 工程量由 P.milestone 派生（seed），progressActual 同步写避免两字段漂移 */
+    patchProject(P.id, { milestone: newPct, progressActual: newPct });
+    const nodeAt = mileTplOf(P.biz).find((n) => n.pct === newPct);
+    const bare = (nodeAt?.name ?? '').replace(/^M\d+\s*/, '');
+    /* GC 法定关口：消防验收备案完成 → 执行中转入验收结算 */
+    if (P.biz === 'GC' && bare === '消防验收备案') {
+      return moveProject(P.id, '验收结算中') ? '，消防验收已备案，项目转入验收结算' : '';
+    }
+    if (newPct >= 100) {
+      if (P.biz === 'GC') {
+        if (P.status === '执行中') moveProject(P.id, '验收结算中');
+        return moveProject(P.id, '已结项') ? '，结算完成，项目已结项' : '';
+      }
+      if (P.biz === 'JC') {
+        return moveProject(P.id, '验收结算中') ? '，检测报告已交付，进入结算' : '';
+      }
+      /* WB 维保：末节点为年度续签评估与结算，服务持续，不自动结项 */
+    }
+    return '';
+  };
 
   const teamRows = useMemo(() => teamOfProject(P.id, P.pm), [P.id, P.pm]);
   const certRows = useMemo(() => occOfProject(P.id), [P.id]);
   const certValidTo = (certId: string) => CERTS.find((c) => c.id === certId)?.validTo || '—';
 
-  /* ---------- 项目合同树：全部由本项目真实合同派生 ----------
-     修复前 saleCt 是硬编码常量 SALE_CT（昆明万达 4 份合同），任意项目点开「商务合同」
-     都看到同一棵万达合同树 —— 项目 A 的页面显示项目 B 的合同。
-     现在按 store 中 project === P.id 的合同分组：收款类 = 销售 / 维护保养；
-     付款类 = 采购 / 分包；补充协议按 parentId 挂到主合同下。
-     收款期次读合同自带的 Contract.installments（2026-09-23 补入模型），期次状态由「实收 / 应收 / 开票」派生。 */
-  const projContracts = useMemo(
-    () => getContracts().filter((c) => c.project === P.id),
-    [P.id, tick],
-  );
-  const saleCt = useMemo(() => {
-    const isBuy = (t: string) => t === '采购合同' || t === '分包合同';
-    return projContracts
-      .filter((c) => !isBuy(c.type) && !c.parentId)
-      .map((c) => {
-        const kids = projContracts.filter((k) => k.parentId === c.id);
-        const delta = c.execAmt - c.amt;
-        return {
-          code: c.id, name: c.name, st: c.status, tone: CT_TONE(c.status), amt: c.amt,
-          role: c.contractRole,
-          badge: `合同额 ${fmtAmt(c.amt)} · 执行额 ${fmtAmt(c.execAmt)}${delta ? `（含已生效变更 ${delta > 0 ? '+' : ''}${fmtAmt(delta)}）` : ''}`,
-          payplan: c.installments?.length
-            ? c.installments.map((i) => ({ ...i, st: instSt(i), note: i.note ?? '' }))
-            : undefined,
-          children: kids.length
-            ? kids.map((k) => ({
-              code: k.id, name: k.name, amt: k.amt,
-              note: k.contractRole === 'supplement_price'
-                ? '价格调整补充协议（增量：合同额不动，只加执行额）'
-                : '服务类补充协议（独立成行）',
-            }))
-            : undefined,
-        };
-      });
-  }, [projContracts]);
-  const buyCt = useMemo(() => projContracts
-    .filter((c) => c.type === '采购合同' || c.type === '分包合同')
-    .map((c) => ({
-      code: c.id, name: c.name, st: c.status, tone: CT_TONE(c.status), amt: c.amt,
-    })), [projContracts]);
+  const payRows = payFilter === '全部' ? D.payRows : D.payRows.filter((r) => r.kind === payFilter);
+  /** 变更金额：已生效进执行额，审批中只作过程记录 */
+  const CHG_EFFECTIVE = D.changes.filter((c) => c.st === '已生效').reduce((s, c) => s + c.amt, 0);
+  const CHG_PENDING = D.changes.filter((c) => c.st !== '已生效').reduce((s, c) => s + c.amt, 0);
+  const qualityTodo = D.arrivals.filter((a) => a.have.length < a.need.length).length
+    + D.rectifyRounds.reduce((s, r) => s + r.items.filter((i) => !i.done).length, 0);
 
-  const payRows = payFilter === '全部' ? PAY_ROWS : PAY_ROWS.filter((r) => r.kind === payFilter);
-  const bars = COST9.map((t) => {
-    const act = costRows.filter((r) => r.type === t).reduce((s, r) => s + r.amt, 0);
-    const pln = planRows.filter((r) => r.type === t).reduce((s, r) => s + r.amt, 0);
-    return { t, act, pln, max: Math.max(act, pln) };
-  });
-  const barMax = Math.max(...bars.map((b) => b.max), 1);
-  const flushRow = PAY_ROWS.find((r) => r.id === flushId);
-  const dunCount = [overdue.length > 0, dev > 0, APPROVALS.length > 0, depIn.length > 0, curMiss.length > 0].filter(Boolean).length;
+  /** 本项目待审批事项（变更 + 无合同付款）—— 项目侧只列与本项目相关的，全局审批在「审批中心」 */
+  const pending = [
+    ...D.changes.filter((c) => c.st !== '已生效').map((c) => ({
+      id: c.id, type: '合同变更',
+      desc: `${c.title} · 增量 ${c.amt.toLocaleString()} 元 · 归属合同 ${c.contract}`,
+    })),
+    ...D.payRows.filter((r) => r.st === 'approving').map((r) => ({
+      id: r.id, type: '无合同付款', desc: `${r.use} · ${r.amt.toLocaleString()} 元 · 项目级挂账`,
+    })),
+  ];
+
+  /** 状态流转：由 P.logs 派生（规格 §6.2 要求暂停/恢复/关闭/重开/作废全部留痕）。
+   *  logs 里已有「— → 状态」的建档行时不再补建，避免同一事件出现两行。 */
+  const flowRows = useMemo(() => {
+    const rows: { time: string; title: string; tag: string; d: string }[] = [];
+    const hasBirth = (P.logs ?? []).some((l) => l.from === '—');
+    if (!hasBirth) {
+      rows.push({
+        time: P.start, title: '创建项目（待启动）', tag: '手动',
+        d: `来源：${P.source} · 负责人：${P.owner}${P.pm ? ` · 项目经理：${P.pm}` : ''}`
+          + (P.noContract ? ' · 无合同先施工，须按期限补签合同' : ''),
+      });
+    }
+    (P.logs ?? []).forEach((l) => {
+      rows.push({
+        time: l.at,
+        title: l.from === '—' ? `立项（→ ${l.to}）` : `${l.from} → ${l.to}`,
+        tag: l.auto ? '自动' : '手动',
+        d: `${l.by}${l.reason ? ` · ${l.reason}` : ''}`,
+      });
+    });
+    return rows;
+  }, [P]);
+
+  /* 按业务类型动态裁剪不适用模块：消防工程全配；维保无大型机械 / 分包（有耗材）；检测为纯人力服务 */
+  const feature = {
+    machine: P.biz === 'GC',
+    material: P.biz !== 'JC',
+    subcontract: P.biz === 'GC',
+  };
 
   /** 子页共享上下文：一次组装，避免每个子页各自取数导致口径漂移 */
   const C: PjCtx = {
@@ -511,19 +457,27 @@ export default function ProjectCenterPage({ go, role, nav }: { go: (p: string) =
     toast,
     openLog: () => setLogOpen(true),
     openPanorama: () => setPanoOpen(true),
+    feature,
+    scene: D.scene,
     CONTRACT_NOW, EXEC_AMT, CASH_IN, NET_IN, UNRECV, PAY_PROGRESS, WARRANTY,
-    TARGET_COST, COST_SUM, PLAN_SUM, dev, devPct, COST_PROGRESS, planProfit, actProfit,
+    COST_SUM, PLAN_SUM, dev, devPct, COST_PROGRESS, planProfit, actProfit,
     BUDGET_EST, BUDGET_SRC: P.budgetSrc,
     progActual, progPlan, progDev, progLevel, progTag,
-    overdue, overdueAmt, CHG_EFFECTIVE, CHG_PENDING,
+    overdue: D.overdue, overdueAmt: D.overdueAmt, overdueDays: D.overdueDays,
+    CHG_EFFECTIVE, CHG_PENDING,
     depIn: depIn.map((d) => ({ id: d.id, type: d.type, amt: d.amt, due: d.due })),
-    depInAmt,
-    costRows, planRows, groupedPlan, bars, barMax,
-    laborRows, laborSum, machRows, machSum, matRows, matSum,
-    payRows, payFilter, setPayFilter, SUM_IN, SUM_OUT,
+    costRows: D.costRows, groupedPlan,
+    laborRows: D.laborRows, laborSum: D.laborSum,
+    machRows: D.machRows, machSum: D.machSum,
+    matRows: D.matRows, matSum: D.matSum,
+    payRows, payRowsAll: D.payRows, payFilter, setPayFilter, SUM_IN: D.sumIn, SUM_OUT: D.sumOut,
     depositRows, teamRows, certRows, certValidTo,
-    saleCt, buyCt, attach: ATTACH, attCnt: ATT_CNT, mileRows: MILE_ROWS,
-    curMile, curReq, curFiles, curMiss, dunCount,
+    saleCt, buyCt, attach: D.attach, attCnt: D.attCnt, mileRows: D.mileRows, mileAxis: D.mileAxis,
+    curMile, curReq, curFiles, curMiss, workItems: D.workItems,
+    changes: D.changes, visas: D.visas,
+    arrivals: D.arrivals, hidden: D.hidden, safeRows: D.safeRows,
+    rectifyRounds: D.rectifyRounds, checkInfo: D.checkInfo, qualityTodo,
+    siteLogs: D.siteLogs, parties: D.parties, ops: D.ops,
   };
 
   /* 溯源链：按外键精确取数（relOfProject），不再按 customerId 模糊匹配取首个单据 ——
@@ -585,11 +539,12 @@ export default function ProjectCenterPage({ go, role, nav }: { go: (p: string) =
             { label: '登记成本', onClick: () => setM('cost') },
             { label: '上传档案', onClick: () => setM('upload') },
           ]} />
+          <Btn onClick={() => setLogOpen(true)}><Ico n="history" size={16} /> 操作记录</Btn>
           <Btn onClick={() => setPanoOpen(true)}><Ico n="search" size={16} /> 项目全景</Btn>
         </>}
       />
 
-      {/* ---- 二级导航：6 个子页（概览 + 5 业务域），附着在内容区顶部不随滚动 ---- */}
+      {/* ---- 二级导航：7 个子页（概览 + 6 业务域），附着在内容区顶部不随滚动 ---- */}
       <div className="nc-pjnav">
         <span className="nc-pjnav-lb">项目视图</span>
         <Tabs
@@ -597,15 +552,17 @@ export default function ProjectCenterPage({ go, role, nav }: { go: (p: string) =
           onChange={setSub}
           items={[
             { key: 'overview', label: '概览' },
-            { key: 'track', label: '执行履约', cnt: MILE_ROWS.length },
-            { key: 'quality', label: curMiss.length > 0 ? `质量验收 ⚠` : '质量验收', cnt: 3 + 2 + 5 },
-            { key: 'biz', label: '商务合同', cnt: saleCt.length + buyCt.length + PAY_ROWS.length },
-            { key: 'cost', label: dev > 0 ? '成本台账 ⚠' : '成本台账', cnt: costRows.length },
-            { key: 'members', label: '团队资料', cnt: teamRows.length + certRows.length + ATT_CNT },
+            { key: 'track', label: '进度履约', cnt: D.mileRows.length },
+            { key: 'quality', label: qualityTodo > 0 ? '质量安全 ⚠' : '质量安全', cnt: D.arrivals.length + D.hidden.length + D.safeRows.length + D.rectifyRounds.reduce((s, r) => s + r.items.length, 0) },
+            { key: 'contract', label: '合同变更', cnt: saleCt.length + buyCt.length },
+            { key: 'fund', label: '资金台账', cnt: D.payRows.length },
+            { key: 'cost', label: dev > 0 ? '成本管控 ⚠' : '成本管控', cnt: D.costRows.length },
+            { key: 'members', label: '团队与干系人', cnt: teamRows.length + certRows.length },
           ]}
         />
         <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span className="nc-cell-sub">更新于 {TODAY} 10:24</span>
+          {/* 更新时间取项目自身的 updatedAt（改造前写死「TODAY 10:24」，永远是同一个时刻） */}
+          <span className="nc-cell-sub">更新于 {P.updatedAt ?? P.start}</span>
           <Btn size="sm" onClick={() => setLogOpen(true)}>操作记录</Btn>
         </span>
       </div>
@@ -623,8 +580,8 @@ export default function ProjectCenterPage({ go, role, nav }: { go: (p: string) =
             {(P as { pausedAt?: string }).pausedAt ? `（暂停于 ${(P as { pausedAt?: string }).pausedAt}）` : ''}
           </Banner>
         )}
-        {C.overdue.length > 0 && sub !== 'biz' && (
-          <Banner tone="warn" actions={<Btn size="sm" onClick={() => { setSub('biz'); }}>去处理</Btn>}>
+        {C.overdue.length > 0 && sub !== 'fund' && (
+          <Banner tone="warn" actions={<Btn size="sm" onClick={() => { setSub('fund'); }}>去处理</Btn>}>
             有 {C.overdue.length} 笔已开票未到账（{C.overdueAmt.toLocaleString()} 元 · 账龄 75 天）—— 计入应收账龄，不计回款。
           </Banner>
         )}
@@ -637,7 +594,13 @@ export default function ProjectCenterPage({ go, role, nav }: { go: (p: string) =
       <Modal
         open={m === 'mile'} width={480} title={`确认里程碑节点${curMile ? `：${curMile.name}` : ''}`}
         onClose={closeM}
-        foot={<><Btn onClick={closeM}>取消</Btn><Btn kind="primary" disabled={curMiss.length > 0} onClick={() => { toast(`${curMile?.name} 已确认，进度自动更新`); setProgEdit(curMile?.pct ?? progEdit); closeM(); }}>确认</Btn></>}
+                foot={<><Btn onClick={closeM}>取消</Btn><Btn kind="primary" disabled={curMiss.length > 0} onClick={() => {
+          const np = curMile?.pct ?? progEdit;
+          const note = commitProgress(np);
+          setProgEdit(np);
+          toast(`${curMile?.name} 已确认，进度更新为 ${np}%${note}`);
+          closeM();
+        }}>确认</Btn></>}
       >
         <div className="nc-gate">
           {curReq.length === 0 && <div className="nc-empty-mini">该节点无必传资料要求</div>}
@@ -735,7 +698,7 @@ export default function ProjectCenterPage({ go, role, nav }: { go: (p: string) =
       <Modal open={m === 'cost'} width={480} title="登记成本" onClose={closeM}
         foot={<><Btn onClick={closeM}>取消</Btn><Btn kind="primary" onClick={() => { toast('成本已登记并计入目标成本对应科目'); closeM(); }}>确认登记</Btn></>}>
         <label className="nc-field nc-field-4"><span>成本类别</span>
-          <select className="nc-input">{COST9.map((t) => <option key={t}>{t}</option>)}</select>
+          <select className="nc-input">{COST_TYPES.map((t) => <option key={t}>{t}</option>)}</select>
         </label>
         <label className="nc-field nc-field-4"><span>发生金额（元）</span><input className="nc-input" /></label>
         <div className="nc-field nc-field-4"><div className="nc-cell-sub">成本更正不可物理删除，冲销走红字单按净额追加。</div></div>
@@ -743,13 +706,14 @@ export default function ProjectCenterPage({ go, role, nav }: { go: (p: string) =
 
       <Modal open={m === 'dunning'} width={480} title="发起催收" onClose={closeM}
         foot={<><Btn onClick={closeM}>取消</Btn><Btn kind="primary" onClick={() => { toast('催收函已生成并推送甲方对接人'); closeM(); }}>生成催收函</Btn></>}>
-        {overdue.map((r) => (
+        {D.overdue.map((r) => (
           <div key={r.id} className="nc-gate-row">
-            <span className="nc-gate-n">{r.id}<div className="nc-cell-sub">{(r as { note?: string }).note ?? r.use} · {r.date}</div></span>
+            <span className="nc-gate-n">{r.id}<div className="nc-cell-sub">{r.use} · {r.date}</div></span>
             <span className="is-num num">{r.amt.toLocaleString()}</span>
-            <span className="nc-gate-s"><Tag tone="orange">账龄 75 天</Tag></span>
+            <span className="nc-gate-s"><Tag tone="orange">账龄 {daysBetween(r.date, TODAY)} 天</Tag></span>
           </div>
         ))}
+        {D.overdue.length === 0 && <div className="nc-empty-mini">本项目当前无已开票未到账款项</div>}
       </Modal>
 
       <Modal open={m === 'check'} width={480} title="登记第三方消防检测" onClose={closeM}
@@ -774,7 +738,7 @@ export default function ProjectCenterPage({ go, role, nav }: { go: (p: string) =
       <Modal open={m === 'upload'} width={480} title="上传档案" onClose={closeM}
         foot={<><Btn onClick={closeM}>取消</Btn><Btn kind="primary" onClick={() => { toast('档案已上传并归档到对应节点'); closeM(); }}>确认上传</Btn></>}>
         <label className="nc-field nc-field-4"><span>归属节点</span>
-          <select className="nc-input">{ATTACH.map((g) => <option key={g.mile}>{g.mile}</option>)}</select>
+          <select className="nc-input">{D.attach.map((g) => <option key={g.mile}>{g.mile}</option>)}</select>
         </label>
         <label className="nc-field nc-field-4"><span>资料类型</span>
           <select className="nc-input">{['隐蔽工程验收记录', '影像资料', '验收查验记录', '竣工资料', '签字件', '其他'].map((t) => <option key={t}>{t}</option>)}</select>
@@ -791,7 +755,11 @@ export default function ProjectCenterPage({ go, role, nav }: { go: (p: string) =
       </Modal>
 
       <Modal open={m === 'progress'} width={480} title="更新施工进度" onClose={closeM}
-        foot={<><Btn onClick={closeM}>取消</Btn><Btn kind="primary" onClick={() => { toast(`进度已更新为 ${progEdit}%`); closeM(); }}>保存</Btn></>}>
+        foot={<><Btn onClick={closeM}>取消</Btn><Btn kind="primary" onClick={() => {
+          const note = commitProgress(progEdit);
+          toast(`进度已保存为 ${progEdit}%${note}`);
+          closeM();
+        }}>保存</Btn></>}>
         <label className="nc-field nc-field-4"><span>完成百分比（0-100）</span>
           <input className="nc-input" type="number" min={0} max={100} value={progEdit} onChange={(e) => setProgEdit(Math.min(100, Math.max(0, Number(e.target.value) || 0)))} />
         </label>
@@ -822,10 +790,11 @@ export default function ProjectCenterPage({ go, role, nav }: { go: (p: string) =
         </div>
       </Modal>
 
-      <Modal open={m === 'approve'} width={480} title="待我审批" onClose={closeM}
-        foot={<><Btn onClick={closeM}>关闭</Btn></>}>
+      <Modal open={m === 'approve'} width={480} title="本项目待审批事项" onClose={closeM}
+        foot={<><span className="nc-cell-sub" style={{ marginRight: 'auto' }}>全局审批在「审批中心」，此处只列与本项目相关的单据</span><Btn onClick={closeM}>关闭</Btn></>}>
         <div className="nc-gate">
-          {APPROVALS.map((a) => (
+          {pending.length === 0 && <div className="nc-empty-mini">本项目当前无待审批事项</div>}
+          {pending.map((a) => (
             <div key={a.id} className="nc-gate-row">
               <span className="nc-gate-n">{a.id} <Tag tone="blue">{a.type}</Tag><div className="nc-cell-sub">{a.desc}</div></span>
               <span className="nc-gate-s">
@@ -845,7 +814,7 @@ export default function ProjectCenterPage({ go, role, nav }: { go: (p: string) =
 
       <ConfirmModal
         open={!!flushId} title={`红字冲销 ${flushId}`}
-        impact={`原单据保留并置灰，冲销按净额追加；${flushRow ? `${flushRow.amt.toLocaleString()} 元` : ''} 将不再计入现金。`}
+        impact={`原单据保留并置灰，冲销按净额追加；${D.payRows.find((r) => r.id === flushId)?.amt.toLocaleString() ?? ''} 元将不再计入现金。`}
         reason reasonLabel="冲销原因" okText="确认冲销"
         onOk={() => { toast(`${flushId} 已红字冲销`); setFlushId(''); closeM(); }} onClose={() => setFlushId('')}
       />
@@ -877,12 +846,7 @@ export default function ProjectCenterPage({ go, role, nav }: { go: (p: string) =
           <span className="nc-subtab">操作明细</span>
         </div>
         <div className="nc-gate">
-          {[
-            { time: '2026-09-12', title: '创建项目（待启动）', tag: '手动', d: '来源：合同立项 · 合同交底已确认' },
-            { time: '2026-09-18', title: '立项审批通过（待启动 → 执行中）', tag: '自动', d: '触发：终审通过 · 里程碑轴启用' },
-            { time: '2026-09-20', title: 'M1 进场准备完成', tag: '手动', d: '操作人：张工 · 已上传开工报告' },
-            { time: '2026-09-22', title: 'M2 进场施工完成', tag: '手动', d: '操作人：张工 · 关联打卡 12 人次' },
-          ].map((h) => (
+          {flowRows.map((h) => (
             <div key={h.time + h.title} className="nc-gate-row">
               <span className="nc-gate-n"><b>{h.title}</b><div className="nc-cell-sub">{h.d}</div></span>
               <span className="is-num num">{h.time}</span>
@@ -890,13 +854,22 @@ export default function ProjectCenterPage({ go, role, nav }: { go: (p: string) =
             </div>
           ))}
           <div className="nc-gate-row">
-            <span className="nc-gate-n"><b>执行中 · 施工阶段（当前）</b><div className="nc-cell-sub">M3 管线安装进行中</div></span>
-            <span className="is-num num">{TODAY}</span>
-            <span className="nc-gate-s"><Tag tone="orange">进行中</Tag></span>
+            <span className="nc-gate-n">
+              <b>{P.status}{D.curMileName ? ` · ${D.curMileName}` : ''}（当前）</b>
+              <div className="nc-cell-sub">
+                {D.curMileName
+                  ? `${D.curMileName}进行中 · 节点准入资料${curMiss.length ? `缺 ${curMiss.length} 项` : '齐备'}`
+                  : `进度 ${progActual}%`}
+              </div>
+            </span>
+            <span className="is-num num">{P.updatedAt ?? P.start}</span>
+            <span className="nc-gate-s">
+              <Tag tone={(PROJECT_STATUS_TONE[P.status] || 'blue') as 'blue'}>{P.status}</Tag>
+            </span>
           </div>
         </div>
         <div className="nc-ledhd" style={{ marginTop: 18 }}>操作明细</div>
-        <Timeline items={OPS.map((o) => ({
+        <Timeline items={C.ops.map((o) => ({
           date: o.t, tone: o.tag === '自动' ? 'gray' as const : 'ok' as const,
           text: <><b>{o.w}</b> <Tag tone={o.tag === '自动' ? 'gray' : 'blue'}>{o.tag}</Tag><div style={{ marginTop: 4 }}>{o.d}</div></>,
         }))} />

@@ -11,6 +11,7 @@ import React, { useMemo, useState } from 'react';
 import { useHashPage, defineHashPageRoute } from '../../common/useHashPage';
 import AppShell from './components/AppShell';
 import { ToastProvider } from './components/ui';
+import { EntityPreviewHost } from './components/entityPreview';
 import { APPROVALS, BIDS, PAGE_META, RECEIVABLES } from './components/data';
 import './style.css';
 
@@ -56,7 +57,9 @@ const ROUTE = defineHashPageRoute(
  */
 const FIXED_PAGES = new Set([
   'customer', 'opp', 'quote', 'bid', 'cert', 'doc',
-  'approval', 'supplier', 'material',
+  'approval', 'supplier',
+  /* 物料域的 5 个二级页：都是列表型视口锁定（一级页 'material' 已随菜单压平移除） */
+  'material-list', 'material-kit', 'material-stock', 'material-src', 'material-cert',
 ]);
 
 type GoFn = (pageId: string) => void;
@@ -82,7 +85,16 @@ export default function NuoanCloud6() {
     [],
   );
 
+  /**
+   * 物料域 5 个二级页共用同一页面组件，由 page 决定展示哪一域（见 MaterialPage 的 ROUTE_VIEW）。
+   * 它们各自就是左侧「供应链管理」组下的二级菜单项，点即到，没有三级折叠。
+   */
+  const MATERIAL_PAGES = new Set([
+    'material-list', 'material-kit', 'material-stock', 'material-src', 'material-cert',
+  ]);
+
   const render = () => {
+    if (MATERIAL_PAGES.has(page)) return <MaterialPage go={go} role={role} nav={nav} pageId={page} />;
     switch (page) {
       case 'dashboard': return <DashboardPage go={go} role={role} nav={nav} />;
       case 'customer': return <CustomerPage go={go} role={role} nav={nav} />;
@@ -102,7 +114,6 @@ export default function NuoanCloud6() {
       case 'attendance': return <AttendancePage go={go} role={role} nav={nav} />;
       case 'approval': return <ApprovalPage go={go} role={role} nav={nav} />;
       case 'supplier': return <SupplierPage go={go} role={role} nav={nav} />;
-      case 'material': return <MaterialPage go={go} role={role} nav={nav} />;
       case 'invoice': return <InvoicePage go={go} role={role} nav={nav} />;
       case 'settings': return <SettingsPage go={go} role={role} nav={nav} />;
       default: return <DashboardPage go={go} role={role} nav={nav} />;
@@ -114,6 +125,8 @@ export default function NuoanCloud6() {
       <AppShell page={page} onNavigate={go} role={role} onRoleChange={setRole} pending={pending} fixedLayout={FIXED_PAGES.has(page)}>
         {render()}
       </AppShell>
+      {/* 穿透预览宿主（全局唯一）：EntityLink 查看型穿透统一在当前页打开，不打断操作 */}
+      <EntityPreviewHost role={role} />
     </ToastProvider>
   );
 }

@@ -35,6 +35,8 @@ export default function ContractPage({ go, role, nav }: { go: (p: string) => voi
   const [projF, setProjF] = useState('');
   /* 合同四分类筛选：primary 主合同 / supplement_price 价格调整补充 / supplement_service 新增服务补充 / maintenance 维保 */
   const [roleF, setRoleF] = useState('');
+  const [topOnly, setTopOnly] = useState(false);   /* 仅顶层合同：隐藏有 parentId 的补充/执行单 */
+  const [curOnly, setCurOnly] = useState(false);   /* 当前有效：隐藏已续签 / 已终止历史 */
   const [quick, setQuick] = useState<string>('全部状态');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
@@ -93,6 +95,8 @@ export default function ContractPage({ go, role, nav }: { go: (p: string) => voi
     if (typeF && c.type !== typeF) return false;
     if (projF && c.project !== projF) return false;
     if (roleF && (c.contractRole || '') !== roleF) return false;
+    if (topOnly && c.parentId) return false;
+    if (curOnly && (c.renewedTo || st(c) === '已终止')) return false;
     /* 待签署 = 电子签未完成且合同未到终态（未发起 / 签署中 / 已撤回 均需推动） */
     if (quick === '待签署'
       && !(['未发起', '签署中', '已撤回'].includes(signStatusOf(c)) && !TERMINAL.includes(st(c)))) return false;
@@ -101,12 +105,13 @@ export default function ContractPage({ go, role, nav }: { go: (p: string) => voi
     if (kw && !(c.id + c.name + c.party).includes(kw)) return false;
     return true;
     // contracts 必须进依赖：登记收款 / 审批回写后列表与状态列要跟着刷新
-  }), [tab, kw, typeF, projF, quick, contracts]);
+  }), [tab, kw, typeF, projF, roleF, topOnly, curOnly, quick, contracts]);
 
-  /* 主从列表：价格调整类补充协议不独立成行，紧跟挂载主合同之后缩进显示；新增服务/维保独立成行 */
+  /* 主从列表：凡有 parentId 的（价格/服务补充、框架执行单）不独立平铺，紧跟挂载父合同之后缩进显示；
+     无 parentId 的顶层合同独立成行（对齐泛微：子合同/订单在主合同卡片聚合，不独立进列表）。 */
   const treeRows = useMemo(() => {
-    const children = rows.filter((c) => c.contractRole === 'supplement_price');
-    const parents = rows.filter((c) => c.contractRole !== 'supplement_price');
+    const children = rows.filter((c) => c.parentId);
+    const parents = rows.filter((c) => !c.parentId);
     const out = [...parents];
     children.forEach((ch) => {
       const idx = out.findIndex((r) => r.id === ch.parentId);
@@ -118,22 +123,25 @@ export default function ContractPage({ go, role, nav }: { go: (p: string) => voi
   const daysLeft = (d: string) => Math.round((new Date(d).getTime() - new Date(TODAY).getTime()) / 86400000);
   const overdueCnt = contracts.filter((c) => c.overdue).length;
   const overpayCnt = contracts.filter((c) => c.overpay).length;
-  /* 金额口径概览（KPI 卡）：执行金额合计 / 已收 / 待收 / 逾期未收 */
-  const sumExec = contracts.filter((c) => c.contractRole !== 'supplement_price').reduce((s, c) => s + c.execAmt, 0);
-  const sumRecv = contracts.reduce((s, c) => s + c.recv, 0);
+  /* 金额口径概览（KPI 卡）：执行金额合计 / 已收 / 待收 / 逾期未收。
+     当前口径（去重）：排除价格调整补充（增量已并入主合同 execAmt）、框架协议本身（amt 为额度而非执行额，
+     其下执行单照常计入）、已续签旧合同（renewedTo，历史）。 */
+  const inScope = (c: C) => c.contractRole !== 'supplement_price' && c.type !== '框架协议' && !c.renewedTo;
+  const sumExec = contracts.filter(inScope).reduce((s, c) => s + c.execAmt, 0);
+  const sumRecv = contracts.filter(inScope).reduce((s, c) => s + c.recv, 0);
   const openRecv = Math.max(sumExec - sumRecv, 0);
-  const overdueAmt = contracts.filter((c) => c.overdue).reduce((s, c) => s + Math.max(c.execAmt - c.recv, 0), 0);
+  const overdueAmt = contracts.filter((c) => c.overdue && inScope(c)).reduce((s, c) => s + Math.max(c.execAmt - c.recv, 0), 0);
   const recvRate = sumExec ? Math.round((sumRecv / sumExec) * 100) : 0;
 
   const cols = [
     {
       key: 'id', title: '编号', width: 136, sticky: 'left' as const,
       render: (c: C) => (
-        <div className="nc-cell-main" style={c.contractRole === 'supplement_price' ? { marginLeft: 16 } : undefined}>
+        <div className="nc-cell-main" style={c.parentId ? { marginLeft: 16 } : undefined}>
           <IdCell onClick={() => openDetail(c)} title="查看合同详情">{c.id}</IdCell>
-          {c.contractRole === 'supplement_price' && <div className="nc-cell-sub">↳ 价格调整补充（挂载主合同）</div>}
+          {c.contractRole === 'supplement_price' && <div className="nc-cell-sub" title={`挂主合同 ${c.parentId}`}>↳ 价格调整补充</div>}
+          {c.contractRole === 'supplement_service' && c.parentId && <div className="nc-cell-sub" title={`挂载 ${c.parentId}`}>↳ 服务执行单</div>}
           {c.renewedTo && <div className="nc-cell-sub nc-ellip" title={`续签 → ${c.renewedTo}`}>续签 → {c.renewedTo}</div>}
-          {!c.renewedTo && c.sub && <div className="nc-cell-sub">子合同</div>}
         </div>
       ),
     },
@@ -156,15 +164,15 @@ export default function ContractPage({ go, role, nav }: { go: (p: string) => voi
       key: 'project', title: '关联项目', width: 114,
       render: (c: C) => (c.project
         ? <div className="nc-cell-main"><EntityLink target="project-center" id={c.project} go={go} title="下钻到项目详情"><Code>{c.project}</Code></EntityLink><div className="nc-cell-sub nc-ellip" title={PROJECTS.find((p) => p.id === c.project)?.name ?? ''}>{PROJECTS.find((p) => p.id === c.project)?.name ?? ''}</div></div>
-        : <span className="nc-cell-sub">框架（挂子合同）</span>),
+        : <span className="nc-cell-sub">框架（挂执行单）</span>),
     },
     {
       key: 'amt', title: '金额 → 执行金额', width: 126, align: 'right' as const,
       render: (c: C) => (
         c.contractRole === 'supplement_price'
           ? <div className="num">+{fmtWan(c.amt)}<div className="nc-cell-sub">增量（进执行额）</div></div>
-          : c.type === '框架协议' && !c.sub
-          ? <div className="num">额度 {fmtWan(c.execAmt)}</div>
+          : c.type === '框架协议'
+          ? <div className="num">额度 {fmtWan(c.amt)}<div className="nc-cell-sub">已执行 {fmtWan(c.execAmt)}</div></div>
           : (
             <div>
               <div className="num">{fmtWan(c.amt)}</div>
@@ -267,10 +275,10 @@ export default function ContractPage({ go, role, nav }: { go: (p: string) => voi
 
       {/* 金额概览 5 卡（执行口径；卡即筛选入口，与投标 / 项目页同一套瓦片） */}
       <div className="nc-tiles nc-tiles-5">
-        <div className="nc-tile is-clickable" title="口径：执行金额合计（含子合同额度）" onClick={() => { setTab('全部'); setQuick('全部状态'); setPage(1); }}>
+        <div className="nc-tile is-clickable" title="口径：执行金额合计（框架协议仅计其下执行单、不含框架额度；已排除历史续签）" onClick={() => { setTab('全部'); setQuick('全部状态'); setPage(1); }}>
           <div className="nc-tile-value num"><Money v={sumExec} role={role} wan /></div>
           <div className="nc-tile-label">合同总额</div>
-          <div className="nc-tile-sub">执行金额口径 · {contracts.length} 份</div>
+          <div className="nc-tile-sub">当前口径 {contracts.filter(inScope).length} 份 · 台账共 {contracts.length} 份</div>
         </div>
         <div className="nc-tile is-clickable" title="口径：累计已收（采购合同为已付）" onClick={() => { setTab('全部'); setQuick('全部状态'); setPage(1); }}>
           <div className="nc-tile-value num nc-v-green"><Money v={sumRecv} role={role} wan /></div>
@@ -325,6 +333,8 @@ export default function ContractPage({ go, role, nav }: { go: (p: string) => voi
           <option value="maintenance">维保合同</option>
         </select>
         <div className="nc-ctchips">
+          <button className={`nc-fchip${topOnly ? ' is-on' : ''}`} onClick={() => { setTopOnly(!topOnly); setPage(1); }} title="只显示无 parentId 的顶层合同">仅顶层</button>
+          <button className={`nc-fchip${curOnly ? ' is-on' : ''}`} onClick={() => { setCurOnly(!curOnly); setPage(1); }} title="隐藏已续签 / 已终止的历史合同">当前有效</button>
           {QUICKS.map((q) => (
             <button
               key={q} className={`nc-fchip${quick === q ? ' is-on' : ''}`}

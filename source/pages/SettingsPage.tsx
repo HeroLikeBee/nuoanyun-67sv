@@ -15,8 +15,9 @@ import {
 } from '../components/ui';
 import CategoryTree from '../components/CategoryTree';
 import {
-  CHANGE_LOGS, CAT_TREE, CUST_SOURCES, DEPTS, FOLLOW_WAYS, ITEMS, MARK_TYPES, QUOTE_CATS,
-  SUP_CATS, UNITS, UNIT_DESC, UNIT_GROUPS, catPath, catSubtreeIds, catVersion, subscribeCats,
+  CHANGE_LOGS, CAT_TREE, CUST_SOURCES, DEPTS, FOLLOW_WAYS, ITEMS, MARK_TYPES, QUOTE_SCOPES,
+  SUP_CATS, UNITS, UNIT_DESC, UNIT_GROUPS, catPath, catPathsOfScope, catSubtreeIds, catVersion,
+  quoteScopeOf, subscribeCats, type QuoteScopeKey,
 } from '../components/data';
 import {
   addOppStage, countOppsInStage, getOppStages, moveOppStage, removeOppStage,
@@ -127,7 +128,7 @@ export default function SettingsPage({ go, role, nav }: { go: (p: string) => voi
   const [grp, setGrp] = useState('cat');
   const [unitOn, setUnitOn] = useState<Record<string, boolean>>(() => Object.fromEntries(UNITS.map((u) => [u, true])));
   const [markOn, setMarkOn] = useState<Record<string, boolean>>(() => Object.fromEntries(MARK_TYPES.map((m) => [m.k, true])));
-  const [markup, setMarkup] = useState<Record<string, number>>(() => Object.fromEntries(QUOTE_CATS.map((c) => [c.key, c.markup])));
+  const [markup, setMarkup] = useState<Record<string, number>>(() => Object.fromEntries(QUOTE_SCOPES.map((c) => [c.key, c.markup])));
   const redline = 20;
   const [trigger, setTrigger] = useState(50);
   const [snapshot, setSnapshot] = useState(30);
@@ -157,12 +158,13 @@ export default function SettingsPage({ go, role, nav }: { go: (p: string) => voi
   const catCount = (id: string) =>
     ITEMS.filter((r) => catSubtreeIds(id).includes(r.cat)).length;
   const catUsed = useMemo(() => ITEMS.map((r) => r.cat).filter(Boolean), []);
-  /** 目录条目数：按目录名匹配分类树末级名称的条目（原型口径，仅作数量感知） */
-  const catEntries = (names: string[]) =>
-    ITEMS.filter((r) => {
-      const leaf = catPath(r.cat).split(' / ').pop() || '';
-      return names.includes(leaf);
-    }).length;
+  /**
+   * 科目命中条目数：由物料自身的目录沿祖先链派生（quoteScopeOf），
+   * 不再靠「目录名 × 分类树末级名」拍脑袋匹配 —— 树上改名 / 加层级都不会让它失准。
+   */
+  const scopeEntries = (k: QuoteScopeKey) => ITEMS.filter((r) => quoteScopeOf(r.cat) === k).length;
+  /** 科目挂在树上的哪些子树（只读反查，用于核对归集是否符合预期） */
+  const scopePaths = (k: QuoteScopeKey) => catPathsOfScope(k);
 
   const body = () => {
     switch (grp) {
@@ -253,21 +255,30 @@ export default function SettingsPage({ go, role, nav }: { go: (p: string) => voi
       case 'quote':
         return (
           <>
-            <Table head={[['序', 56], ['目录名称', 170], ['默认整体浮率', 160], ['成本红线', 110], ['建议最低报价率', 150], ['条目数', 100]]}>
-              {QUOTE_CATS.map((c, i) => (
-                <tr key={c.key}>
-                  <td className="num">{i + 1}</td>
-                  <td><b>{c.name}</b><div className="nc-tiny nc-muted">{c.cats.slice(0, 2).join(' · ')}{c.cats.length > 2 ? ' …' : ''}</div></td>
-                  <td>
-                    <input className="nc-cell-in" style={{ width: 70, textAlign: 'right' }} type="number"
-                      value={markup[c.key]} onChange={(e) => setMarkup((s) => ({ ...s, [c.key]: Number(e.target.value) }))} /> %
-                  </td>
-                  <td className="is-num num nc-v-red">{redline}%</td>
-                  <td className="is-num num nc-v-green">{(100 / (1 - redline / 100)).toFixed(1)}%</td>
-                  <td className="is-center num">{catEntries(c.cats) || '—'}</td>
-                </tr>
-              ))}
+            <Table head={[['序', 56], ['报价科目', 170], ['默认整体浮率', 160], ['成本红线', 110], ['建议最低报价率', 150], ['条目数', 100]]}>
+              {QUOTE_SCOPES.map((c, i) => {
+                const paths = scopePaths(c.key);
+                return (
+                  <tr key={c.key}>
+                    <td className="num">{i + 1}</td>
+                    <td><b>{c.name}</b><div className="nc-tiny nc-muted" title={paths.join('；')}>
+                      {paths.length ? `${paths.slice(0, 2).join(' · ')}${paths.length > 2 ? ' …' : ''}` : '尚未在分类树上指定'}
+                    </div></td>
+                    <td>
+                      <input className="nc-cell-in" style={{ width: 70, textAlign: 'right' }} type="number"
+                        value={markup[c.key]} onChange={(e) => setMarkup((s) => ({ ...s, [c.key]: Number(e.target.value) }))} /> %
+                    </td>
+                    <td className="is-num num nc-v-red">{redline}%</td>
+                    <td className="is-num num nc-v-green">{(100 / (1 - redline / 100)).toFixed(1)}%</td>
+                    <td className="is-center num">{scopeEntries(c.key) || '—'}</td>
+                  </tr>
+                );
+              })}
             </Table>
+            <div className="nc-cell-sub" style={{ marginTop: 8 }}>
+              科目不由本表直接接单：<b>分类树节点上的「报价科目」声明才是归集依据</b>（子节点继承最近祖先）。
+              本表只定义计价口径与默认浮率；在「多级分类目录」里挪动子树，归集结果即刻跟随。
+            </div>
             <div className="nc-warnbox is-info" style={{ marginTop: 12 }}>
               <b>报价双触发规则</b>
               <div>

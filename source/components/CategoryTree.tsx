@@ -8,7 +8,11 @@
 import React, { useMemo, useState, useSyncExternalStore } from 'react';
 import { Btn, Field, Modal, useToast, pressProps} from './ui';
 import { Ico } from './icons';
-import { CAT_TREE, catAddChild, catRemove, catRename, catVersion, subscribeCats, type CatNode } from './data';
+import {
+  CAT_TREE, catAddChild, catRemove, catRename, catSetProps, catVersion, subscribeCats,
+  CAT_SRC_CN, CERT_RULE_CN, certRuleOf, catSrcOf, listCodeOf, markupOf,
+  REAL_SCOPES, type CatNode, type CertRuleKey, type QuoteScopeKey,
+} from './data';
 
 export type CatRootKey = 'prod' | 'mat';
 
@@ -51,6 +55,11 @@ export default function CategoryTree({ value, onChange, countOf, usedIds, editab
   const [name, setName] = useState('');
   const [owner, setOwner] = useState('');
   const [err, setErr] = useState('');
+  /* 分类的计价 / 合规属性（可留空 = 按最近祖先继承） */
+  const [pScope, setPScope] = useState<QuoteScopeKey | ''>('');
+  const [pMarkup, setPMarkup] = useState('');
+  const [pCert, setPCert] = useState<CertRuleKey | ''>('');
+  const [pCode, setPCode] = useState('');
 
   const roots: CatRootKey[] = rootFilter ? [rootFilter] : ['mat', 'prod'];
   const flat = useMemo(() => {
@@ -73,9 +82,12 @@ export default function CategoryTree({ value, onChange, countOf, usedIds, editab
 
   const openAdd = (root: CatRootKey, parent: CatNode | null) => {
     setModal({ mode: 'add', root, parent, edit: null }); setName(''); setOwner(''); setErr('');
+    setPScope(''); setPMarkup(''); setPCert(''); setPCode('');
   };
   const openEdit = (root: CatRootKey, node: CatNode) => {
     setModal({ mode: 'edit', root, parent: null, edit: node }); setName(node.n); setOwner(node.owner || ''); setErr('');
+    setPScope(node.quoteScope || ''); setPMarkup(typeof node.markup === 'number' ? String(node.markup) : '');
+    setPCert(node.certRule || ''); setPCode(node.listCode || '');
   };
 
   const submit = () => {
@@ -95,19 +107,37 @@ export default function CategoryTree({ value, onChange, countOf, usedIds, editab
       if (dup) toast(`提示：其它层级已存在「${nm}」，原型允许重名但建议区分`, 'err');
     }
 
+    const props: Parameters<typeof catSetProps>[1] = {
+      quoteScope: pScope,
+      markup: pMarkup.trim() === '' ? '' : Number(pMarkup),
+      certRule: pCert,
+      listCode: pCode,
+    };
+
     if (modal.mode === 'add') {
       const node = catAddChild(modal.root, modal.parent ? modal.parent.id : null, nm, owner.trim() || undefined);
       if (!node) { setErr('新增失败：上级分类不存在'); return; }
+      catSetProps(node.id, props);
       toast(`已新增分类「${nm}」，已同步至表单下拉`);
       if (modal.parent) setExpanded((e) => ({ ...e, [modal.parent!.id]: true }));
     } else {
+      /* 平台标准目录：结构（名称）受保护，只允许在其下自建子节点或覆盖计价 / 合规属性 */
+      if (catSrcOf(modal.edit!.id) === 'platform' && nm !== modal.edit!.n) {
+        toast(`「${modal.edit!.n}」属平台标准目录，名称不可改；可新增子分类或覆盖其属性`, 'err');
+        return;
+      }
       catRename(modal.edit!.id, nm, owner.trim() || undefined);
-      toast(`已重命名分类为「${nm}」，路径与表单下拉同步更新`);
+      catSetProps(modal.edit!.id, props);
+      toast(`已保存分类「${nm}」，路径与表单下拉同步更新`);
     }
     setModal(null);
   };
 
   const del = (root: CatRootKey, node: CatNode) => {
+    if (catSrcOf(node.id) === 'platform') {
+      toast(`「${node.n}」属平台标准目录，不可删除；租户请在其下自建子节点`, 'err');
+      return;
+    }
     if ((node.ch || []).length) { toast(`「${node.n}」有子分类，禁止删除`, 'err'); return; }
     const ids = subIds(node);
     if (usedIds.some((u) => ids.includes(u))) { toast(`「${node.n}」下存在材料 / 产品，被引用禁删`, 'err'); return; }
@@ -167,8 +197,10 @@ export default function CategoryTree({ value, onChange, countOf, usedIds, editab
 
       {/* 新增 / 重命名 */}
       <Modal
-        open={!!modal} onClose={() => setModal(null)} width={480}
-        title={modal?.mode === 'add' ? `新增分类${modal.parent ? ` · 上级「${modal.parent.n}」` : ` · ${CAT_TREE[modal.root].n}`}` : `重命名分类 · ${modal?.edit?.n ?? ''}`}
+        open={!!modal} onClose={() => setModal(null)} width={640}
+        title={modal?.mode === 'add'
+          ? `新增分类${modal.parent ? ` · 上级「${modal.parent.n}」` : ` · ${CAT_TREE[modal.root].n}`}`
+          : `维护分类 · ${modal?.edit?.n ?? ''}`}
         foot={<>
           <Btn onClick={() => setModal(null)}>取消</Btn>
           <Btn kind="primary" onClick={submit}>保存</Btn>
@@ -176,13 +208,36 @@ export default function CategoryTree({ value, onChange, countOf, usedIds, editab
       >
         <div className="nc-dnote" style={{ marginBottom: 12 }}>
           支持任意层级；同级重名校验；被引用分类禁删。分类保存后自动同步到材料 / 产品表单下拉。
+          {modal?.mode === 'edit' && catSrcOf(modal.edit?.id) === 'platform' && (
+            <> <b>本节点属{CAT_SRC_CN.platform}</b>，名称与层级不可改；计价 / 合规属性可在租户层覆盖。</>
+          )}
         </div>
-        <Field label="分类名称" req err={err}>
-          <input className="nc-input" value={name} onChange={(e) => { setName(e.target.value); setErr(''); }} placeholder="如：管阀件 / 火灾自动报警" />
-        </Field>
-        <Field label="分类负责人（选填）" note="用于「谁维护这类主数据」的归属提示">
-          <input className="nc-input" value={owner} onChange={(e) => setOwner(e.target.value)} placeholder="如：张仓" />
-        </Field>
+        <div className="nc-form-grid">
+          <Field label="分类名称" req err={err}>
+            <input className="nc-input" value={name} onChange={(e) => { setName(e.target.value); setErr(''); }} placeholder="如：管阀件 / 火灾自动报警" />
+          </Field>
+          <Field label="分类负责人（选填）" note="用于「谁维护这类主数据」的归属提示">
+            <input className="nc-input" value={owner} onChange={(e) => setOwner(e.target.value)} placeholder="如：张仓" />
+          </Field>
+          <Field label="报价科目" note="留空 = 按最近祖先继承（如「成套产品」下各成套各自声明）">
+            <select className="nc-input" value={pScope} onChange={(e) => setPScope(e.target.value as QuoteScopeKey | '')}>
+              <option value="">继承上级…</option>
+              {REAL_SCOPES.map((s) => <option key={s.key} value={s.key}>{s.name}</option>)}
+            </select>
+          </Field>
+          <Field label="默认上浮率（%）" note={pMarkup.trim() === '' ? `留空 = 继承（当前 ${markupOf(modal?.edit?.id)}%）` : '覆盖继承值'}>
+            <input className="nc-input" type="number" value={pMarkup} onChange={(e) => setPMarkup(e.target.value)} placeholder="如 20" />
+          </Field>
+          <Field label="认证要求" note={modal?.edit ? `当前整链取值：${CERT_RULE_CN[certRuleOf(modal.edit.id)]}` : '留空 = 继承上级'}>
+            <select className="nc-input" value={pCert} onChange={(e) => setPCert(e.target.value as CertRuleKey | '')}>
+              <option value="">继承上级…</option>
+              {(Object.keys(CERT_RULE_CN) as CertRuleKey[]).map((k) => <option key={k} value={k}>{CERT_RULE_CN[k]}</option>)}
+            </select>
+          </Field>
+          <Field label="投标清单编码" note="GB50856 通用安装工程；如 030901 水灭火系统 / 030904 火灾自动报警">
+            <input className="nc-input" value={pCode} onChange={(e) => setPCode(e.target.value)} placeholder="如 030901" />
+          </Field>
+        </div>
       </Modal>
 
       {/* 删除二次确认（危险操作 · 规范 §6.2） */}
@@ -232,6 +287,8 @@ function Branch({
           ? <span className={`nc-tcaret${open ? ' is-open' : ''}`} onClick={(e) => { e.stopPropagation(); onToggle(node.id); }} {...pressProps(() => onToggle(node.id))}>▸</span>
           : <span className="nc-tdot" />}
         <span className="nc-tnode-nm" onClick={() => onPick(node.id)} {...pressProps(() => onPick(node.id))}>{node.n}</span>
+        {catSrcOf(node.id) === 'tenant' && <span className="nc-towner" title="租户自建目录（可改名 / 可删）">租户</span>}
+        {listCodeOf(node.id) && <span className="nc-towner num" title="投标清单编码（GB50856）">{listCodeOf(node.id)}</span>}
         {node.owner && <span className="nc-towner">{node.owner}</span>}
         <em className="num">{cntOf(node)}</em>
         {editable && (

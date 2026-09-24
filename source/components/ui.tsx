@@ -3,6 +3,7 @@ import React, { createContext, useCallback, useContext, useEffect, useLayoutEffe
 import { createPortal } from 'react-dom';
 import { Ico } from './icons';
 import { canSeeMoney, fmt, fmtAmt, fmtWan, PROJECTS, TODAY } from './data';
+import { isPreviewTarget, openPreview } from './entityPreviewState';
 import { setFocus } from './store';
 
 /* ============================ Toast ============================ */
@@ -76,6 +77,9 @@ export function EntityLink({ target, id, go, children, title, strong }: {
 }) {
   const onClick = (e: React.MouseEvent) => {
     e.stopPropagation();
+    /* 查看型穿透：目标实体支持穿透预览且有 id → 当前页打开抽屉 / 弹窗，不打断操作；
+       id 缺失（无对应实体）或目标页不支持预览 → 回退整页跳转（原行为） */
+    if (id && isPreviewTarget(target)) { openPreview(target, id); return; }
     if (id) setFocus(target, id);
     go(target);
   };

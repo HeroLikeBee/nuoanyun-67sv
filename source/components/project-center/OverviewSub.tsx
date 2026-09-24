@@ -1,14 +1,16 @@
 // 项目详情 · 概览（默认子页）
 //
-// 职责：回答「这个项目现在怎么样、卡在哪、下一步做什么」，不重复摊开台账明细。
-// 版式：KPI 带 → 三列（合同与回款 / 成本与利润 / 风险与覆盖）× 业务域入口 → 全链路血缘。
-// 口径：所有绝对值只在此处出现一次，其余子页只承接差额 / 比率 / 流水。
+// 职责：回答「这个项目现在怎么样、卡在哪、下一步做什么」，不重复摊开各业务域台账。
+// 版式：KPI 带 → 基本信息 → 风险与待办 → 全链路血缘。
+// 去重（2026-09-23 评审）：删除与各 tab 重复的三列摘要卡（合同回款 / 成本利润）、
+//   删除业务域入口卡（二级导航本身就是入口）；绝对值只在 KPI 带出现一次。
+// 血缘：商机 / 报价 / 合同按真实外键定位，点击走穿透弹窗，不整页打断。
 import React from 'react';
-import { Btn, Card, Code, EntityLink, KvGrid, Progress, Tag, Tip } from '../ui';
+import { Btn, Card, EntityLink, KvGrid, Tag, Tip } from '../ui';
 import { Ico } from '../icons';
-import type { IconName } from '../icons';
 import { PROJECT_STATUS_TONE, TODAY, isServiceProject, fmtAmt } from '../data';
-import { PjSection } from './PjSection';
+import { getOpps, relOfProject } from '../store';
+import { openPreview } from '../entityPreviewState';
 import type { PjCtx } from './ctx';
 
 /** 业务线中文（数据层存缩写） */
@@ -16,17 +18,15 @@ const BIZ_CN: Record<string, string> = {
   GC: '消防工程', WB: '维保服务', JC: '消防检测', RJ: '软件平台', QT: '其他',
 };
 
-/** 基本信息：项目档案的身份与契约属性（不含任何金额——金额全归 KPI 带，避免重复） */
+/** 基本信息：项目档案的身份与契约属性（不含金额——金额全归 KPI 带，避免重复） */
 function CardProfile({ C }: { C: PjCtx }) {
   const { P } = C;
   const DAY = 86400000;
   const t = (s?: string) => (s ? new Date(s).getTime() : NaN);
-  /** 距计划竣工日剩余天数；无竣工日显示 — */
   const daysLeft = Number.isFinite(t(P.end)) ? Math.round((t(P.end) - t(TODAY)) / DAY) : null;
   const daysText = daysLeft == null ? '—'
     : daysLeft >= 0 ? `剩余 ${daysLeft} 天`
       : `已超期 ${Math.abs(daysLeft)} 天`;
-  /** 工期已过比例 = 已过天数 ÷ 总工期；总工期为 0 时按 0 处理，避免除零放大成 100% */
   const span = Number.isFinite(t(P.start)) && Number.isFinite(t(P.end)) ? Math.round((t(P.end) - t(P.start)) / DAY) : 0;
   const passed = span > 0 && Number.isFinite(t(TODAY)) ? Math.round((t(TODAY) - t(P.start)) / DAY) : 0;
   const done = span > 0 ? Math.min(100, Math.max(0, Math.round((passed / span) * 100))) : 0;
@@ -80,33 +80,41 @@ function CardProfile({ C }: { C: PjCtx }) {
   );
 }
 
-/** KPI 带：6 格，绝对值口径；每格可穿透（jump 为 undefined 时不可点） */
+/**
+ * KPI 带：绝对值口径，每格可穿透到对应业务域（jump 为 undefined 时不可点）
+ *
+ * 口径归属（同一指标全站只出现一次，比率类一律下放各自业务域）：
+ *   概览只给「多少钱 / 多少笔」——回款率归资金域，占目标 / 偏差 / 毛利率归成本域，
+ *   加权完成率归履约域工序清单。概览的 sub 只写本格数字的构成或来源，不写另一个指标。
+ */
 function KpiStrip({ C }: { C: PjCtx }) {
+  const skPaid = C.payRowsAll.filter((r) => r.kind === '收入' && r.st === 'paid').length;
   const cells: { k: string; v: React.ReactNode; sub: string; tone?: string; jump?: string }[] = [
     {
       k: '合同额', v: fmtAmt(C.CONTRACT_NOW),
-      sub: `执行额 ${(C.EXEC_AMT / 10000).toFixed(1)} 万（含已生效变更）`, jump: 'biz',
+      sub: `执行额 ${(C.EXEC_AMT / 10000).toFixed(1)} 万（含已生效变更）`, jump: 'contract',
     },
     {
       k: '已回款', v: fmtAmt(C.CASH_IN),
-      sub: `回款率 ${C.PAY_PROGRESS.toFixed(1)}% ÷ 执行额 · 未回款 ${(C.UNRECV / 10000).toFixed(1)} 万`, jump: 'biz',
+      sub: `${skPaid} 笔银行到账`, jump: 'fund',
     },
     {
       k: '已发生成本', v: fmtAmt(C.COST_SUM),
-      sub: `目标成本 ${(C.PLAN_SUM / 10000).toFixed(1)} 万 · 占目标 ${C.COST_PROGRESS.toFixed(1)}%`, jump: 'cost',
+      sub: `${C.costRows.length} 笔已入账`, jump: 'cost',
     },
     {
       k: '净现金流', v: `${C.NET_IN >= 0 ? '+' : '−'}${fmtAmt(Math.abs(C.NET_IN))}`,
-      sub: '已到账 − 已付出 · 审批中不计', jump: 'cost',
+      sub: '已到账 − 已付出 · 审批中不计', jump: 'fund',
     },
     {
       k: '施工进度', v: `${C.progActual}%`,
-      sub: `计划应到 ${C.progPlan}% · 偏差 ${C.progDev >= 0 ? '+' : ''}${C.progDev}% ${C.progTag}`,
+      /* 偏差数值与告警由下方「风险与待办」统一说明，此处只给参照值，避免同一对比写两遍 */
+      sub: `计划应到 ${C.progPlan}% · ${C.progTag}`,
       tone: C.progLevel === 'red' ? 'red' : C.progLevel === 'yellow' ? 'orange' : undefined,
       jump: 'track',
     },
     {
-      k: '质量整改待闭环', v: `${C.dunCount}`, sub: '含逾期应收 / 超支 / 待审批', tone: C.dunCount > 0 ? 'orange' : undefined, jump: 'quality',
+      k: '质量待办', v: `${C.qualityTodo}`, sub: '报验缺件 + 整改未闭环', tone: C.qualityTodo > 0 ? 'orange' : undefined, jump: 'quality',
     },
   ];
   return (
@@ -132,139 +140,19 @@ function KpiStrip({ C }: { C: PjCtx }) {
   );
 }
 
-/** 左栏：合同与回款 —— 合同树 + 回款期次 + 未回款构成（绝对值的唯一归属地） */
-function CardReceipt({ C }: { C: PjCtx }) {
-  const got = C.payRows.filter((r) => r.kind === '收入' && r.st === 'paid');
-  const invoiced = C.overdue;
-  const pendingPlan = C.saleCt.flatMap((c) => c.payplan ?? []).filter((p) => p.st === '未到期');
-  const rest = Math.max(0, C.EXEC_AMT - C.CASH_IN - C.overdueAmt);
-  const pct = (v: number) => (C.EXEC_AMT > 0 ? (v / C.EXEC_AMT) * 100 : 0);
-
-  return (
-    <Card
-      hd={<span><Ico n="card" size={16} /> 合同与回款</span>}
-      extra={<Btn kind="link" onClick={() => C.pj('biz')}>进入商务合同 →</Btn>}
-    >
-      {C.saleCt.map((c) => (
-        <div key={c.code} className="nc-ctcard">
-          <div className="nc-ctcard-hd">
-            <EntityLink target="contract" id={c.code} go={C.go} title="下钻到合同详情"><Code>{c.code}</Code></EntityLink>
-            <b>{c.name}</b>
-            <Tag tone={c.tone}>{c.st}</Tag>
-            <span className="nc-ctcard-amt">{(c.amt / 10000).toFixed(0)} 万</span>
-          </div>
-          {c.children?.map((ch) => (
-            <div key={ch.code} className="nc-cell-sub" style={{ margin: '4px 0 0 12px' }}>
-              └ {ch.code} {ch.name} <span className="num">+{(ch.amt / 10000).toFixed(1)} 万</span>
-            </div>
-          ))}
-        </div>
-      ))}
-
-      <div className="nc-ledhd" style={{ marginTop: 14 }}>
-        未回款构成 <b>{(C.UNRECV / 10000).toFixed(1)} 万</b>
-        <Tip w={340} text="未回款 = 执行额 − 银行已到账 − 已核销坏账。已开票未到账挂应收账龄，不计回款；未到期为按合同尚未到期的期次。" />
-      </div>
-      <div className="nc-gate">
-        {[
-          { n: '已到账（计入回款）', v: C.CASH_IN, st: <Tag tone="green">已回款</Tag>, exp: got.map((r) => r.id).join(' / ') },
-          { n: '已开票未到账（应收账龄）', v: C.overdueAmt, st: <Tag tone="orange">催收中</Tag>, exp: invoiced.map((r) => r.id).join(' / ') },
-          { n: '未到期（按合同未到收款期）', v: rest, st: <Tag tone="gray">未到期</Tag>, exp: pendingPlan.map((p) => p.n).join(' / ') },
-        ].map((r) => (
-          <div key={r.n} className="nc-gate-row">
-            <span className="nc-gate-n">{r.n}<div className="nc-cell-sub">{r.exp || '—'}</div></span>
-            <span className="nc-num">{r.v > 0 ? `${(r.v / 10000).toFixed(1)} 万` : '—'}</span>
-            <span className="nc-gate-s">{r.st}</span>
-          </div>
-        ))}
-      </div>
-      <div style={{ marginTop: 10 }}>
-        <Progress value={Math.min(100, pct(C.CASH_IN))} tone="green" />
-        <div className="nc-cell-sub" style={{ marginTop: 4 }}>
-          回款率 {C.PAY_PROGRESS.toFixed(1)}% · 已到账 {got.length} 笔 / 应收 {C.overdueAmt > 0 ? `+ 未到账 ${C.overdue.length} 笔` : '全部按期'}
-        </div>
-      </div>
-    </Card>
-  );
-}
-
-/** 中栏：成本与利润 —— 目标 vs 实际 + 预算科目构成 + 三处偏差（不重复绝对值） */
-function CardCost({ C }: { C: PjCtx }) {
-  const top = [...C.groupedPlan].sort((a, b) => b.sum - a.sum).slice(0, 4);
-  const max = Math.max(...top.map((g) => g.sum), 1);
-  return (
-    <Card
-      hd={<span><Ico n="chart" size={16} /> 成本与利润</span>}
-      extra={<Btn kind="link" onClick={() => C.pj('cost')}>进入成本台账 →</Btn>}
-    >
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 14 }}>
-        <div>
-          <div className="nc-cell-sub">目标成本</div>
-          <div className="num" style={{ fontSize: 20, fontWeight: 600 }}>{C.PLAN_SUM.toLocaleString()}</div>
-        </div>
-        <div style={{ color: 'var(--ink-3)' }}>vs</div>
-        <div>
-          <div className="nc-cell-sub">已发生</div>
-          <div className="num" style={{ fontSize: 20, fontWeight: 600, color: C.dev > 0 ? 'var(--c-danger)' : 'var(--c-success)' }}>
-            {C.COST_SUM.toLocaleString()}
-          </div>
-        </div>
-        <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
-          <div className="nc-cell-sub">{C.dev > 0 ? '超支' : '结余'}</div>
-          <div className="num" style={{ fontSize: 17, fontWeight: 600, color: C.dev > 0 ? 'var(--c-danger)' : 'var(--c-success)' }}>
-            {C.dev > 0 ? '+' : ''}{(Math.abs(C.dev) / 10000).toFixed(1)} 万
-          </div>
-        </div>
-      </div>
-      <Progress value={Math.min(100, C.COST_PROGRESS)} tone={C.dev > 0 ? 'red' : 'green'} />
-
-      <div className="nc-ledhd" style={{ marginTop: 14 }}>目标成本构成（直接费 / 间接费）</div>
-      {top.map((g) => (
-        <div key={g.g} style={{ marginBottom: 8 }}>
-          <div style={{ display: 'flex', fontSize: 12.5 }}>
-            <span style={{ flex: 1 }}>{g.g} <span className="nc-cell-sub">{g.rows.length} 个科目</span></span>
-            <span className="num">{(g.sum / 10000).toFixed(1)} 万 · 占 {((g.sum / C.PLAN_SUM) * 100).toFixed(0)}%</span>
-          </div>
-          <div className="nc-paybar" style={{ width: '100%' }}>
-            <i style={{ width: `${(g.sum / max) * 100}%`, background: 'var(--c-primary)' }} />
-          </div>
-        </div>
-      ))}
-
-      <div className="nc-ledhd" style={{ marginTop: 14 }}>三处偏差</div>
-      {[
-        { k: '成本偏差', v: `${C.dev > 0 ? '+' : ''}${(C.dev / 10000).toFixed(1)} 万 · ${C.devPct > 0 ? '+' : ''}${C.devPct.toFixed(1)}%`, t: C.dev > 0 ? 'danger' : 'ok' },
-        { k: '毛利率', v: `计划 ${C.planProfit.toFixed(1)}% → 实际 ${C.actProfit.toFixed(1)}%`, t: C.actProfit < C.planProfit ? 'danger' : 'ok' },
-        { k: '进度偏差', v: `${C.progDev >= 0 ? '+' : ''}${C.progDev}% · ${C.progTag}`, t: C.progLevel === 'ok' ? 'ok' : 'danger' },
-      ].map((r) => (
-        <div key={r.k} className="nc-looprow">
-          <span className="nc-looprow-k">{r.k}</span>
-          <span className="nc-looprow-v num" style={{ color: r.t === 'danger' ? 'var(--c-danger)' : 'var(--c-success)' }}>{r.v}</span>
-        </div>
-      ))}
-
-      <div className="nc-ledhd" style={{ marginTop: 14 }}>质保金（结算时客户扣留）</div>
-      <div className="nc-looprow">
-        <span className="nc-looprow-k">质保金</span>
-        <span className="nc-looprow-v num">{C.WARRANTY.toLocaleString()} 元 <span className="nc-cell-sub">= 合同额 × 3%（法定上限）</span></span>
-      </div>
-    </Card>
-  );
-}
-
-/** 右栏：风险与闭环 —— 现状 / 目标 / 处置三列，每条都能处置并销项 */
+/** 风险与待办 —— 现状 / 目标 / 处置三列，每条都能处置并销项（概览的核心价值，全宽） */
 function CardRisk({ C }: { C: PjCtx }) {
   const rows: { k: string; now: string; aim: string; act: string; onAct: () => void; tone: string }[] = [];
   if (C.overdue.length > 0) {
     rows.push({
-      k: '逾期应收', now: `${C.overdue.length} 笔 · ${(C.overdueAmt / 10000).toFixed(1)} 万 · 账龄 75 天`,
+      k: '逾期应收', now: `${C.overdue.length} 笔 · ${(C.overdueAmt / 10000).toFixed(1)} 万`,
       aim: '全部到账或签署延期确认', act: '发起催收', onAct: () => C.openM('dunning'), tone: 'orange',
     });
   }
   if (C.dev > 0) {
     rows.push({
       k: '成本超支', now: `超出目标 ${(C.dev / 10000).toFixed(1)} 万（${C.devPct.toFixed(1)}%）`,
-      aim: '回到目标成本内或完成变更归集', act: '成本台账', onAct: () => C.pj('cost'), tone: 'orange',
+      aim: '回到目标成本内或完成变更归集', act: '成本管控', onAct: () => C.pj('cost'), tone: 'orange',
     });
   }
   if (C.progLevel !== 'ok') {
@@ -276,7 +164,7 @@ function CardRisk({ C }: { C: PjCtx }) {
   if (C.depIn.length > 0) {
     rows.push({
       k: '保证金待退', now: `${C.depIn.length} 笔 · ${C.depIn.map((d) => d.id).join(' / ')}`,
-      aim: '到期退还或转履约', act: '保证金台账', onAct: () => C.openM('deposit'), tone: 'gold',
+      aim: '到期退还或转履约', act: '资金台账', onAct: () => C.pj('fund'), tone: 'gold',
     });
   }
   if (C.curMile && C.curMiss.length > 0) {
@@ -287,6 +175,7 @@ function CardRisk({ C }: { C: PjCtx }) {
   }
 
   return (
+    /* 标题计数取实际渲染行数：一个口径，不存在第二个「待办数」 */
     <Card
       hd={<span><Ico n="warning" size={16} /> 风险与待办 <b className="nc-v-orange">{rows.length}</b></span>}
     >
@@ -308,64 +197,33 @@ function CardRisk({ C }: { C: PjCtx }) {
   );
 }
 
-/** 业务域入口：5 个域，各带计数 + 待办角标（点进去是子页，不是弹窗） */
-function DomainCards({ C }: { C: PjCtx }) {
-  const domains: { key: string; label: string; icon: IconName; v: string; sub: string; todo: string; tone: 'orange' | 'red' | 'blue' }[] = [
-    {
-      key: 'track', label: '执行履约', icon: 'swap',
-      v: `${C.progActual}%`, sub: `里程碑 ${C.mileRows.length} 个 · 日志与投入已在域内`,
-      todo: C.progLevel !== 'ok' ? '进度告警' : '', tone: 'orange',
-    },
-    {
-      key: 'quality', label: '质量验收', icon: 'check',
-      v: `${C.attCnt}`, sub: '报验 / 隐蔽 / 检测 / 验收资料份数',
-      todo: C.curMiss.length > 0 ? `${C.curMiss.length} 项缺件` : '', tone: 'orange',
-    },
-    {
-      key: 'biz', label: '商务合同', icon: 'card',
-      v: `${C.saleCt.length + C.buyCt.length}`, sub: `收款类 ${C.saleCt.length} · 付款类 ${C.buyCt.length}`,
-      todo: C.overdue.length > 0 ? `逾期 ${C.overdue.length} 笔` : '', tone: 'red',
-    },
-    {
-      key: 'cost', label: '成本台账', icon: 'book',
-      v: `${C.costRows.length}`, sub: `已发生 ${(C.COST_SUM / 10000).toFixed(1)} 万 · 目标 ${(C.PLAN_SUM / 10000).toFixed(1)} 万`,
-      todo: C.dev > 0 ? `超支 ${(C.dev / 10000).toFixed(1)} 万` : '', tone: 'orange',
-    },
-    {
-      key: 'members', label: '团队资料', icon: 'user',
-      v: `${C.teamRows.length}`, sub: `团队 ${C.teamRows.length} 人 · 证书占用 ${C.certRows.length} 项 · 档案 ${C.attCnt} 份`,
-      todo: '', tone: 'blue',
-    },
-  ];
-  return (
-    <div className="nc-domain">
-      {domains.map((d) => (
-        <button key={d.key} className="nc-domain-card" onClick={() => C.pj(d.key)} title={`进入${d.label}`}>
-          <span className="nc-domain-card-hd"><Ico n={d.icon} size={15} /> {d.label} <span className="nc-drill">进入↗</span></span>
-          <span className="nc-domain-card-v num">{d.v}</span>
-          <span className="nc-domain-card-sub">{d.sub}</span>
-          {d.todo && <Tag tone={d.tone as 'orange'}>{d.todo}</Tag>}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-/** 全链路血缘：商机 → 报价 → 合同 → 项目 → 节点 → 验收 → 结算 → 质保 / 维保，每跳可点 */
+/** 全链路血缘：商机 → 报价 → 合同 → 项目 → 节点 → 验收 → 结算 → 质保 / 维保，真实定位、点击弹窗穿透 */
 function Lineage({ C }: { C: PjCtx }) {
   const { P } = C;
   const svc = isServiceProject(P);
-  const trOpp = P.customerId ? `商机` : null;
+  const tr = React.useMemo(() => {
+    const r = relOfProject(P.id);
+    const oppId = r.quotes.map((q) => q.opp).find(Boolean) || '';
+    return {
+      opp: oppId ? getOpps().find((o) => o.id === oppId) : undefined,
+      quote: r.quotes[0],
+      contract: r.contracts[0],
+    };
+  }, [P.id]);
+
   const nodes: { k: string; v: React.ReactNode; st: string; cur?: boolean; void?: boolean; onClick?: () => void }[] = [
     {
-      k: '商机', v: trOpp ?? '无关联', st: trOpp ? '商机直签 / 投标中标' : '未登记溯源',
-      onClick: trOpp ? () => C.go('opp') : undefined,
+      k: '商机', v: tr.opp?.id ?? '无关联', st: tr.opp ? '商机直签 / 投标中标' : '未登记溯源',
+      void: !tr.opp, onClick: tr.opp ? () => openPreview('opp', tr.opp!.id) : undefined,
     },
-    { k: '报价', v: '已转化', st: '报价单转合同草稿', onClick: () => C.go('quote') },
     {
-      k: '合同', v: C.saleCt[0]?.name ?? '无销售合同', st: C.saleCt[0] ? `${C.saleCt[0].st} · ${(C.saleCt[0].amt / 10000).toFixed(0)} 万` : '待关联',
-      void: !C.saleCt[0],
-      onClick: C.saleCt[0] ? () => C.go('contract-detail') : undefined,
+      k: '报价', v: tr.quote?.id ?? '无关联', st: tr.quote ? '报价单转合同草稿' : '无报价记录',
+      void: !tr.quote, onClick: tr.quote ? () => openPreview('quote', tr.quote!.id) : undefined,
+    },
+    {
+      k: '合同', v: tr.contract ? tr.contract.name : '无销售合同',
+      st: tr.contract ? `${tr.contract.status} · ${(tr.contract.amt / 10000).toFixed(0)} 万` : '待关联',
+      void: !tr.contract, onClick: tr.contract ? () => openPreview('contract', tr.contract!.id) : undefined,
     },
     { k: '项目', v: P.name, st: `${P.status} · ${P.milestoneName}`, cur: true },
     {
@@ -419,15 +277,8 @@ export default function OverviewSub({ C }: { C: PjCtx }) {
     <div className="nc-pjsection">
       <KpiStrip C={C} />
       <CardProfile C={C} />
-      <div className="nc-pjsplit" style={{ marginTop: 16 }}>
-        <CardReceipt C={C} />
-        <CardCost C={C} />
-        <CardRisk C={C} />
-      </div>
-      <PjSection title={<><Ico n="module" size={16} /> 业务域</>}>
-        <DomainCards C={C} />
-      </PjSection>
-      <Lineage C={C} />
+      <div style={{ marginTop: 16 }}><CardRisk C={C} /></div>
+      <div style={{ marginTop: 16 }}><Lineage C={C} /></div>
     </div>
   );
 }

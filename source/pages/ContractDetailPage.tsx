@@ -4,7 +4,9 @@
 // ★ 合同文件页（Tab「文档」）= 基础信息 + 电子合同纸面正文 + AI 审查侧栏（零切换，三者同屏）
 //   电子合同：条款正文按合同类型套用模板 → 变量插值；电子签章完成即「已签署」并生成签署栏 + 印章 + 防伪水印
 //   AI 融入电子合同：AI 不再单独占 Tab，而是作为纸面右侧审查栏，与条款双向定位（角标 ↔ 风险项）
-// 主子合同体系：主合同可下钻子合同（独立明细 · 收款计划 · 附件 · 日志），子合同可返回主合同
+// 两套“从属”表达，勿混淆：
+//   ① 真实合同族（写入台账，见 data.ts）：主合同 + 价格/服务补充 + 框架执行单，靠 contractRole + parentId 挂载；
+//   ② 工作量拆分视图（本页 buildSubs，不写台账、不产生新合同）：主合同按工作量/分期拆成 -01/-02 只读视图，可下钻后返回。
 // 勾稽：合同总额 = Σ明细行；已收款 = Σ收款计划实收；质保金 = 结算总额 × 3% 上限；实收只来自回款登记
 // 收款红字冲销一笔仅一次 · 付款超限硬拦截 · 政府 / 部队四件套
 import React, { useEffect, useMemo, useState } from 'react';
@@ -18,7 +20,7 @@ import type { Installment, SignConfig, SignParty } from '../components/data';
 import {
   getSignConfig, patchContract, saveSignConfig, setBizStatus, setPendingProject,
   signOneParty, startSign, subscribeStore, withdrawSign,
-  getContracts, getBizStatus, getFocus, consumeFocusTab,
+  getContracts, getBizStatus, getFocus, setFocus, consumeFocusTab,
 } from '../components/store';
 import { Ico } from '../components/icons';
 
@@ -81,6 +83,8 @@ type CView = {
   code: string; name: string; status: string; stype: string; isSub: boolean;
   parentCode?: string; parentName?: string;
   total: number; spent: number;
+  /** 框架协议额度（仅框架协议主视图有；普通合同为空，金额一律取 total） */
+  limitAmt?: number;
   partyA: string; sign: string; end: string; start: string; warranty: number;
   place: string; owner: string; contact: string; phone: string; industry: string; region: string;
   details: DetailRow[]; plans: PlanRow[]; files: FileGroups; projects: ProjRow[]; logs: LogRow[];
@@ -121,7 +125,7 @@ const CLAUSES: Record<string, ClauseTpl[]> = {
   ],
   框架协议: [
     { id: 'c1', h: '第一条 合作方式', t: '甲方委托乙方提供消防技术服务，具体需求以本框架协议项下子合同形式另行确认。' },
-    { id: 'c2', h: '第二条 额度', t: '协议期内服务费用总额不超过人民币{{金额}}，超出部分另行签订补充协议。' },
+    { id: 'c2', h: '第二条 额度', t: '协议期内服务费用总额不超过人民币{{额度}}，超出部分另行签订补充协议。' },
     { id: 'c3', h: '第三条 子合同', t: '子合同以本协议为依据签订（编号冠以本协议号），无需重复分级审批；单笔子合同金额 ≥50 万元的，须提交财务复核。' },
     { id: 'c4', h: '第四条 协议期', t: '自{{工期起}}至{{工期止}}。' },
     { id: 'c5', h: '第五条 违约责任', t: '任何一方违约的，违约金为已发生服务费的 20%。' },
@@ -138,6 +142,7 @@ function buildClauses(v: CView, type: string, tax: number, freq: string, warrant
     t: x.t
       .replace('{{项目}}', v.projects[0]?.name ?? v.name)
       .replace('{{金额}}', moneyTxt(v.total, role))
+      .replace('{{额度}}', moneyTxt(v.limitAmt ?? v.total, role))
       .replace('{{税率}}', String(tax))
       .replace('{{付款条款}}', '首期款 30%、进度款 40%、尾款 27%、质保金 3%')
       .replace('{{工期起}}', v.start)
@@ -191,7 +196,7 @@ const PLAN_TPL: [string, number][] = [
 ];
 /**
  * 收款计划：**优先用合同自带的收款期次**（`Contract.installments`，来自签约时约定的收款节点）。
- * 无期次数据（如框架协议、子合同按工作量拆分）时才按 30/40/27/3 模板套算：
+ * 无期次数据（如框架协议、工作量拆分视图）时才按 30/40/27/3 模板套算：
  * 计划额末期兜底差额、质保金封顶法定 3%；实收按已收总额逐期填充 → 出现「部分收款」态。
  */
 function buildPlans(total: number, recv: number, sign: string, end: string, inst?: Installment[]): PlanRow[] {
@@ -266,8 +271,9 @@ function buildMain(c: C, role: string): CView {
       : normContractStatus(c.status) === '履约中' ? 'processing' : 'pending') as 'done' | 'processing' | 'pending',
     isSub: false,
     total: c.execAmt, spent: Math.round(c.execAmt * 0.14),
+    ...(c.type === '框架协议' ? { limitAmt: c.amt } : {}),
     partyA: c.party, sign: c.sign, start: c.start, end: c.end, warranty: 12,
-    place: c.project ? '按项目现场实施地点执行' : '按子合同约定地点执行',
+    place: c.project ? '按项目现场实施地点执行' : '按分项约定地点执行',
     owner: c.owner, contact: '王芳', phone: '138-0000-8888',
     industry: guessIndustry(c), region: guessRegion(c),
     details: buildDetails(c.execAmt, period),
@@ -283,9 +289,11 @@ function buildMain(c: C, role: string): CView {
   };
 }
 
-/** 子合同：主合同按工作量拆分，合计约占总额 65%，余款由主合同直接执行 */
+/** 工作量拆分视图：主合同按工作量/分期拆分为只读视图对象（-01/-02），合计约占总额 65%，余款由主合同直接执行。
+ *  这些视图不写入合同台账、不产生新合同（真正的补充协议 / 框架执行单见 data.ts 的 contractRole + parentId）。 */
 function buildSubs(c: C, role: string): CView[] {
-  if (c.type === '采购合同') return [];
+  /* 框架协议不按额度做工作量拆分（额度 ≠ 已执行），其下真实执行单由详情组件单独从台账查询展示 */
+  if (c.type === '采购合同' || c.type === '框架协议') return [];
   const defs: { suf: string; sname: string; type: string; pct: number; status: string; stype: string; owner: string }[] = [
     { suf: '-01', sname: '一期主体', type: c.type === '框架协议' ? '维护保养' : '消防工程', pct: 0.5, status: '履约中', stype: 'processing', owner: c.owner },
     { suf: '-02', sname: '二期 / 检测', type: '检测', pct: 0.15, status: '已完成', stype: 'done', owner: '王磊' },
@@ -313,7 +321,7 @@ function buildSubs(c: C, role: string): CView[] {
         ? [{ code: `${c.project}${d.suf.replace('-', '')}`, name: `${c.name}（${d.sname}）项目`, owner: d.owner, status: d.status === '已完成' ? '已完成' : '进行中', stype: d.stype }]
         : [],
       logs: [
-        { time: `${c.sign} 15:12`, text: <><b>{c.owner}</b> 创建子合同（拆分自主合同 <b>{c.id}</b>），金额 <Money v={total} role={role} /></> },
+        { time: `${c.sign} 15:12`, text: <><b>{c.owner}</b> 创建工作量拆分视图（按主合同 <b>{c.id}</b> 工作量拆分，不产生新合同），金额 <Money v={total} role={role} /></> },
         { time: `${start} 09:00`, warn: true, text: <>期1款 <b><Money v={Math.round(total * 0.3)} role={role} /></b> 到账</> },
         ...(d.stype === 'done' ? [{ time: `${end} 16:40`, text: <><b>{d.owner}</b> 交付《{d.type}报告》，状态变更为 <Tag tone="green">已完成</Tag></> }] : []),
       ],
@@ -503,7 +511,7 @@ export default function ContractDetailPage({ go, role, nav }: { go: (p: string) 
     // nav 进依赖：同一详情页反复下钻不同合同也要重新落地
   }, [c?.id, nav, initialTab]);
 
-  /* 电子合同正文：随「主 / 子合同视图」与合同类型重建；AI 审查结果同步重置 */
+  /* 电子合同正文：随「主合同 / 工作量拆分视图」与合同类型重建；AI 审查结果同步重置 */
   useEffect(() => {
     if (!cur || !c) { setClauses([]); setRisks([]); setScanned(false); return; }
     setClauses(buildClauses(cur, c.type, taxOf(c.type), freqOf(c), cur.warranty, role));
@@ -582,6 +590,18 @@ export default function ContractDetailPage({ go, role, nav }: { go: (p: string) 
   const dLeft = Math.round((new Date(cur.end).getTime() - new Date(TODAY).getTime()) / 86400000);
   const isGov = c.party.includes('医院') || c.party.includes('政府') || c.party.includes('管理局');
   const isPurchase = c.type === '采购合同';
+  const isFramework = c.type === '框架协议';
+  /* 框架协议的真实执行单：parentId 指向本协议（不按额度伪造拆分）；点击进入执行单合同详情独立页 */
+  const execOrders = useMemo(() => (isFramework ? getContracts().filter((k) => k.parentId === c.id) : []), [isFramework, c]);
+  const usedExec = execOrders.reduce((s, k) => s + k.execAmt, 0);
+  const usedPct = c.amt ? Math.round((usedExec / c.amt) * 100) : 0;
+  const openExecOrder = (id: string) => { setFocus('contract-detail', id); go('contract-detail'); };
+  /* 框架协议统计卡口径：额度 / 已执行 / 已收 / 执行未收 / 剩余可用 */
+  const fwLimit = c.amt;
+  const fwUsed = usedExec;
+  const fwRecv = execOrders.reduce((s, k) => s + k.recv, 0);  /* 已收 = Σ 执行单回款（框架本身不收钱） */
+  const fwOpen = Math.max(fwUsed - fwRecv, 0);
+  const fwRemain = Math.max(fwLimit - fwUsed, 0);
   /** 合同状态（归一化：审批中 / 已审批 / 结算中 / 已结项 / 已中止 / 已解除 → 文档 6 态，与状态轴 STAGES 同源） */
   const cSt = normContractStatus(c.status);
   /** 电子签状态（CON-02）：未登记 signStatus 的合同视为「未发起」 */
@@ -596,16 +616,24 @@ export default function ContractDetailPage({ go, role, nav }: { go: (p: string) 
   if (cSt === '待审批') issues.push({ tone: 'is-orange', text: ' 待我审批：该合同尚未完成审批流转，请在本页页脚「同意 / 驳回」处理', tab: 'appr' });
   if (signSt === '签署中') issues.push({ tone: 'is-orange', text: ' 电子签进行中：尚有签署方未完成签署，全部完成后合同方可转「已签约」', tab: 'sign' });
   if (signSt === '已签' && cSt === '待审批') issues.push({ tone: 'is-gold', text: ' 电子签已完成：合同可转「已签约」（在「电子签」页签确认）', tab: 'sign' });
-  if (c.type === '框架协议') issues.push({ tone: 'is-orange', text: ' 框架协议：子合同累计执行金额已达框架总额 82%，超出须签补充协议', tab: 'sub' });
+  if (c.type === '框架协议') {
+    if (usedPct >= 80) {
+      issues.push({ tone: 'is-orange', text: ` 框架协议：执行单累计执行金额已达框架额度 ${usedPct}%，超出须签补充协议提高额度`, tab: 'sub' });
+    } else {
+      issues.push({ tone: 'is-gold', text: ` 框架协议：额度 ${moneyTxt(c.amt, role)}，已执行 ${moneyTxt(usedExec, role)}（${usedPct}%），剩余可用 ${moneyTxt(Math.max(c.amt - usedExec, 0), role)}；单笔执行单 ≥50 万须财务复核`, tab: 'sub' });
+    }
+  }
   if (c.overdue || c.overpay) issues.push({ tone: 'is-orange', text: ' AI 审查命中「违约金 30%」高风险条款，建议复核（见「合同文件」电子合同右栏）', tab: 'doc' });
   if (isGov) issues.push({ tone: 'is-gold', text: ' 政府 / 部队项目：安全 / 廉政 / 农民工工资 / 技术协议四件套须齐备', tab: 'attach' });
 
-  /* ---- Tab（采购合同无子合同；子合同视图不显示子合同 Tab） ----
+  /* ---- Tab（采购合同无工作量拆分；拆分视图下不显示该 Tab） ----
      对齐参考：原「概览 / AI 审查」两 Tab 合并为「合同文件」——基础信息 + 电子合同纸面 + AI 审查侧栏同屏零切换 */
   const tabs = [
     { key: 'doc', label: '合同文件' },
     { key: 'list', label: '合同明细', cnt: cur.details.length },
-    ...(view === 'main' && subs.length ? [{ key: 'sub', label: '子合同', cnt: subs.length }] : []),
+    ...(view === 'main' && (isFramework ? execOrders.length : subs.length)
+      ? [{ key: 'sub', label: isFramework ? '执行单' : '工作量拆分', cnt: isFramework ? execOrders.length : subs.length }]
+      : []),
     isPurchase
       ? { key: 'money', label: '付款记录', cnt: PAYMENTS.length }
       : { key: 'money', label: '收款计划', cnt: cur.plans.length },
@@ -687,7 +715,7 @@ export default function ContractDetailPage({ go, role, nav }: { go: (p: string) 
 
   const gotoSub = (i: number) => {
     setSubIdx(i); setView('sub'); setTab('doc'); setEdit(false);
-    toast(`已跳转至子合同详情：${subs[i].code}`);
+    toast(`已打开工作量拆分视图：${subs[i].code}（只读，不产生新合同）`);
   };
   const backMain = () => {
     setView('main'); setTab('doc'); setEdit(false);
@@ -711,7 +739,7 @@ export default function ContractDetailPage({ go, role, nav }: { go: (p: string) 
             <span className="nc-d2-id">{cur.code}</span>
             <Tag tone={ST_TONE[cur.status] ?? 'gray'}>{cur.status}</Tag>
             <Tag tone={TYPE_TONE[c.type] ?? 'gray'}>{c.type}</Tag>
-            {cur.isSub && <Tag tone="purple">子合同</Tag>}
+            {cur.isSub && <Tag tone="purple">工作量拆分</Tag>}
             {dLeft < 30 && <Tag tone="red">剩余 {dLeft} 天</Tag>}
             <span className="spacer" />
             {cur.isSub && <Btn size="sm" onClick={backMain}>← 返回主合同</Btn>}
@@ -719,7 +747,7 @@ export default function ContractDetailPage({ go, role, nav }: { go: (p: string) 
           <div className="nc-d2-name">{cur.name}</div>
           {/* 头部只留身份与时间；金额与收款进度一律由下方 5 张统计卡承载，不在此重复 */}
           <div className="nc-d2-sub">
-            {cur.isSub && <span>所属主合同 <a className="nc-link" onClick={backMain}>{cur.parentCode}</a> {cur.parentName}</span>}
+            {cur.isSub && <span>工作量拆分自 <a className="nc-link" onClick={backMain}>{cur.parentCode}</a> {cur.parentName}（视图，不产生新合同）</span>}
             {!cur.isSub && <span>相对方 {go ? <EntityLink target="customer" id={custOf(c.party)?.id} go={go} title="下钻到客户档案">{c.party}</EntityLink> : c.party}</span>}
             <span>负责人 {cur.owner}</span>
             {/* 上游来源单据（投标 → 合同 / 报价 → 合同）：按外键反查，修复前这两个字段落了库却没有出口 */}
@@ -744,6 +772,38 @@ export default function ContractDetailPage({ go, role, nav }: { go: (p: string) 
 
         {/* ---------- 5 张统计卡（金额的唯一出处 · 常驻可见，每项只出现一次） ---------- */}
         <div className="nc-d2-stats">
+          {isFramework ? (
+            <div className="nc-stat5">
+              <div className="nc-stat5-card" style={{ '--accent': 'var(--c-primary)' } as React.CSSProperties}>
+                <div className="nc-stat5-hd"><span className="nc-stat5-ico is-blue">额</span>框架额度</div>
+                <div className="nc-stat5-amt num"><Money v={fwLimit} role={role} /></div>
+                <div className="nc-stat5-foot">总额度（冻结）</div>
+              </div>
+              <div className="nc-stat5-card" style={{ '--accent': 'var(--c-primary)' } as React.CSSProperties}>
+                <div className="nc-stat5-hd"><span className="nc-stat5-ico is-blue">执</span>已执行</div>
+                <div className="nc-stat5-amt num"><Money v={fwUsed} role={role} /></div>
+                <div className="nc-stat5-foot">
+                  <div className="nc-stat5-row"><span>执行进度</span><b className="num" style={{ color: 'var(--c-success-deep)' }}>{usedPct}%</b></div>
+                  <Progress value={usedPct} tone="green" />
+                </div>
+              </div>
+              <div className="nc-stat5-card" style={{ '--accent': 'var(--c-success)' } as React.CSSProperties}>
+                <div className="nc-stat5-hd"><span className="nc-stat5-ico is-green">收</span>已收款</div>
+                <div className="nc-stat5-amt num is-green"><Money v={fwRecv} role={role} /></div>
+                <div className="nc-stat5-foot">执行单回款</div>
+              </div>
+              <div className="nc-stat5-card" style={{ '--accent': 'var(--c-warning)' } as React.CSSProperties}>
+                <div className="nc-stat5-hd"><span className="nc-stat5-ico is-orange">欠</span>执行未收</div>
+                <div className="nc-stat5-amt num is-orange"><Money v={fwOpen} role={role} /></div>
+                <div className="nc-stat5-foot">已执行未回款</div>
+              </div>
+              <div className="nc-stat5-card" style={{ '--accent': 'var(--c-danger)' } as React.CSSProperties}>
+                <div className="nc-stat5-hd"><span className="nc-stat5-ico is-red">余</span>剩余可用</div>
+                <div className="nc-stat5-amt num is-green"><Money v={fwRemain} role={role} /></div>
+                <div className="nc-stat5-foot">框架剩余额度</div>
+              </div>
+            </div>
+          ) : (
           <div className="nc-stat5">
             <div className="nc-stat5-card" style={{ '--accent': 'var(--c-primary)' } as React.CSSProperties}>
               <div className="nc-stat5-hd"><span className="nc-stat5-ico is-blue">总</span>合同总额</div>
@@ -774,6 +834,7 @@ export default function ContractDetailPage({ go, role, nav }: { go: (p: string) 
               <div className="nc-stat5-foot">项目成本 · 只读</div>
             </div>
           </div>
+          )}
         </div>
 
         {/* ---------- 操作区 ---------- */}
@@ -917,7 +978,7 @@ export default function ContractDetailPage({ go, role, nav }: { go: (p: string) 
                     <span>编号：{cur.code}</span>
                     <span>甲方：{cur.partyA}</span>
                     <span>乙方：{PARTY_B}</span>
-                    <span>金额：<Money v={cur.total} role={role} /></span>
+                    <span>{isFramework ? '框架额度：' : '金额：'}<Money v={cur.limitAmt ?? cur.total} role={role} /></span>
                   </div>
                   {clauses.map((cl) => {
                     const rs = risks.filter((r) => r.clauseId === cl.id);
@@ -1049,15 +1110,15 @@ export default function ContractDetailPage({ go, role, nav }: { go: (p: string) 
             </>
           )}
 
-          {tab === 'sub' && view === 'main' && (
+          {tab === 'sub' && view === 'main' && !isFramework && (
             <>
-              <div className="nc-sec-title">子合同</div>
+              <div className="nc-sec-title">工作量拆分</div>
               <div className="nc-subbar">
-                <Ico n="package" size={14} /> 已拆分 {subs.length} 个子合同，合计 {<Money v={subs.reduce((a, s) => a + s.total, 0)} role={role} />}（占总额 {Math.round(subs.reduce((a, s) => a + s.total, 0) / total * 100)}%）；余款由主合同直接执行。点击行进入子合同详情。
+                <Ico n="package" size={14} /> 主合同按工作量拆分为 {subs.length} 个只读视图，合计 {<Money v={subs.reduce((a, s) => a + s.total, 0)} role={role} />}（占总额 {Math.round(subs.reduce((a, s) => a + s.total, 0) / total * 100)}%）；余款由主合同直接执行。视图不写入台账、不产生新合同，点击行可下钻查看。
               </div>
               <table className="nc-tbl" style={{ minWidth: 860 }}>
                 <thead><tr>
-                  <th style={{ width: 170 }}>子合同编号</th><th>子合同名称</th>
+                  <th style={{ width: 170 }}>拆分编号</th><th>拆分项名称</th>
                   <th style={{ width: 90 }}>类型</th><th style={{ width: 130 }} className="is-num">金额</th>
                   <th style={{ width: 100 }}>状态</th><th style={{ width: 90 }}>操作</th>
                 </tr></thead>
@@ -1074,10 +1135,45 @@ export default function ContractDetailPage({ go, role, nav }: { go: (p: string) 
                   ))}
                 </tbody>
                 <tfoot><tr className="nc-tbl-sum">
-                  <td colSpan={3}>合计（已拆分）</td>
+                  <td colSpan={3}>合计（工作量拆分）</td>
                   <td className="is-num"><b className="num">{<Money v={subs.reduce((a, s) => a + s.total, 0)} role={role} />}</b></td>
                   <td colSpan={2} style={{ fontWeight: 400, color: 'var(--ink-3)' }}>
                     占总额 {Math.round(subs.reduce((a, s) => a + s.total, 0) / total * 100)}% · 余款由主合同直接执行
+                  </td>
+                </tr></tfoot>
+              </table>
+            </>
+          )}
+
+          {tab === 'sub' && view === 'main' && isFramework && (
+            <>
+              <div className="nc-sec-title">执行单</div>
+              <div className="nc-subbar">
+                <Ico n="package" size={14} /> 框架额度 <b className="num">{<Money v={c.amt} role={role} />}</b>，已签执行单 {execOrders.length} 份、累计执行 {<Money v={usedExec} role={role} />}（占额度 {usedPct}%）；单笔 ≥50 万元须财务复核，累计超出额度须先签补充协议。点击行进入执行单详情。
+              </div>
+              <table className="nc-tbl" style={{ minWidth: 860 }}>
+                <thead><tr>
+                  <th style={{ width: 170 }}>执行单编号</th><th>执行单名称</th>
+                  <th style={{ width: 90 }}>类型</th><th style={{ width: 130 }} className="is-num">执行金额</th>
+                  <th style={{ width: 100 }}>状态</th><th style={{ width: 90 }}>操作</th>
+                </tr></thead>
+                <tbody>
+                  {execOrders.map((k) => (
+                    <tr key={k.id} className="nc-subrow" onClick={() => openExecOrder(k.id)}>
+                      <td><a className="nc-link num">{k.id}</a></td>
+                      <td>{k.name}</td>
+                      <td><Tag tone="gray">{k.type}</Tag></td>
+                      <td className="is-num"><b className="num"><Money v={k.execAmt} role={role} /></b></td>
+                      <td><Tag tone={k.status === '履约中' ? 'green' : k.status === '已签约' ? 'blue' : 'gray'}>{k.status}</Tag></td>
+                      <td><div className="nc-ops"><Op onClick={() => openExecOrder(k.id)}>详情</Op></div></td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot><tr className="nc-tbl-sum">
+                  <td colSpan={3}>累计已执行 / 框架额度</td>
+                  <td className="is-num"><b className="num">{<Money v={usedExec} role={role} />} / {<Money v={c.amt} role={role} />}</b></td>
+                  <td colSpan={2} style={{ fontWeight: 400, color: 'var(--ink-3)' }}>
+                    占额度 {usedPct}% · 超出须签补充协议
                   </td>
                 </tr></tfoot>
               </table>
@@ -1247,7 +1343,7 @@ export default function ContractDetailPage({ go, role, nav }: { go: (p: string) 
             <>
               <div className="nc-sec-title">关联项目</div>
               {cur.projects.length === 0
-                ? <div className="nc-empty-mini">框架协议暂无直接关联项目，按子合同工作量挂接</div>
+                ? <div className="nc-empty-mini">框架协议暂无直接关联项目，按执行单工作量挂接</div>
                 : (
                   <table className="nc-tbl" style={{ minWidth: 720 }}>
                     <thead><tr><th style={{ width: 160 }}>项目编号</th><th>项目名称</th><th style={{ width: 120 }}>负责人</th><th style={{ width: 110 }}>状态</th></tr></thead>
