@@ -1,12 +1,14 @@
 // 诺安云 6.0 · 应用外壳
-// 顶栏（品牌 + 13 模块 Tab + 右侧工具区）+ 页签栏（可关闭）+ 侧栏（6 组 14 项）+ 内容区
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+// 顶栏（品牌 + 13 模块 Tab + 右侧工具区）+ 页签栏（可关闭）+ 侧栏（7 组 18 项）+ 内容区
+import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
-  APPROVALS, BIDS, CERTS, MENU, MODULE_TABS, RECEIVABLES, ROLES, PAGE_META, PAGE_PARENT,
+  BIDS, MENU, MODULE_TABS, RECEIVABLES, ROLES, PAGE_META, PAGE_PARENT,
   TODAY, canSeeMoney, fmtWan,
 } from './data';
 import { useToast } from './ui';
 import { Ico, type IconName } from './icons';
+import { getApprovals, getCerts, subscribeStore } from './store';
+import AiAssistant from './AiAssistant';
 
 type Props = {
   page: string;
@@ -25,21 +27,20 @@ type Props = {
  * 口径 = 逾期应收期次 + 待审批单据 + 保证金未退 + 证书已过期 / 30 天内到期。
  */
 
-/* AI 助手示例问法（演示态）：点击后给出确定性答复，不做真实模型调用 */
-const AI_ASKS = [
-  { q: '本月逾期应收有多少？', a: '逾期应收由「合同 → 收付款计划」实时汇总，驾驶舱首张卡可穿透到期次明细。' },
-  { q: '哪些证书 30 天内到期？', a: '证书台账按 6 档预警（过期 / 30 / 60 / 90 天 / 催出逾期 / 履约期过期），可一键筛选。' },
-  { q: '这笔付款为什么被拦截？', a: '付款校验规则：累计已付 + 本次 ≤ 执行金额 × 付款比例上限；超限需「特殊审批放行」并填写理由。' },
-  { q: '质保金最多能留多少？', a: '按建质〔2017〕138 号，质量保证金不得超过结算总额 3%。' },
-];
-
 export default function AppShell({ page, onNavigate, role, onRoleChange, pending, fixedLayout, crumbs, children }: Props) {
   const toast = useToast();
+  /* 证书读**跨页 store**：证书管理页续证 / 收回后，侧栏证书徽标与消息中心即时跟随。
+     此前直读 data.ts 常量，导致「证书页把安许续期了，侧栏还在报证书临期」。 */
+  const certs = useSyncExternalStore(subscribeStore, getCerts, getCerts);
+  /* 审批切片：侧栏徽标与顶栏通知都要在「通过 / 退回」后即时更新，故订阅 store 而非读静态常量 */
+  const approvals = useSyncExternalStore(subscribeStore, getApprovals, getApprovals);
   const [mini, setMini] = useState(false);
   const [mOpen, setMOpen] = useState(false);
-  const [dd, setDd] = useState<'' | 'role' | 'bell' | 'search' | 'ai'>('');
+  const [dd, setDd] = useState<'' | 'role' | 'bell' | 'search'>('');
+  /* AI 助手已由「顶栏下拉」改为「全局悬浮窗」（见 AiAssistant.tsx 头部注释）：
+     顶栏按钮与右下角悬浮球是同一个开关的两个入口，状态由这里托管。 */
+  const [aiOpen, setAiOpen] = useState(false);
   const [groupFold, setGroupFold] = useState<Record<string, boolean>>({});
-  const [menuKw, setMenuKw] = useState('');
   const [tabs, setTabs] = useState<string[]>(['dashboard', 'customer']);
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; id: string } | null>(null);
   /* 兜底不再用下标 ROLES[6] —— 角色数组一扩（7 → 10）下标就会静默指向别的角色。
@@ -67,7 +68,7 @@ export default function AppShell({ page, onNavigate, role, onRoleChange, pending
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') { setDd(''); setCtxMenu(null); setMOpen(false); }
       /**
-       * 评审 I5：顶栏搜索与页面级检索弹窗（文档中心 / 材料主数据）都监听 Ctrl+K，
+       * 评审 I5：顶栏搜索与页面级检索弹窗（文档中心 / 物料主数据）都监听 Ctrl+K，
        * 在两个页面会同时弹出两层浮层。约定：页面级处理器先调用 preventDefault()
        * 并在事件对象上打 __ncHandled 标记表示「已接管」；顶栏延后一拍检查该标记，
        * 已被页面接管时让位，保证同一时刻只有一层浮层。
@@ -83,19 +84,15 @@ export default function AppShell({ page, onNavigate, role, onRoleChange, pending
   }, [mOpen]);
 
   /**
-   * 侧栏菜单：先按角色白名单裁剪（roles 缺省 = 全角色可见），再按关键字过滤。
+   * 侧栏菜单：按角色白名单裁剪（roles 缺省 = 全角色可见）。
    * 组为空时整组隐藏，避免出现「只有标题没有项」的空组。
+   * （项25：原菜单搜索框已移除，不再按关键字过滤）
    */
   const menuGroups = useMemo(() => {
-    const kw = menuKw.trim();
-    const byRole = MENU
+    return MENU
       .map((g) => ({ group: g.group, items: g.items.filter((it) => !it.roles || it.roles.includes(role)) }))
       .filter((g) => g.items.length > 0);
-    if (!kw) return byRole;
-    return byRole
-      .map((g) => ({ group: g.group, items: g.items.filter((it) => it.label.includes(kw) || g.group.includes(kw)) }))
-      .filter((g) => g.items.length > 0);
-  }, [menuKw, role]);
+  }, [role]);
 
   /** 消息通知列表（与顶栏角标同源派生） */
   const notis = useMemo(() => {
@@ -105,23 +102,25 @@ export default function AppShell({ page, onNavigate, role, onRoleChange, pending
     RECEIVABLES.filter((r) => r.status === '逾期').forEach((r) => list.push({
       tone: 'red', t: `逾期收款 · ${r.customer.slice(0, 10)}`, d: `${r.node} 逾期 ${r.overdueDays} 天 · ${amt(r.amt)}`,
     }));
-    APPROVALS.filter((a) => a.status === '待审批' || a.status === '审批中').forEach((a) => list.push({
+    approvals.filter((a) => a.status === '待审批' || a.status === '审批中').forEach((a) => list.push({
       tone: 'orange', t: `审批提醒 · ${a.type}`, d: `${a.ref.split(' ')[0]} 待您审批 · ${amt(a.amt)}`,
     }));
     BIDS.filter((b) => b.depositSt === '未退').forEach((b) => list.push({
       tone: 'gray', t: `保证金未退 · ${b.id}`, d: `${b.name.slice(0, 12)} · 保证金 ${amt(b.deposit)}`,
     }));
-    CERTS.filter((c) => c.validTo < TODAY || (c.warnDays > 0 && c.warnDays <= 30)).forEach((c) => list.push({
+    certs.filter((c) => c.validTo < TODAY || (c.warnDays > 0 && c.warnDays <= 30)).forEach((c) => list.push({
       tone: c.validTo < TODAY ? 'red' : 'orange', t: `证书${c.validTo < TODAY ? '已过期' : '临期'} · ${c.name.slice(0, 12)}`, d: `${c.id} · 有效期至 ${c.validTo}（过期将导致投标废标）`,
     }));
     return list;
-  }, [role]);
+  }, [role, certs, approvals]);
 
   /** 侧栏徽标：由业务数据派生，避免写死数字与台账脱节 */
-  const badgeOf = (key?: 'bid' | 'cert') => {
+  const badgeOf = (key?: 'bid' | 'cert' | 'approval') => {
     if (key === 'bid') return BIDS.filter((b) => b.stage === '开标' || b.depositSt === '未退').length;
     // 证书：已过期 + 30 天内到期（即预警卡红色 / 橙色两档，需立即处置）
-    if (key === 'cert') return CERTS.filter((c) => c.validTo < TODAY || (c.warnDays > 0 && c.warnDays <= 30)).length;
+    if (key === 'cert') return certs.filter((c) => c.validTo < TODAY || (c.warnDays > 0 && c.warnDays <= 30)).length;
+    // 审批中心：待我审批（待审批 + 审批中），与审批中心页「待我审批」Tab 同口径
+    if (key === 'approval') return approvals.filter((a) => a.status === '待审批' || a.status === '审批中').length;
     return 0;
   };
 
@@ -185,14 +184,6 @@ export default function AppShell({ page, onNavigate, role, onRoleChange, pending
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.73 21a2 2 0 0 1-3.46 0" /></svg>
             <span className="nc-badge">{pending}</span>
           </button>
-          <button
-            className="nc-hbtn nc-hbtn-ai"
-            title="AI 助手（演示态）· 点击展开示例问法"
-            onClick={(e) => { e.stopPropagation(); setDd(dd === 'ai' ? '' : 'ai'); }}
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.5l1.9 5.6L19.5 10l-5.6 1.9L12 17.5l-1.9-5.6L4.5 10l5.6-1.9z" /><path d="M19 15l.9 2.6 2.6.9-2.6.9L19 22l-.9-2.6-2.6-.9 2.6-.9z" /></svg>
-            <span>AI 助手</span>
-          </button>
           <button className="nc-avatar" title="切换角色视角" onClick={(e) => { e.stopPropagation(); setDd(dd === 'role' ? '' : 'role'); }}>{cur.name[0]}</button>
         </div>
       </header>
@@ -244,29 +235,19 @@ export default function AppShell({ page, onNavigate, role, onRoleChange, pending
           <div style={{ padding: 8 }}>
             <input className="nc-input" autoFocus placeholder="搜索客户 / 商机 / 合同 / 项目 / 证书（Ctrl+K）" />
           </div>
-          <div className="nc-dd-title">跨 12 类对象检索：客户 / 商机 / 报价 / 合同 / 项目 / 投标 / 证书 / 业绩 / 文档 / 发票 / 供应商 / 材料，按权限过滤后返回</div>
+          <div className="nc-dd-title">跨 12 类对象检索：客户 / 商机 / 报价 / 合同 / 项目 / 投标 / 证书 / 业绩 / 文档 / 发票 / 供应商 / 物料，按权限过滤后返回</div>
           <button className="nc-dd-item" onClick={() => setDd('')}><Ico n="search" size={16} /> Enter 进入聚合结果页（演示态）</button>
         </div>
       )}
 
-      {/* AI 助手下拉（演示态：示例问法 + 确定性答复，不做真实模型调用） */}
-      {dd === 'ai' && (
-        <div className="nc-dd" style={{ width: 360, right: 120 }} onClick={(e) => e.stopPropagation()}>
-          <div className="nc-dd-head" style={{ fontWeight: 600 }}><Ico n="star" size={16} /> AI 助手 · 问数 / 问流程</div>
-          <div className="nc-dd-title">演示态：以下为内置示例问法，点击即可查看口径答复（不调用外部模型）</div>
-          {AI_ASKS.map((a) => (
-            <button key={a.q} className="nc-dd-item" style={{ alignItems: 'flex-start' }} onClick={() => toast(`AI 助手：${a.a}`)}>
-              <Ico n="robot" size={16} />
-              <span style={{ flex: 1, minWidth: 0 }}>
-                <b style={{ fontSize: 13 }}>{a.q}</b>
-                <span style={{ display: 'block', fontSize: 12, color: 'var(--ink-3)' }}>{a.a}</span>
-              </span>
-            </button>
-          ))}
-          <div className="nc-dd-sep" />
-          <button className="nc-dd-item" onClick={() => { setDd(''); onNavigate('dashboard'); }}>进入驾驶舱查看全部指标 →</button>
-        </div>
-      )}
+      {/* AI 助手：全局悬浮窗（原顶栏下拉已移除 —— 一移鼠标就关、答复看一半就没了） */}
+      <AiAssistant
+        onNavigate={(p) => { onNavigate(p); setAiOpen(true); }}
+        roleName={cur.name}
+        page={page}
+        open={aiOpen}
+        onOpenChange={setAiOpen}
+      />
 
       {/* ==================== 页签栏 ==================== */}
       <div className="nc-tabbar">
@@ -308,12 +289,6 @@ export default function AppShell({ page, onNavigate, role, onRoleChange, pending
       <div className="nc-body">
         {mOpen && <div className="nc-side-mask" onClick={() => setMOpen(false)} />}
         <aside className={`nc-side${mini ? ' is-mini' : ''}${mOpen ? ' is-mopen' : ''}`}>
-          {!mini && (
-            <div className="nc-side-search">
-              <span className="nc-side-search-lbl">菜单</span>
-              <input value={menuKw} placeholder="搜索菜单…" onChange={(e) => setMenuKw(e.target.value)} />
-            </div>
-          )}
           <nav className="nc-side-nav">
             {menuGroups.map((g) => {
               const folded = !!groupFold[g.group];

@@ -10,7 +10,7 @@ import React, { useState } from 'react';
 import { Btn, Card, Field, KvGrid, Modal, Progress, Tag, Timeline, Tip } from '../ui';
 import { Ico } from '../icons';
 import { MILESTONE_LEGAL, TODAY } from '../data';
-import { nodeKey } from './seed';
+import { daysBetween, nodeKey } from './seed';
 import { PjSection } from './PjSection';
 import type { PjCtx } from './ctx';
 
@@ -38,8 +38,8 @@ function Milestones({ C }: { C: PjCtx }) {
       <table className="nc-tbl" style={{ minWidth: 900 }}>
         <thead><tr>
           <th>节点</th>
-          <th style={{ width: 120 }}>计划完成日</th>
-          <th style={{ width: 120 }}>实际完成日</th>
+          <th style={{ width: 120 }} className="is-num">计划完成日</th>
+          <th style={{ width: 120 }} className="is-num">实际完成日</th>
           <th style={{ width: 100 }}>状态</th>
           <th style={{ width: 100 }}>责任人</th>
           <th style={{ width: 120 }}>准入资料</th>
@@ -58,8 +58,8 @@ function Milestones({ C }: { C: PjCtx }) {
                   {MILESTONE_LEGAL.includes(r.n.replace(/^M\d+\s*/, '')) && <Tag tone="gray">法定</Tag>}
                   {isCur && <Tag tone="blue">当前</Tag>}
                 </td>
-                <td className={`num${over ? ' nc-v-red' : ''}`}>{r.plan}{over && ' ⚠'}</td>
-                <td className="num">{r.act}</td>
+                <td className={`is-num num${over ? ' nc-v-red' : ''}`} title={over ? `已逾期 ${daysBetween(r.plan, TODAY)} 天（计划完成日 ${r.plan}，尚未完成）` : undefined}>{r.plan}{over && ' ⚠'}</td>
+                <td className="is-num num">{r.act}</td>
                 <td><Tag tone={MILE_ST_TONE[r.st] ?? 'gray'}>{r.st}</Tag></td>
                 <td>{r.owner}</td>
                 <td>
@@ -328,7 +328,7 @@ function SiteInput({ C }: { C: PjCtx }) {
                 <table className="nc-tbl">
                 <thead><tr>
                   <th>机械名称</th><th style={{ width: 90 }} className="is-num">台班数</th>
-                  <th style={{ width: 110 }}>进场日期</th><th style={{ width: 100 }}>状态</th>
+                  <th style={{ width: 110 }} className="is-num">进场日期</th><th style={{ width: 100 }}>状态</th>
                 </tr></thead>
                 <tbody>
                   {C.machRows.map((m) => {
@@ -337,14 +337,14 @@ function SiteInput({ C }: { C: PjCtx }) {
                       <tr key={m.name}>
                         <td><b>{m.name}</b></td>
                         <td className="is-num num">{m.qty}</td>
-                        <td className="num">{m.date}</td>
+                        <td className="is-num num">{m.date}</td>
                         <td><Tag tone={inSite ? 'green' : 'gray'}>{inSite ? '已进场' : '计划中'}</Tag></td>
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
-              )}
+            )}
           </Card>
         )}
       </div>

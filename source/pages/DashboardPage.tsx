@@ -8,16 +8,18 @@
 // 硬规则：指标全部由基础数据自动推算，禁止人工填报；穿透 ≤3 click。
 /* 本项目 vite 用 jsxRuntime: 'classic' —— JSX 编译成 React.createElement，
    所以即使代码里不显式写 React.xxx，也必须保留默认导入，删掉会运行时抛 React is not defined */
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import {
-  Alert, Btn, Card, Code, EntityLink, Kpi, Op, PageHead, Progress, Tag, Tabs, Tip, useToast, pressProps,} from '../components/ui';
+  Alert, Btn, Card, Code, EntityLink, Kpi, Op, OpMore, PageHead, Progress, Tag, Tabs, Tip, useToast, pressProps,} from '../components/ui';
 import {
-  APPROVALS, BIDS, CERTS, CONTRACTS, CUSTOMERS, INVOICES, ITEMS, MATERIALS, OPPS, PROJECTS,
+  APPROVALS, BIDS, CONTRACTS, CUSTOMERS, INVOICES, ITEMS, MATERIALS, OPPS, PROJECTS,
+  contractOverdue, contractOverpay,
   RECEIVABLES, RISKS, ROLES, SUPPLIERS,
   fmt, fmtWan, isOppClosed, normContractStatus, oppStageTone, CONTRACT_STATUS_TONE, TODAY, canSeeMoney,
+  getTodoConfig,
 } from '../components/data';
 import { Ico } from '../components/icons';
-import { getOppStageIdx, getOppStages, getOppStageWeight, setFocus, setFocusTab } from '../components/store';
+import { getCerts, getOppStageIdx, getOppStages, getOppStageWeight, setFocus, setFocusTab, subscribeStore } from '../components/store';
 import type { IconName } from '../components/icons';
 
 /** 距今天的天数（正 = 未来，负 = 已过期） */
@@ -59,6 +61,7 @@ function buildFunnel(mode: 'c' | 'a') {
     return {
       name: st.name,
       value: mode === 'c' ? list.length : weighted,
+      cnt: list.length,
       label: mode === 'c' ? `${list.length} 个` : fmtWan(weighted),
     };
   });
@@ -67,24 +70,26 @@ function buildFunnel(mode: 'c' | 'a') {
 
 /* ============================ 证书预警 6 档口径 ============================ */
 function certBuckets() {
-  const expired = CERTS.filter((c) => c.validTo < TODAY);
-  const d30 = CERTS.filter((c) => c.warnDays > 0 && c.warnDays <= 30);
-  const d60 = CERTS.filter((c) => c.warnDays > 30 && c.warnDays <= 60);
-  const d90 = CERTS.filter((c) => c.warnDays > 60 && c.warnDays <= 90);
+  /* 读**跨页 store**（非 data.ts 常量）：证书管理页续证 / 收回后，本页 6 档预警即时归零 */
+  const all = getCerts();
+  const expired = all.filter((c) => c.validTo < TODAY);
+  const d30 = all.filter((c) => c.warnDays > 0 && c.warnDays <= 30);
+  const d60 = all.filter((c) => c.warnDays > 30 && c.warnDays <= 60);
+  const d90 = all.filter((c) => c.warnDays > 60 && c.warnDays <= 90);
   // 催出逾期：外借已过约定归还日仍未收回（演示口径固定 0，避免与证书台账重复计数）
   const urgeLate = 0;
   // 履约期过期提醒：证书已过期但仍在项目占用中（占用维持 + 提醒持证人/PM + 不影响验收，N-61）
-  const holdExpired = CERTS.filter((c) => c.validTo < TODAY && (c.used as string[]).length > 0).length;
+  const holdExpired = all.filter((c) => c.validTo < TODAY && (c.used as string[]).length > 0).length;
   return { expired, d30, d60, d90, urgeLate, holdExpired };
 }
 
 /* ============================ 新手引导（5 步，长期保留可回看） ============================ */
 const GUIDE_STEPS = [
-  { t: '切换数据范围', d: '本月 / 本季 / 本年只影响「区间类」指标（本月应收 · 本年新增客户 · 商机加权）；「时点类」指标（逾期应收 · 待我审批 · 待付款 · 保证金未退）不随动。' },
-  { t: '读懂「资金与合同」分区', d: '逾期应收 = 近逾期欠款 − 红字冲销净额；点指标右上 ↗ 可穿透明细（全局穿透 ≤3 click）；鼠标悬停标题可看完整口径 Tooltip。' },
-  { t: '处理「待我审批」（闭环）', d: '五类聚合：合同 / 变更 / 付款 / 开票 / 用章；审批口径以提交时快照为准；审批完成后状态自动回写、对应提醒即时消除（无合同付款固定路由总经理）。' },
-  { t: '清空「我的待办」（闭环）', d: '每条待办都带直达操作：催收 / 补金额 / 去提交 / 去投标详情；处理完自动销提醒；提醒频控 ≤5 条/人日防打扰。' },
-  { t: '善用角色视角与快捷条', d: '切换角色视角后，指标按 A-02 权限裁剪：无权限金额显示「—」脱敏而非隐藏；底部快捷条随角色变化，新建立即回流刷新。' },
+  { t: '切换数据范围', d: '本月 / 本季 / 本年仅联动区间类指标，时点类指标不随动。' },
+  { t: '读懂「资金与合同」分区', d: '点指标右上 ↗ 查看明细；悬停标题看口径。' },
+  { t: '处理「待我审批」', d: '五类聚合：合同 / 变更 / 付款 / 开票 / 用章，完成后状态自动回写。' },
+  { t: '清空「我的待办」', d: '每条待办带直达操作，处理完自动销提醒。' },
+  { t: '善用角色视角与快捷条', d: '切换角色视角，指标按权限裁剪；无权限金额显示「—」。' },
 ];
 
 /* ============================ 底部快捷操作（随角色变化） ============================ */
@@ -104,8 +109,6 @@ const ADMIN_SYSTEMS = [
   { name: '模板库（4 套 · 白名单变量）', st: '正常', note: '—' },
   { name: '提醒矩阵（18 事件 × 渠道）', st: '正常', note: '频控 ≤5 条/人日' },
   { name: '操作日志', st: '正常', note: '今日 23 条 · 保留 ≥2 年' },
-  { name: '租户 Logo', st: '已上传', note: '决策 27' },
-  { name: '待批开关', st: '关（默认）', note: '本月 0 笔' },
 ];
 
 export default function DashboardPage({ go, role, nav }: { go: (p: string) => void; role: string; nav?: number }) {
@@ -113,6 +116,7 @@ export default function DashboardPage({ go, role, nav }: { go: (p: string) => vo
   const money = canSeeMoney(role);
 
   /* ---- 顶部工具区状态 ---- */
+  const certs = useSyncExternalStore(subscribeStore, getCerts, getCerts);
   const [view, setView] = useState(role); // 角色视角（默认跟随顶栏切换的角色）
   /* 顶栏角色变更后同步页内视角：此前 useState 初值只在挂载时取一次 role，
      顶栏换角色后 view 不变 → 「视角 Tab」与「权限裁剪 money=canSeeMoney(role)」永久错位。 */
@@ -121,7 +125,9 @@ export default function DashboardPage({ go, role, nav }: { go: (p: string) => vo
   /* L1：项目经营卡「盈亏 / 现金流」两种口径切换（默认权责口径） */
   const [bizTab, setBizTab] = useState<'profit' | 'cash'>('profit');
   /* L1：我的项目卡「执行概览 / 项目进度明细」切换 */
-  const [projTab, setProjTab] = useState<'kpi' | 'list'>('kpi');
+  const [projDetailOpen, setProjDetailOpen] = useState(true);
+  /* L1：审批 Tab（待我审批 / 我已审批 / 抄送我）—— GM 视图聚合 */
+  const [apprTab, setApprTab] = useState<'todo' | 'done' | 'cc'>('todo');
   const [funMode, setFunMode] = useState<'c' | 'a'>('c');
   const [updTime, setUpdTime] = useState(TODAY + ' 10:23');
 
@@ -145,22 +151,24 @@ export default function DashboardPage({ go, role, nav }: { go: (p: string) => vo
   /* 应收榜口径：逾期 + 已开票未到账（账龄 60-90 天）；已开票未到账不计入回款，与回款榜不重叠 */
   const overdueRecv = RECEIVABLES.filter((r) => r.status === '逾期' || r.status === '已开票未到账');
   const payable = RECEIVABLES.filter((r) => r.status === '可请款');
-  const overdueContracts = CONTRACTS.filter((c) => c.overdue);
-  const overpayContracts = CONTRACTS.filter((c) => c.overpay);
+  const overdueContracts = CONTRACTS.filter((c) => contractOverdue(c));
+  const overpayContracts = CONTRACTS.filter((c) => contractOverpay(c));
   const lowStock = MATERIALS.filter((m) => m.stock < m.safe);
   const pendingBidDeposit = BIDS.filter((b) => b.depositSt === '未退');
   const waitingOpen = BIDS.filter((b) => b.stage === '开标');
 
   const newClientCount = newCustOf(scope);
-  const clientsToFollow = CUSTOMERS.filter((c) => c.lastFollowDays > 30);
+  /* 项2：跟进超期自动进待办（开关 + 提醒天数读取 BUSINESS_CONFIG，替代硬编码 30 天） */
+  const todoCfg = getTodoConfig();
+  const clientsToFollow = todoCfg.followOverdueAutoTodo ? CUSTOMERS.filter((c) => c.lastFollowDays > todoCfg.remindDays) : [];
   const myOpps = OPPS.filter((o) => !isOppClosed(o)).sort((a, b) => b.amt - a.amt);
   const myProjects = PROJECTS.slice(0, 4);
-  const myCertsWarn = CERTS.filter((c) => c.warnDays > 0 || c.validTo < TODAY);
+  const myCertsWarn = certs.filter((c) => c.warnDays > 0 || c.validTo < TODAY);
   /* 异常处置：已过有效期证书（须续证或停用）。
      原写法 `validTo < TODAY && status !== '已过期'` 恒为空集——status 字段本身就是
      「已过期 / 60 天内到期 / 30 天内到期」的预警档位，过期证书 status 必为「已过期」，
      两个条件互斥。改为只按有效期判定，并在副文案区分是否仍被项目占用。 */
-  const healthDanger = CERTS.filter((c) => c.validTo < TODAY);
+  const healthDanger = certs.filter((c) => c.validTo < TODAY);
 
   /* ---------------- 资金类派生指标（禁止硬编码） ---------------- */
   /** 逾期应收 = Σ逾期期次金额 − 红字冲销净额（当前无冲销，净额 = 0） */
@@ -172,7 +180,7 @@ export default function DashboardPage({ go, role, nav }: { go: (p: string) => vo
   const dueIn7 = dueIn(7);
   const dueIn30 = dueIn(30);
   /** 收款类合同（销售 + 维保）：用于实收 / 回款率 */
-  const saleContracts = CONTRACTS.filter((c) => c.type === '销售合同' || c.type === '维护保养合同');
+  const saleContracts = CONTRACTS.filter((c) => c.type === '销售合同' || c.type === '检测合同' || c.type === '维护保养合同');
   /** 采购类合同：用于现金流出 */
   const buyContracts = CONTRACTS.filter((c) => c.type === '采购合同');
   const inflow = saleContracts.reduce((s, c) => s + c.recv, 0);
@@ -214,7 +222,7 @@ export default function DashboardPage({ go, role, nav }: { go: (p: string) => vo
   type Todo = { key: string; n: number; label: string; sub: string; page: string; tone: 'red' | 'orange' | 'green' | 'blue' | 'gray' | 'gold' };
   const todos: Todo[] = [
     { key: 'approve', n: approvalTabs.length, label: '待我审批', sub: '合同 1 · 变更 1 · 付款 1 · 开票 1', page: 'approval', tone: 'orange' },
-    { key: 'follow', n: clientsToFollow.length, label: '待我跟进客户（>30 天）', sub: clientsToFollow.length ? `最久 ${Math.max(...clientsToFollow.map((c) => c.lastFollowDays))} 天未跟进（已超期）` : '无超期客户', page: 'customer', tone: 'orange' },
+    { key: 'follow', n: clientsToFollow.length, label: `待我跟进客户（>${todoCfg.remindDays} 天）`, sub: clientsToFollow.length ? `最久 ${Math.max(...clientsToFollow.map((c) => c.lastFollowDays))} 天未跟进（已超期）` : '无超期客户', page: 'customer', tone: 'orange' },
     { key: 'recv', n: overdueRecv.length, label: '待我登记收款', sub: overdueRecv[0] ? `${overdueRecv[0].contract} 期次逾期 ${overdueRecv[0].overdueDays} 天` : '无逾期期次', page: 'contract', tone: 'red' },
     { key: 'cost', n: 2, label: '待登记项目成本', sub: '上月 2 个项目未登记成本', page: 'project-center', tone: 'blue' },
   ];
@@ -229,7 +237,7 @@ export default function DashboardPage({ go, role, nav }: { go: (p: string) => vo
   const markDone = (i: number) => {
     setGuideDone((prev) => {
       const next = prev.map((v, ix) => (ix === i ? true : v));
-      if (next.every(Boolean)) toast(' 新手引导已全部完成！引导长期保留，可随时回看');
+      if (next.every(Boolean)) { toast('新手引导已全部完成，已折叠为一行摘要，可随时展开回看'); setGuideOpen(false); }
       else toast(`已完成第 ${i + 1} 步：${GUIDE_STEPS[i].t}`);
       return next;
     });
@@ -252,17 +260,17 @@ export default function DashboardPage({ go, role, nav }: { go: (p: string) => vo
             tone={money ? 'red' : undefined}
             locked={!money}
             sub={overdueRecv[0] ? `${overdueRecv[0].node} · 逾期 ${overdueRecv[0].overdueDays} 天` : '无逾期'}
-            note="口径：Σ逾期期次金额 − 红字冲销净额（时点类，不随数据范围切换）"
+            note="口径：Σ逾期期次金额 − 红字冲销净额，不随数据范围切换"
             onClick={() => go('contract')}
             drill
           />
           <Kpi
             label="本月应收"
             value={money ? sc.recv : '—'}
-            tone="orange"
+            tone="blue"
             locked={!money}
             sub="随数据范围"
-            note="口径：区间类，随「本月 / 本季 / 本年」联动"
+            note="随「本月 / 本季 / 本年」联动"
             onClick={() => go('contract')}
             drill
           />
@@ -277,10 +285,12 @@ export default function DashboardPage({ go, role, nav }: { go: (p: string) => vo
           />
           <Kpi
             label="待我审批"
-            value={o.todoAppr != null ? `${o.todoAppr} 笔` : `${approvalTabs.length} 笔`}
-            tone="orange"
+            value={(o.todoAppr != null ? o.todoAppr : approvalTabs.length)
+              ? `${o.todoAppr != null ? o.todoAppr : approvalTabs.length} 笔`
+              : <span className="nc-v-muted">0 笔</span>}
+            tone={(o.todoAppr != null ? o.todoAppr : approvalTabs.length) ? 'orange' : undefined}
             sub="合同 · 变更 · 付款 · 开票 · 用章"
-            note="口径：五类聚合，按当前角色可见审批节点统计（时点类）"
+            note="口径：五类聚合，按当前角色可见审批节点统计"
             onClick={() => go('approval')}
             drill
           />
@@ -290,16 +300,16 @@ export default function DashboardPage({ go, role, nav }: { go: (p: string) => vo
             tone="orange"
             locked={!money}
             sub="审批中 + 已通过未付"
-            note="口径：Σ付款申请（待审批 + 审批中）+ 已通过未付（时点类）"
+            note="口径：Σ付款申请（待审批 + 审批中）+ 已通过未付"
             onClick={() => go('approval')}
             drill
           />
           <Kpi
             label="保证金未退"
-            value={`${pendingBidDeposit.length} 笔`}
+            value={pendingBidDeposit.length ? `${pendingBidDeposit.length} 笔` : <span className="nc-v-muted">0 笔</span>}
             tone={pendingBidDeposit.length ? 'orange' : undefined}
             sub={pendingBidDeposit[0] ? `${pendingBidDeposit[0].id} · ${fmtWan(pendingBidDeposit[0].deposit)}` : '暂无未退保证金'}
-            note="口径：开标后到期未登记退回的投标保证金（时点类）"
+            note="口径：开标后到期未登记退回的投标保证金"
             onClick={() => go('bid')}
             drill
           />
@@ -320,8 +330,10 @@ export default function DashboardPage({ go, role, nav }: { go: (p: string) => vo
       }
     >
       <div className="nc-funnel">
-        {funnelRows.map((r) => {
+        {funnelRows.map((r, i) => {
           const max = Math.max(...funnelRows.map((x) => x.value), 1);
+          const prev = i > 0 ? funnelRows[i - 1] : null;
+          const conv = prev && prev.cnt > 0 ? Math.round((r.cnt / prev.cnt) * 100) : null;
           return (
             <div key={r.name} className="nc-funnel-row">
               <span className="nc-funnel-name">{r.name}</span>
@@ -329,6 +341,7 @@ export default function DashboardPage({ go, role, nav }: { go: (p: string) => vo
                 <span className="nc-funnel-bar" style={{ width: `${Math.max(14, (r.value / max) * 100)}%` }}>{r.value}</span>
               </span>
               <span className="nc-funnel-val num">{r.label}</span>
+              {conv != null && <span className="nc-cell-sub" style={{ marginLeft: 6, whiteSpace: 'nowrap' }}>转化 {conv}%</span>}
             </div>
           );
         })}
@@ -337,7 +350,7 @@ export default function DashboardPage({ go, role, nav }: { go: (p: string) => vo
         <span className="nc-cell-sub">
           加权 = 金额 × 阶段权重 ｜ 在谈总额 {money ? fmtWan(funnel.total) : '—'} · 加权 {money ? fmtWan(funnel.weighted) : '—'}
         </span>
-        <Btn size="sm" onClick={() => go('opp')}>穿透商机列表 →</Btn>
+        <Btn size="sm" onClick={() => go('opp')}>查看商机列表 →</Btn>
       </div>
     </Card>
   );
@@ -383,15 +396,15 @@ export default function DashboardPage({ go, role, nav }: { go: (p: string) => vo
     <Card hd={<><Ico n="scroll" size={16} /> 证书预警</>} extra={<Btn size="sm" onClick={() => go('cert')}>证书管理 →</Btn>}>
       <div className="nc-kpi-grid is-6" style={{ gap: 8 }}>
         {[
-          { n: cb.expired.length, l: '过期', tone: 'red' as const },
+          { n: cb.expired.length, l: '已过期', tone: 'red' as const },
           { n: cb.d30.length, l: '30 天内', tone: 'orange' as const },
           { n: cb.d60.length, l: '60 天内', tone: 'orange' as const },
-          { n: cb.d90.length, l: '90 天内' },
-          { n: cb.urgeLate, l: '催出逾期' },
-          { n: cb.holdExpired, l: '履约期过期提醒', tone: 'orange' as const },
+          { n: cb.d90.length, l: '90 天内', tone: 'blue' as const },
+          { n: cb.urgeLate, l: '外借逾期' },
+          { n: cb.holdExpired, l: '履约期占用', tone: 'orange' as const },
         ].map((x) => (
           <button key={x.l} className="nc-stage-pill" onClick={() => go('cert')}>
-            <span className={`nc-stage-pill-n num${x.tone ? ` nc-v-${x.tone}` : ''}`}>{x.n}</span>
+            <span className={`nc-stage-pill-n num${x.tone ? ` nc-v-${x.tone}` : ''}${x.n === 0 ? ' nc-v-muted' : ''}`}>{x.n}</span>
             <span className="nc-stage-pill-l">{x.l}</span>
           </button>
         ))}
@@ -412,11 +425,11 @@ export default function DashboardPage({ go, role, nav }: { go: (p: string) => vo
           drill
         />
         <Kpi
-          label="待跟进（>30 天）"
+          label={`待跟进（>${todoCfg.remindDays} 天）`}
           value={clientsToFollow.length}
           tone="orange"
           sub={clientsToFollow.length ? `最久 ${Math.max(...clientsToFollow.map((c) => c.lastFollowDays))} 天` : '无超期'}
-          note="口径：距最近一次跟进记录 > 30 天，触发待办"
+          note={`口径：距最近一次跟进记录 > ${todoCfg.remindDays} 天，触发待办（开关 / 天数见系统设置）`}
           onClick={() => go('customer')}
           drill
         />
@@ -465,32 +478,65 @@ export default function DashboardPage({ go, role, nav }: { go: (p: string) => vo
     </Card>
   );
 
-  /** 待我审批表 */
+  /** 审批表体（待我审批 / 我已审批 / 抄送我 三 Tab 复用） */
+  const apprTableBody = (rows: typeof APPROVALS, emptyText = '当前账号无待审批单据') => (
+    <table className="nc-tbl is-md">
+      <thead><tr><th>类型</th><th>单据</th><th className="is-num" style={{ width: 120 }}>金额</th><th style={{ width: 130 }}>分级 / 路由</th><th style={{ width: 70 }}>操作</th></tr></thead>
+      <tbody>
+        {rows.slice(0, 4).map((a) => (
+          <tr key={a.id}>
+            <td><Tag tone={a.type === '合同审批' ? 'blue' : a.type === '变更审批' ? 'green' : a.type === '付款申请' ? 'orange' : 'gray'}>{a.type.replace('审批', '').replace('申请', '')}</Tag></td>
+            <td><span className="nc-link" onClick={() => go('approval')} role="link" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter') go('approval'); }}>{a.ref.split(' ')[0]}</span></td>
+            <td className={`is-num${a.type === '变更审批' ? ' nc-v-green' : ''}`}>{money ? `${a.type === '变更审批' ? '+' : ''}${fmt(a.amt)}` : '—'}</td>
+            <td>
+              <Tag tone={a.amt >= 2000000 ? 'red' : a.amt >= 500000 ? 'orange' : 'gray'}>{a.level}</Tag>
+              <div className="nc-cell-sub">{a.amt >= 500000 ? '浮率 / 金额双触发' : a.amt >= 200000 ? '金额分级' : '2 级校验'}</div>
+            </td>
+            <td><Op onClick={() => go('approval')}>去审批</Op></td>
+          </tr>
+        ))}
+        {!rows.length && <tr><td colSpan={5} className="nc-cell-sub" style={{ textAlign: 'center', padding: 18 }}><Ico n="check" size={16} /> {emptyText}</td></tr>}
+      </tbody>
+    </table>
+  );
+
+  /** 待我审批表（分管等视图平铺，保持原样式） */
   const blockApproval = (rows: typeof APPROVALS, total: number) => (
     <Card
       hd={<><span><Ico n="check" size={16} /> 待我审批</span>{total > 0 && <Tag tone="orange">五类聚合 = {total} 笔</Tag>}</>}
-      extra={<><span className="nc-cell-sub">审批口径以提交快照为准</span><Btn size="sm" kind="primary" onClick={() => go('approval')}>去审批中心 →</Btn></>}
+      extra={<Btn size="sm" kind="primary" onClick={() => go('approval')}>去审批中心 →</Btn>}
     >
-      <table className="nc-tbl is-md">
-        <thead><tr><th>类型</th><th>单据</th><th className="is-num" style={{ width: 120 }}>金额</th><th style={{ width: 130 }}>分级 / 路由</th><th style={{ width: 70 }}>操作</th></tr></thead>
-        <tbody>
-          {rows.slice(0, 4).map((a) => (
-            <tr key={a.id}>
-              <td><Tag tone={a.type === '合同审批' ? 'blue' : a.type === '变更审批' ? 'green' : a.type === '付款申请' ? 'orange' : 'gray'}>{a.type.replace('审批', '').replace('申请', '')}</Tag></td>
-              <td><span className="nc-link" onClick={() => go('approval')} role="link" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter') go('approval'); }}>{a.ref.split(' ')[0]}</span></td>
-              <td className={`is-num${a.type === '变更审批' ? ' nc-v-green' : ''}`}>{money ? `${a.type === '变更审批' ? '+' : ''}${fmt(a.amt)}` : '—'}</td>
-              <td>
-                <Tag tone={a.amt >= 2000000 ? 'red' : a.amt >= 500000 ? 'orange' : 'gray'}>{a.level}</Tag>
-                <div className="nc-cell-sub">{a.amt >= 500000 ? '浮率 / 金额双触发' : a.amt >= 200000 ? '金额分级' : '2 级校验'}</div>
-              </td>
-              <td><Op onClick={() => go('approval')}>去审批</Op></td>
-            </tr>
-          ))}
-          {!rows.length && <tr><td colSpan={5} className="nc-cell-sub" style={{ textAlign: 'center', padding: 18 }}><Ico n="check" size={16} /> 当前账号无待审批单据</td></tr>}
-        </tbody>
-      </table>
+      {apprTableBody(rows)}
     </Card>
   );
+
+  /** 审批（GM 视图）：待我审批 / 我已审批 / 抄送我 三 Tab，待办红色角标 */
+  const blockApprovalTabs = () => {
+    const todoRows = APPROVALS.filter((a) => a.status === '待审批' || a.status === '审批中');
+    const doneRows = APPROVALS.filter((a) => a.status === '已通过' || a.status === '已退回');
+    const ccRows = APPROVALS.filter((a) => (a.cc || []).length > 0);
+    const curRows = apprTab === 'todo' ? todoRows : apprTab === 'done' ? doneRows : ccRows;
+    const emptyText = apprTab === 'todo' ? '当前账号无待审批单据' : apprTab === 'done' ? '暂无已审批单据' : '暂无抄送我的单据';
+    return (
+      <Card
+        hd={<><Ico n="check" size={16} /> 审批</>}
+        extra={<Btn size="sm" kind="primary" onClick={() => go('approval')}>去审批中心 →</Btn>}
+      >
+        <div className="nc-ptabs" style={{ marginBottom: 12 }}>
+          <button className={`nc-ptab${apprTab === 'todo' ? ' is-on' : ''}`} onClick={() => setApprTab('todo')}>
+            待我审批{todoRows.length > 0 && <span className="nc-ptab-cnt" style={{ background: 'var(--c-danger)', color: 'var(--c-canvas)' }}>{todoRows.length}</span>}
+          </button>
+          <button className={`nc-ptab${apprTab === 'done' ? ' is-on' : ''}`} onClick={() => setApprTab('done')}>
+            我已审批<span className="nc-ptab-cnt">{doneRows.length}</span>
+          </button>
+          <button className={`nc-ptab${apprTab === 'cc' ? ' is-on' : ''}`} onClick={() => setApprTab('cc')}>
+            抄送我<span className="nc-ptab-cnt">{ccRows.length}</span>
+          </button>
+        </div>
+        {apprTableBody(curRows, emptyText)}
+      </Card>
+    );
+  };
 
   /** 我的待办（个人视角，原「我的工作台」核心） */
   const blockTodo = () => (
@@ -569,10 +615,10 @@ export default function DashboardPage({ go, role, nav }: { go: (p: string) => vo
     <>
       <div className="nc-kpi-grid is-6">
         <Kpi label="在建项目" value={PROJECTS.filter((p) => ['执行中', '暂停', '验收结算中'].includes(p.status)).length} tone="blue" sub="本人负责施工" onClick={() => go('project')} drill />
-        <Kpi label="今日任务" value={5} tone="blue" sub="2 项需现场照片" />
+        <Kpi label="今日任务" value={5} sub="2 项需现场照片" />
+        <Kpi label="本周报工" value="12 次" sub="照片齐备率 100%" />
         <Kpi label="逾期任务" value={1} tone="red" sub="GC0009 · 逾期 1 天" />
         <Kpi label="待验收节点" value={1} tone="orange" sub="××中学 · 10-22" onClick={() => go('project-center')} drill />
-        <Kpi label="本周报工" value="12 次" tone="green" sub="照片齐备率 100%" />
         <Kpi label="整改未闭环" value={1} tone="orange" sub="GC0012 · 3 项已 2 天" />
       </div>
     </>
@@ -589,17 +635,28 @@ export default function DashboardPage({ go, role, nav }: { go: (p: string) => vo
    * 评审 L1：原「我的项目」KPI 卡与「项目进度」表描述的是同一批 myProjects
    * 的两种呈现，信息重叠且各占一张卡位。合并为一张卡，页内 Tab 切换概览 / 明细。
    */
-  const blockProjectExec = () => (
-    <Card hd={<><Ico n="building" size={16} /> 我的项目</>} extra={<Btn size="sm" onClick={() => go('project')}>项目管理 →</Btn>}>
-      <Tabs value={projTab} onChange={(k) => setProjTab(k as 'kpi' | 'list')} items={[
-        { key: 'kpi', label: '执行概览' },
-        { key: 'list', label: '项目进度明细', cnt: myProjects.length },
-      ]} />
-      <div style={{ marginTop: 12 }}>
-        {projTab === 'kpi' ? myProjectKpiBody() : myProjectTableBody()}
-      </div>
-    </Card>
-  );
+  const blockProjectExec = () => {
+    const canSeeProjDetail = ['pm', 'boss', 'deputy', 'sysadmin'].includes(view);
+    return (
+      <Card hd={<><Ico n="building" size={16} /> 我的项目</>} extra={<Btn size="sm" onClick={() => go('project')}>项目管理 →</Btn>}>
+        {myProjectKpiBody()}
+        {canSeeProjDetail && (
+          <div style={{ marginTop: 14, borderTop: '1px solid var(--c-border, #eef0f3)', paddingTop: 10 }}>
+            <button
+              type="button"
+              onClick={() => setProjDetailOpen((v) => !v)}
+              style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, background: 'none', border: 'none', cursor: 'pointer', padding: '2px 0', fontSize: 13 }}
+            >
+              <b>项目进度明细</b>
+              <Tag tone="gray">{myProjects.length} 个项目</Tag>
+              <span style={{ marginLeft: 'auto' }} className="nc-cell-sub">{projDetailOpen ? '收起 ▴' : '展开 ▾'}</span>
+            </button>
+            {projDetailOpen && <div style={{ marginTop: 10 }}>{myProjectTableBody()}</div>}
+          </div>
+        )}
+      </Card>
+    );
+  };
 
   /** 项目进度明细表 */
   const myProjectTableBody = () => (
@@ -726,7 +783,7 @@ export default function DashboardPage({ go, role, nav }: { go: (p: string) => vo
   const blockProjectBiz = (rows?: { label: string; value: string; tone?: 'red' | 'orange' | 'green' | 'blue'; sub: string; page?: string }[], withQuick = false) => (
     <Card
       hd={<><Ico n="chart" size={16} /> 项目经营</>}
-      extra={<span className="nc-cell-sub">{rows ? '权责口径（盈亏）／收付口径（现金流）' : '收付口径 · 红字冲销净额 · 审批中不计流出'}</span>}
+      extra={rows ? <span className="nc-cell-sub">单位：万元</span> : undefined}
     >
       {rows ? (
         <>
@@ -770,45 +827,6 @@ export default function DashboardPage({ go, role, nav }: { go: (p: string) => vo
             {blockBid()}
             {blockCert()}
           </div>
-          <div className="nc-dash-2">
-            {blockCustomer()}
-            {blockProfit([
-              { label: ' 最佳项目', value: bestPj ? fmtWan(profitAmtOf(bestPj)) : '¥0', tone: 'green', sub: bestPj ? `${bestPj.id} · ${bestPj.name.slice(0, 8)}` : '—' },
-              { label: ' 最差项目', value: worstPj ? fmtWan(profitAmtOf(worstPj)) : '¥0', tone: 'red', sub: worstPj ? `${worstPj.id} · ${worstPj.name.slice(0, 8)}` : '—' },
-              { label: '亏损项目数', value: String(lossCnt), tone: lossCnt ? 'red' : undefined, sub: lossCnt ? '需经营复盘' : '无亏损项目' },
-              { label: '平均成本率', value: `${(costRate * 100).toFixed(1)}%`, tone: costRate > COST_REDLINE ? 'red' : 'green', sub: `红线 ${COST_REDLINE * 100}% · 超线 ${overCostCnt} 个` },
-            ])}
-          </div>
-          <div className="nc-dash-2">
-            {blockAlert([
-              { tone: 'orange', title: `${noContract.length} 个项目无销售合同在途 > 30 天`, sub: noContract.map((p) => `${p.id} · ${p.name}`).join(' / ') || '无', act: '补签合同', page: 'contract-new' },
-              { tone: 'orange', title: '上月 2 个项目未登记成本', sub: '登记纪律兜底 · 附录 D', act: '去登记成本', page: 'project-center', tab: 'cost' },
-              { tone: 'orange', title: `${lowStock.length} 种材料低于安全库存线`, sub: lowStock.map((m) => `${m.name}（${m.stock}/${m.safe}）`).slice(0, 3).join(' · ') || '—', act: lowStock.length ? '查看最缺材料' : '一键询价', page: 'material-list', focusId: lowStock[0]?.code },
-            ])}
-            {blockApproval(approvalTabs, approvalTabs.length)}
-          </div>
-          <div className="nc-sec-title">总经理 · 经营全局延伸（穿透二级，≤3 click）</div>
-          <div className="nc-dash-2">
-            {blockOverdueRecv()}
-            {blockPayable()}
-          </div>
-          <div className="nc-dash-2">
-            {blockMyProject()}
-            <Card hd="系统健康" extra={<Tag tone="gray">仅管理员可见</Tag>}>
-              <table className="nc-tbl is-sm">
-                <thead><tr><th>子系统</th><th style={{ width: 100 }}>状态</th><th className="is-num">待处理</th></tr></thead>
-                <tbody>
-                  {ADMIN_SYSTEMS.map((s) => (
-                    <tr key={s.name}>
-                      <td>{s.name}</td>
-                      <td><Tag tone={s.st.indexOf('正常') >= 0 || s.st.indexOf('已上传') >= 0 ? 'green' : 'gray'}>{s.st}</Tag></td>
-                      <td className="is-num nc-cell-sub">{s.note}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </Card>
-          </div>
           <Card hd="风险 Top6" extra={<span className="nc-cell-sub">按严重度排序 · 红 / 橙 / 灰三级</span>}>
             {RISKS.map((r) => (
               <div key={r.t} className={`nc-riskrow is-${r.tone}`}>
@@ -824,6 +842,45 @@ export default function DashboardPage({ go, role, nav }: { go: (p: string) => vo
               </div>
             ))}
           </Card>
+          <div className="nc-dash-2">
+            {blockCustomer()}
+            {blockProfit([
+              { label: ' 最佳项目', value: bestPj ? fmtWan(profitAmtOf(bestPj)) : '¥0', tone: 'green', sub: bestPj ? `${bestPj.id} · ${bestPj.name.slice(0, 8)}` : '—' },
+              { label: ' 最差项目', value: worstPj ? fmtWan(profitAmtOf(worstPj)) : '¥0', tone: 'red', sub: worstPj ? `${worstPj.id} · ${worstPj.name.slice(0, 8)}` : '—' },
+              { label: '亏损项目数', value: String(lossCnt), tone: lossCnt ? 'red' : undefined, sub: lossCnt ? '需经营复盘' : '无亏损项目' },
+              { label: '平均成本率', value: `${(costRate * 100).toFixed(1)}%`, tone: costRate > COST_REDLINE ? 'red' : 'green', sub: `红线 ${COST_REDLINE * 100}% · 超线 ${overCostCnt} 个` },
+            ])}
+          </div>
+          <div className="nc-dash-2">
+            {blockAlert([
+              { tone: 'orange', title: `${noContract.length} 个项目无销售合同在途 > 30 天`, sub: noContract.map((p) => `${p.id} · ${p.name}`).join(' / ') || '无', act: '补签合同', page: 'contract-new' },
+              { tone: 'orange', title: '上月 2 个项目未登记成本', sub: '登记纪律兜底', act: '去登记成本', page: 'project-center', tab: 'cost' },
+              { tone: 'orange', title: `${lowStock.length} 种物料低于安全库存线`, sub: lowStock.map((m) => `${m.name}（${m.stock}/${m.safe}）`).slice(0, 3).join(' · ') || '—', act: lowStock.length ? '查看最缺物料' : '一键询价', page: 'material-list', focusId: lowStock[0]?.code },
+            ])}
+            {blockApprovalTabs()}
+          </div>
+          <div className="nc-sec-title">总经理 · 经营全局延伸（下钻二级，≤3 click）</div>
+          <div className="nc-dash-2">
+            {blockOverdueRecv()}
+            {blockPayable()}
+          </div>
+          <div className="nc-dash-2">
+            {blockProjectExec()}
+            <Card hd="系统健康" extra={<Tag tone="gray">仅管理员可见</Tag>}>
+              <table className="nc-tbl is-sm">
+                <thead><tr><th>子系统</th><th style={{ width: 100 }}>状态</th><th className="is-num">待处理</th></tr></thead>
+                <tbody>
+                  {ADMIN_SYSTEMS.map((s) => (
+                    <tr key={s.name} onClick={() => go('settings')} style={{ cursor: 'pointer' }}>
+                      <td>{s.name}</td>
+                      <td><Tag tone={s.st.indexOf('正常') >= 0 || s.st.indexOf('已上传') >= 0 ? 'green' : 'gray'}>{s.st}</Tag></td>
+                      <td className="is-num nc-cell-sub">{s.note}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </Card>
+          </div>
         </>
       );
     }
@@ -838,9 +895,9 @@ export default function DashboardPage({ go, role, nav }: { go: (p: string) => vo
           </div>
           <div className="nc-dash-2">
             {blockAlert([
-              { tone: 'orange', title: '2 个成员客户 > 30 天未跟进', sub: `${clientsToFollow.slice(0, 2).map((c) => `${c.name.slice(0, 6)} ${c.lastFollowDays}天`).join(' · ') || '广西×× 42 天 · 人民医院 35 天'}`, act: '查看名单', page: 'customer' },
+              { tone: 'orange', title: `2 个成员客户 > ${todoCfg.remindDays} 天未跟进`, sub: `${clientsToFollow.slice(0, 2).map((c) => `${c.name.slice(0, 6)} ${c.lastFollowDays}天`).join(' · ') || '广西×× 42 天 · 人民医院 35 天'}`, act: '查看名单', page: 'customer' },
               { tone: 'orange', title: `${overCostCnt} 个项目成本率超 ${COST_REDLINE * 100}% 红线`, sub: topCostPj ? `${topCostPj.id} · 实际 ${money ? fmtWan(topCostPj.cost) : '—'} / 执行 ${money ? fmtWan(topCostPj.execAmt) : '—'} · 成本率 ${((topCostPj.cost / topCostPj.execAmt) * 100).toFixed(1)}%` : '当前无项目超成本红线', act: '项目详情', page: 'project-center' },
-              { tone: 'gray', title: '团队证书 60 天内到期 1 本', sub: `${CERTS.find((c) => c.warnDays > 30 && c.warnDays <= 60)?.name ?? '施工资质'} · 投标引用受影响`, act: '去看证书', page: 'cert' },
+              { tone: 'gray', title: '团队证书 60 天内到期 1 本', sub: `${certs.find((c) => c.warnDays > 30 && c.warnDays <= 60)?.name ?? '施工资质'} · 投标引用受影响`, act: '去看证书', page: 'cert' },
             ], ' 团队经营提醒')}
             {blockApproval(approvalTabs.slice(0, 2), 2)}
           </div>
@@ -869,9 +926,9 @@ export default function DashboardPage({ go, role, nav }: { go: (p: string) => vo
               <Card hd="我的客户" extra={<Tag tone="blue">本人数据范围</Tag>}>
                 <div className="nc-kpi-grid is-4">
                   <Kpi label="名下有效客户" value="3 个" tone="blue" sub="已合并客户不重复计数" onClick={() => go('customer')} drill />
-                  <Kpi label="待跟进（>30 天）" value={clientsToFollow.length} tone="orange" sub={clientsToFollow.map((c) => `${c.name.slice(0, 4)} ${c.lastFollowDays}天`).slice(0, 2).join(' / ') || '—'} onClick={() => go('customer')} drill />
+                  <Kpi label={`待跟进（>${todoCfg.remindDays} 天）`} value={clientsToFollow.length} tone="orange" sub={clientsToFollow.map((c) => `${c.name.slice(0, 4)} ${c.lastFollowDays}天`).slice(0, 2).join(' / ') || '—'} onClick={() => go('customer')} drill />
                   <Kpi label="本周跟进" value="1 次" sub="本周已跟进次数" />
-                  <Kpi label="公司逾期应收" value="—" locked sub="公司级 A-02 不可见" />
+                  <Kpi label="公司逾期应收" value="—" locked sub="公司级无权限查看" />
                 </div>
               </Card>
             </div>
@@ -883,22 +940,12 @@ export default function DashboardPage({ go, role, nav }: { go: (p: string) => vo
           </div>
           {blockTodo()}
           <div className="nc-dash-2">
-            {blockCustomer(2)}
             {blockProfit([
-              { label: '公司实际毛利', value: '—', sub: ' A-02 无权限' },
-              { label: '现金流入', value: '—', sub: ' A-02 无权限' },
-              { label: '净流入', value: '—', sub: ' A-02 无权限' },
+              { label: '公司实际毛利', value: '—', sub: '无权限查看' },
+              { label: '现金流入', value: '—', sub: '无权限查看' },
+              { label: '净流入', value: '—', sub: '无权限查看' },
             ])}
           </div>
-          <Card hd="快捷操作">
-            <div className="nc-quickbar" style={{ marginTop: 0, borderTop: 'none', paddingTop: 0 }}>
-              <button className="nc-qk" onClick={() => go('customer')}><Ico n="user" size={16} /> 新建客户</button>
-              <button className="nc-qk" onClick={() => go('customer')}><Ico n="edit" size={16} /> 客户跟进</button>
-              <button className="nc-qk" onClick={() => go('opp')}><Ico n="target" size={16} /> 新建商机</button>
-              <button className="nc-qk" onClick={() => go('quote-edit')}><Ico n="file" size={16} /> 生成报价</button>
-              <button className="nc-qk" onClick={() => go('bid')}><Ico n="mail" size={16} /> 去投标看板</button>
-            </div>
-          </Card>
         </>
       );
     }
@@ -918,7 +965,7 @@ export default function DashboardPage({ go, role, nav }: { go: (p: string) => vo
           <div className="nc-dash-2">
             {blockTodo()}
             {blockAlert([
-              { tone: 'orange', title: '1 个项目证书履约期已过期', sub: '占用维持 + 提醒持证人 / 项目经理，不影响验收（N-61）', act: '去看证书', page: 'cert' },
+              { tone: 'orange', title: '1 个项目证书履约期已过期', sub: '占用维持 + 提醒持证人 / 项目经理，不影响验收', act: '去看证书', page: 'cert' },
               { tone: 'gray', title: '本月报工照片齐备率 100%', sub: '报工须上传现场照片（水印 + GPS）', act: '去报工', page: 'project-center' },
             ], ' 项目合规提醒')}
           </div>
@@ -967,7 +1014,7 @@ export default function DashboardPage({ go, role, nav }: { go: (p: string) => vo
                 <thead><tr><th>合同</th><th>状态</th><th className="is-num">回款率</th><th className="is-num">已收</th></tr></thead>
                 <tbody>
                   {CONTRACTS.slice(0, 4).map((c) => (
-                    <tr key={c.id} className={c.overdue ? 'nc-row-warn' : undefined}>
+                    <tr key={c.id} className={contractOverdue(c) ? 'nc-row-warn' : undefined}>
                       <td><EntityLink target="contract" id={c.id} go={go} title="下钻到合同详情">{c.id}</EntityLink></td>
                       <td><Tag tone={CONTRACT_STATUS_TONE[normContractStatus(c.status)] ?? 'gray'}>{normContractStatus(c.status)}</Tag></td>
                       <td className="is-num">{c.recvPct}%</td>
@@ -999,17 +1046,20 @@ export default function DashboardPage({ go, role, nav }: { go: (p: string) => vo
         <div className="nc-dash-2">
           <Card hd="待办 · 离职清零引导" extra={<Tag tone="orange">逐项处理后方可停用</Tag>}>
             <table className="nc-tbl is-sm">
-              <thead><tr><th>用户</th><th>归属项</th><th className="is-num">数量</th><th className="is-num">操作</th></tr></thead>
+              <thead><tr><th>用户</th><th>归属项</th><th className="is-num">数量</th><th>证书编号</th><th>状态</th><th className="is-num">操作</th></tr></thead>
               <tbody>
                 <tr>
                   <td rowSpan={3}><b>李红</b><div className="nc-cell-sub"><Tag tone="gray">销售 · 离职流程中</Tag></div></td>
-                  <td>名下客户</td><td className="is-num">0</td>
-                  <td className="is-num"><Tag tone="green">已清零</Tag></td>
+                  <td>名下客户</td><td className="is-num">0</td><td className="nc-cell-sub">—</td>
+                  <td><Tag tone="green">已清零</Tag></td><td className="is-num">—</td>
                 </tr>
-                <tr><td>名下商机</td><td className="is-num">0</td><td className="is-num"><Tag tone="green">已清零</Tag></td></tr>
+                <tr><td>名下商机</td><td className="is-num">0</td><td className="nc-cell-sub">—</td>
+                  <td><Tag tone="green">已清零</Tag></td><td className="is-num">—</td></tr>
                 <tr>
                   <td>人员证书</td>
-                  <td className="is-num nc-v-orange">1（ZS000015）</td>
+                  <td className="is-num nc-v-orange">1</td>
+                  <td><Code>ZS000015</Code></td>
+                  <td><Tag tone="orange">待处理</Tag></td>
                   <td className="is-num"><Op onClick={() => go('cert')}>归属处理</Op></td>
                 </tr>
               </tbody>
@@ -1020,7 +1070,7 @@ export default function DashboardPage({ go, role, nav }: { go: (p: string) => vo
               <thead><tr><th>子系统</th><th style={{ width: 100 }}>状态</th><th className="is-num">待处理</th></tr></thead>
               <tbody>
                 {ADMIN_SYSTEMS.map((s) => (
-                  <tr key={s.name}>
+                  <tr key={s.name} onClick={() => go('settings')} style={{ cursor: 'pointer' }}>
                     <td>{s.name}</td>
                     <td><Tag tone={s.st.indexOf('正常') >= 0 || s.st.indexOf('已上传') >= 0 ? 'green' : 'gray'}>{s.st}</Tag></td>
                     <td className="is-num nc-cell-sub">{s.note}</td>
@@ -1037,15 +1087,6 @@ export default function DashboardPage({ go, role, nav }: { go: (p: string) => vo
               <Kpi label="待准入" value={SUPPLIERS.filter((s) => s.status === '待准入').length} tone="orange" sub="资质待核验" onClick={() => go('supplier')} drill />
               <Kpi label="已冻结" value={SUPPLIERS.filter((s) => s.status === '已冻结').length} tone="red" sub="黑名单硬拦截" onClick={() => go('supplier')} drill />
               <Kpi label="证照 60 天内到期" value={suppCertSoon} tone={suppCertSoon ? 'orange' : undefined} sub={suppCertSoon ? '含已过期 · 准入失效' : '无临期证照'} onClick={() => go('supplier')} drill />
-            </div>
-          </Card>
-          <Card hd="行政快捷入口">
-            <div className="nc-quickbar" style={{ marginTop: 0, borderTop: 'none', paddingTop: 0 }}>
-              <button className="nc-qk" onClick={() => toast('已跳转：用户管理（演示）')}><Ico n="user" size={16} /> 用户管理</button>
-              <button className="nc-qk" onClick={() => go('cert')}><Ico n="scroll" size={16} /> 证书管理</button>
-              <button className="nc-qk" onClick={() => toast('已跳转：操作日志（演示）')}><Ico n="clipboard" size={16} /> 操作日志</button>
-              <button className="nc-qk" onClick={() => toast('已打开：枚举 / 模板 / 提醒（演示）')}><Ico n="module" size={16} /> 枚举/模板/提醒</button>
-              <button className="nc-qk" onClick={() => toast('已打开：租户 Logo（演示）')}><Ico n="camera" size={16} /> 租户 Logo</button>
             </div>
           </Card>
         </div>
@@ -1080,6 +1121,21 @@ export default function DashboardPage({ go, role, nav }: { go: (p: string) => vo
           <Tag tone="gray">更新 {updTime} · 自动刷新 10 min</Tag>
         </>}
         actions={<>
+          <div className="nc-rolebar" style={{ gap: 4 }}>
+            {['boss', 'sales', 'pm'].map((id) => {
+              const r = ROLES.find((x) => x.id === id)!;
+              return (
+                <button key={id} className={`nc-role-tab${view === id ? ' is-on' : ''}`}
+                  onClick={() => { setView(id); toast(`已切换到「${r.name}」视角`); }}
+                  title={`${r.name} · ${r.desc}`}>
+                  <Ico n={r.icon as IconName} size={16} /> {r.name}
+                </button>
+              );
+            })}
+            <OpMore label="更多 ▾" items={ROLES.filter((r) => !['boss', 'sales', 'pm'].includes(r.id)).map((r) => ({
+              label: r.name, onClick: () => { setView(r.id); toast(`已切换到「${r.name}」视角`); },
+            }))} />
+          </div>
           <div className="nc-seg">
             {SCOPES.map((s) => (
               <button key={s.key} className={`nc-seg-btn${scope === s.key ? ' is-on' : ''}`} onClick={() => onScope(s.key)}>{s.label}</button>
@@ -1089,22 +1145,15 @@ export default function DashboardPage({ go, role, nav }: { go: (p: string) => vo
         </>}
       />
 
-      {/* 角色视角 Tab（7 个岗位） */}
-      <div className="nc-rolebar">
-        {ROLES.map((r) => (
-          <button
-            key={r.id}
-            className={`nc-role-tab${view === r.id ? ' is-on' : ''}`}
-            onClick={() => { setView(r.id); toast(`已切换到「${r.name}」视角：指标按 A-02 权限裁剪`); }}
-            title={`${r.name} · ${r.desc}`}
-          >
-            <Ico n={r.icon as IconName} size={16} /> {r.name}
-          </button>
-        ))}
-      </div>
-
-      {/* 新手引导（5 步，长期保留可回看） */}
-      {guideOpen && (
+      {/* 新手引导：全部完成后折叠为一行摘要，可展开回看 */}
+      {!guideOpen ? (
+        <section className="nc-guide" style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span className="nc-guide-tt"><Ico n="book" size={16} /> <b>{guideProgress}</b>/5 新手引导</span>
+          <span className="nc-cell-sub">{guideProgress === GUIDE_STEPS.length ? '已全部完成' : `还有 ${GUIDE_STEPS.length - guideProgress} 步未完成`}</span>
+          <span style={{ flex: 1 }} />
+          <Btn size="sm" onClick={() => setGuideOpen(true)}>展开 ▾</Btn>
+        </section>
+      ) : (
         <section className="nc-guide">
           <div className="nc-guide-top">
             <span className="nc-guide-tt"><Ico n="book" size={16} /> <b>{guideProgress}</b>/5 新手引导</span>
@@ -1139,10 +1188,7 @@ export default function DashboardPage({ go, role, nav }: { go: (p: string) => vo
         </section>
       )}
 
-      {/* ===== 岗位视图 ===== */}
-      {renderView()}
-
-      {/* ===== 底部快捷条（随角色变化） ===== */}
+      {/* ===== 快捷条（随角色变化）· 公共区：PageHead 下方 / 统计卡上方 ===== */}
       <Card hd="快捷条（随角色变化）" extra={<span className="nc-cell-sub">数字为待处理笔数 · 权限外入口自动隐藏</span>}>
         <div className="nc-quickbar" style={{ marginTop: 0, borderTop: 'none', paddingTop: 0 }}>
           {quick.map(([label, target, bdg]) => (
@@ -1167,6 +1213,9 @@ export default function DashboardPage({ go, role, nav }: { go: (p: string) => vo
           ))}
         </div>
       </Card>
+
+      {/* ===== 岗位视图 ===== */}
+      {renderView()}
 
     </>
   );

@@ -30,14 +30,15 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   Banner, Btn, Card, Code, ConfirmModal, Drawer, EntityLink, IdCell, KvGrid, Modal, Money,
   Op, OpMore, PageHead, Progress, Tag, Timeline, Tip, Tabs, useToast,
+  ContractPicker,
 } from '../components/ui';
 import { Ico } from '../components/icons';
 import {
   PROJECT_STATUS_TONE, PROJECT_TERMINAL, TODAY,
-  fmt, fmtAmt, fmtPct, fmtWan, isContractClosed, isServiceProject, normContractStatus,
-  teamOfProject, occOfProject, CERTS,
+  fmtAmt, fmtPct, fmtWan, isContractClosed, isServiceProject, normContractStatus,
+  teamOfProject, occOfProject,
 } from '../components/data';
-import { consumeFocusTab, getContracts, getFocus, getOpps, getProjects, moveProject, patchContract, patchProject, relOfProject, setFocus, setFocusTab, subscribeStore } from '../components/store';
+import { consumeFocusTab, getCerts, getContracts, getFocus, getOpps, getPjCostRows, getProjects, moveProject, patchContract, patchProject, relOfProject, setFocus, setFocusTab, subscribeStore } from '../components/store';
 import OverviewSub from '../components/project-center/OverviewSub';
 import ExecSub from '../components/project-center/ExecSub';
 import QualitySub from '../components/project-center/QualitySub';
@@ -55,7 +56,7 @@ const SUBS = [
   { key: 'overview', label: '概览', comp: OverviewSub },
   { key: 'track', label: '进度履约', comp: ExecSub },
   { key: 'quality', label: '质量安全', comp: QualitySub },
-  { key: 'contract', label: '合同变更', comp: BizSub },
+  { key: 'contract', label: '合同信息', comp: BizSub },
   { key: 'fund', label: '资金台账', comp: FundSub },
   { key: 'cost', label: '成本管控', comp: CostSub },
   { key: 'members', label: '团队与干系人', comp: MembersSub },
@@ -210,7 +211,7 @@ function Panorama({ C, open, onClose }: { C: PjCtx; open: boolean; onClose: () =
         ].map((r) => (
           <div key={r.k} className="nc-gate-row">
             <span className="nc-gate-n">{r.k} <div className="nc-cell-sub">{r.v}</div></span>
-            <span className="nc-gate-s">{r.go ? <Btn size="sm" onClick={r.go}>穿透</Btn> : <Tag tone="green">已完成</Tag>}</span>
+            <span className="nc-gate-s">{r.go ? <Btn size="sm" onClick={r.go}>查看来源单据</Btn> : <Tag tone="green">已完成</Tag>}</span>
           </div>
         ))}
       </div>
@@ -371,7 +372,7 @@ export default function ProjectCenterPage({ go, role, nav }: { go: (p: string) =
   const commitProgress = (newPct: number): string => {
     /* 节点状态 / 工程量由 P.milestone 派生（seed），progressActual 同步写避免两字段漂移 */
     patchProject(P.id, { milestone: newPct, progressActual: newPct });
-    const nodeAt = mileTplOf(P.biz).find((n) => n.pct === newPct);
+    const nodeAt = mileTplOf(P.biz, P.type).find((n) => n.pct === newPct);
     const bare = (nodeAt?.name ?? '').replace(/^M\d+\s*/, '');
     /* GC 法定关口：消防验收备案完成 → 执行中转入验收结算 */
     if (P.biz === 'GC' && bare === '消防验收备案') {
@@ -392,7 +393,8 @@ export default function ProjectCenterPage({ go, role, nav }: { go: (p: string) =
 
   const teamRows = useMemo(() => teamOfProject(P.id, P.pm), [P.id, P.pm]);
   const certRows = useMemo(() => occOfProject(P.id), [P.id]);
-  const certValidTo = (certId: string) => CERTS.find((c) => c.id === certId)?.validTo || '—';
+  /* 读 store：证书管理页续证后，项目详情「证书资格」列的有效期即时跟上（本页已订阅 store，tick 变化即重渲染） */
+  const certValidTo = (certId: string) => getCerts().find((c) => c.id === certId)?.validTo || '—';
 
   const payRows = payFilter === '全部' ? D.payRows : D.payRows.filter((r) => r.kind === payFilter);
   /** 变更金额：已生效进执行额，审批中只作过程记录 */
@@ -466,7 +468,8 @@ export default function ProjectCenterPage({ go, role, nav }: { go: (p: string) =
     overdue: D.overdue, overdueAmt: D.overdueAmt, overdueDays: D.overdueDays,
     CHG_EFFECTIVE, CHG_PENDING,
     depIn: depIn.map((d) => ({ id: d.id, type: d.type, amt: d.amt, due: d.due })),
-    costRows: D.costRows, groupedPlan,
+    /* 合并物料领用结转来的成本行：库存侧领用 → addPjCostRow 写入，这里即时可见 */
+    costRows: [...D.costRows, ...getPjCostRows(P.id)], groupedPlan,
     laborRows: D.laborRows, laborSum: D.laborSum,
     machRows: D.machRows, machSum: D.machSum,
     matRows: D.matRows, matSum: D.matSum,
@@ -554,7 +557,7 @@ export default function ProjectCenterPage({ go, role, nav }: { go: (p: string) =
             { key: 'overview', label: '概览' },
             { key: 'track', label: '进度履约', cnt: D.mileRows.length },
             { key: 'quality', label: qualityTodo > 0 ? '质量安全 ⚠' : '质量安全', cnt: D.arrivals.length + D.hidden.length + D.safeRows.length + D.rectifyRounds.reduce((s, r) => s + r.items.length, 0) },
-            { key: 'contract', label: '合同变更', cnt: saleCt.length + buyCt.length },
+            { key: 'contract', label: '合同信息', cnt: saleCt.length + buyCt.length },
             { key: 'fund', label: '资金台账', cnt: D.payRows.length },
             { key: 'cost', label: dev > 0 ? '成本管控 ⚠' : '成本管控', cnt: D.costRows.length },
             { key: 'members', label: '团队与干系人', cnt: teamRows.length + certRows.length },
@@ -563,7 +566,6 @@ export default function ProjectCenterPage({ go, role, nav }: { go: (p: string) =
         <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
           {/* 更新时间取项目自身的 updatedAt（改造前写死「TODAY 10:24」，永远是同一个时刻） */}
           <span className="nc-cell-sub">更新于 {P.updatedAt ?? P.start}</span>
-          <Btn size="sm" onClick={() => setLogOpen(true)}>操作记录</Btn>
         </span>
       </div>
 
@@ -674,15 +676,12 @@ export default function ProjectCenterPage({ go, role, nav }: { go: (p: string) =
             setLinkCt(''); closeM();
           }}>确认关联</Btn></>}>
         <div className="nc-cell-sub">挂接后合同侧同步记录项目编号；项目侧按合同额回写合同额与执行额，「无合同施工」风险标记自动解除。仅列同客户、未挂其它项目、且已签约 / 履约中的合同。</div>
-        <label className="nc-field nc-field-4"><span>合同编号</span>
-          <select className="nc-input" value={linkCt} onChange={(e) => setLinkCt(e.target.value)}>
-            <option value="">请选择合同</option>
-            {getContracts()
-              .filter((c) => (!c.project || c.project === P.id) && !isContractClosed(c)
-                && ['已签约', '履约中'].includes(normContractStatus(c.status)))
-              .map((c) => <option key={c.id} value={c.id}>{c.id} · {c.name} · {fmtWan(c.amt)}</option>)}
-          </select>
-        </label>
+        {/* 用 div 而不是 label 包 —— label 会把点击转发给内部按钮，导致「点标签文字也会开合弹层」 */}
+        <div className="nc-field nc-field-4"><span>合同编号</span>
+          <ContractPicker value={linkCt} onChange={setLinkCt} clearLabel="请选择合同"
+            options={getContracts().filter((c) => (!c.project || c.project === P.id) && !isContractClosed(c)
+              && ['已签约', '履约中'].includes(normContractStatus(c.status)))} />
+        </div>
         <label className="nc-field nc-field-4"><span>关联方向</span>
           <select className="nc-input"><option>收款类（销售 / 维保合同）</option><option>付款类（采购 / 分包合同）</option></select>
         </label>

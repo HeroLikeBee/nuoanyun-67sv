@@ -10,25 +10,19 @@
 // 状态取项目 8 态（《研发级功能规格》§6.2）；旧数据经 normProjectStatus 归一。
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Banner, Btn, Card, DataTable, Drawer, EntityLink, Field, IdCell, Money, Op, OpMore,
-  PageHead, Progress, TableFoot, Tag, Tip, useToast,
+  Banner, Btn, Card, DataTable, Drawer, EntityLink, Field, IdCell, ListToolbar, Money, Op, OpMore,
+  CustomerPicker, PageHead, Progress, TableFoot, Tag, Tip, useToast,
 } from '../components/ui';
 import type { OpMoreItem } from '../components/ui';
 import {
-  ACCEPT_FLOW, ACCEPT_TONE, CONTRACTS, CUSTOMERS, PROJECT_RISKS, PROJECT_SOURCES, PROJECT_STATUS,
+  ACCEPT_FLOW, CERT_MODE_CN, CONTRACTS, CUSTOMERS, PROJECT_RISKS, PROJECT_SOURCES, PROJECT_STATUS,
   PROJECT_STATUS_TONE, PROJECT_TERMINAL, PROJ_TYPES, TODAY, canSeeMoney, fmt, fmtAmt, fmtPct,
-  isServiceProject, normProjectStatus, riskOf,
+  isServiceProject, normProjectStatus, riskOf, isProjectRiskEnabled,
 } from '../components/data';
-import { getContracts, getProjects, setFocus, subscribeStore } from '../components/store';
+import { getContracts, getCerts, getProjects, setFocus, setFocusTab, subscribeStore } from '../components/store';
 import { Ico } from '../components/icons';
-
-/* 排序规则显式化（不用无标识的升降箭头） */
-const SORTS = [
-  { key: 'updated', label: '按更新时间 ↓' },
-  { key: 'amt', label: '按合同额 ↓' },
-  { key: 'exec', label: '按执行额 ↓' },
-  { key: 'progress', label: '按施工进度 ↑' },
-] as const;
+import MapPicker from '../components/MapPicker';
+import { ExportButton, useExport, getUserName, ExportDialog, type ExportField } from '../components/export';
 
 type Row = {
   id: string; name: string; type: string; source: string;
@@ -89,13 +83,24 @@ export default function ProjectPage({ go, role, nav }: { go: (p: string) => void
   const [sortKey, setSortKey] = useState<string>('updated');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  /** 列表勾选（统一导出用） */
+  const [projSel, setProjSel] = useState<string[]>([]);
 
   /* ---------- 抽屉 ---------- */
   const [edit, setEdit] = useState<Row | null>(null);
+  /** 行内「证书占用」抽屉：展示该项目占用的证书明细（按证书 used 反查） */
+  const [certOcc, setCertOcc] = useState<Row | null>(null);
+  /** 编辑抽屉：项目实施地点（MapPicker，点选或手填） */
+  const [editAddr, setEditAddr] = useState('');
 
   const pms = [...new Set(ALL.map((r) => r.pm))];
-  const custs = [...new Set(ALL.map((r) => r.customer))];
-  const riskKeys = [...new Set(ALL.map((r) => r.risk).filter((x) => x !== 'none' && PROJECT_RISKS[x]))];
+  /* 筛选条候选集仍取自「项目里真实出现过的客户」，与改造前一致；把项目数放进副行，不丢信息 */
+  const custOpts = useMemo(
+    () => [...new Set(ALL.map((r) => r.customer))]
+      .map((c) => ({ id: c, name: c, sub: `${ALL.filter((r) => r.customer === c).length} 个项目` })),
+    [ALL],
+  );
+  const riskKeys = [...new Set(ALL.map((r) => r.risk).filter((x) => x !== 'none' && PROJECT_RISKS[x] && isProjectRiskEnabled(x)))];
 
   const rows = useMemo(() => {
     const list = ALL.filter((r) => {
@@ -124,51 +129,85 @@ export default function ProjectPage({ go, role, nav }: { go: (p: string) => void
   const sumCost = ALL.reduce((a, r) => a + r.cost, 0);
   const sumRecv = ALL.reduce((a, r) => a + (r.contractAmt * r.recvPct) / 100, 0);
   const inProgress = ALL.filter((r) => ['执行中', '暂停', '验收结算中'].includes(r.status)).length;
-  const riskCnt = ALL.filter((r) => r.risk !== 'none' && PROJECT_RISKS[r.risk]).length;
+  const riskCnt = ALL.filter((r) => r.risk !== 'none' && PROJECT_RISKS[r.risk] && isProjectRiskEnabled(r.risk)).length;
 
   const reset = () => {
     setKw(''); setType(''); setSource(''); setStatus(''); setPm(''); setCustomer(''); setRisk('');
     setSortKey('updated'); setPage(1); toast('已重置筛选条件');
   };
 
+  /* 已选条件回显：类型 / 状态 / 来源 / PM / 客户 / 风险中已选中的 */
+  const echoItems: { key: string; label: React.ReactNode }[] = [];
+  if (type) echoItems.push({ key: 'type', label: `类型：${type}` });
+  if (status) echoItems.push({ key: 'status', label: `状态：${status}` });
+  if (source) echoItems.push({ key: 'source', label: `来源：${source}` });
+  if (pm) echoItems.push({ key: 'pm', label: `PM：${pm}` });
+  if (customer) echoItems.push({ key: 'customer', label: `客户：${customer}` });
+  if (risk) echoItems.push({ key: 'risk', label: `风险：${PROJECT_RISKS[risk]?.label ?? risk}` });
+
+  const removeFilter = (key: string) => {
+    setPage(1);
+    if (key === 'type') setType('');
+    else if (key === 'status') setStatus('');
+    else if (key === 'source') setSource('');
+    else if (key === 'pm') setPm('');
+    else if (key === 'customer') setCustomer('');
+    else if (key === 'risk') setRisk('');
+  };
+
   /** 查看：进入项目详情 */
   const openProject = (r: Row) => { setFocus('project-center', r.id); go('project-center'); };
 
+  /* ---------- 统一导出（公共组件） ---------- */
+  const exportFields: ExportField[] = [
+    { key: 'id', label: '项目编号' },
+    { key: 'name', label: '项目名称' },
+    { key: 'customer', label: '客户' },
+    { key: 'type', label: '类型' },
+    { key: 'contractAmt', label: '合同额', sensitive: true },
+    { key: 'status', label: '状态' },
+    { key: 'pm', label: '项目经理' },
+    { key: 'start', label: '开始日' },
+    { key: 'end', label: '结束日' },
+  ];
+  const exportApi = useExport({
+    pageKey: 'project', pageName: '项目台账',
+    fields: exportFields, defaultFieldKeys: exportFields.map((f) => f.key),
+    totalCount: ALL.length, filteredCount: rows.length, selectedCount: projSel.length,
+    previewRows: rows.slice(0, 5),
+    userName: getUserName(role),
+    onExport: () => {},
+  });
+
   const cols = [
     {
-      key: 'id', title: '编号', width: 132, sticky: 'left' as const,
+      key: 'id', title: '编号', width: 132, hide: true,
       render: (r: Row) => <IdCell onClick={() => openProject(r)} title="打开项目详情">{r.id}</IdCell>,
     },
     {
-      key: 'name', title: '项目名 · 客户', width: 214,
+      key: 'name', title: '项目名 · 客户', width: 214, sticky: 'left' as const,
       render: (r: Row) => (
         <div className="nc-cell-main">
           <div className="nc-ellip" title={r.name}><b>{r.name}</b>{r.noContract && <Tag tone="red">无合同</Tag>}</div>
           <div className="nc-cell-sub nc-ellip" title={r.customer}>
             {r.customerId
               ? <EntityLink target="customer" id={r.customerId} go={go} title="下钻到客户档案">{r.customer}</EntityLink>
-              : r.customer}
-            {` · ${r.industry}`}
+              : r.customer}{' '}
+            <Tag tone="gray">{r.industry}</Tag>
           </div>
         </div>
       ),
     },
     {
       key: 'type', title: '类型', width: 84,
-      render: (r: Row) => <Tag tone={r.service ? 'purple' : r.type === '检测' ? 'gold' : 'blue'}>{r.type}</Tag>,
+      render: (r: Row) => <Tag tone="gray">{r.type}</Tag>,
     },
     {
       key: 'status', title: '状态', width: 132,
       render: (r: Row) => (
-        <div className="nc-cell-main">
+        <span title={r.status === '验收结算中' ? `消防验收：${r.accept}` : `当前节点：${r.milestoneName}`}>
           <Tag tone={(PROJECT_STATUS_TONE[r.status] || 'gray') as 'gray'} pill>{r.status}</Tag>
-          {/* 副行：验收结算中的项目显示消防验收推进；其余显示当前里程碑 */}
-          <div className="nc-cell-sub nc-ellip" title={r.status === '验收结算中' ? `消防验收：${r.accept}` : r.milestoneName}>
-            {r.status === '验收结算中'
-              ? <>消防验收 <Tag tone={(ACCEPT_TONE[r.accept] || 'gray') as 'gray'}>{r.accept}</Tag></>
-              : r.milestoneName}
-          </div>
-        </div>
+        </span>
       ),
     },
     {
@@ -176,33 +215,36 @@ export default function ProjectPage({ go, role, nav }: { go: (p: string) => void
       render: (r: Row) => <span><span className="nc-avatar">{r.pm[0]}</span> {r.pm}</span>,
     },
     {
-      key: 'contractAmt', title: '合同额', width: 112, align: 'right' as const,
+      key: 'contractAmt', title: '合同额 ↕', width: 112, align: 'right' as const,
       render: (r: Row) => (!r.contractAmt
-        ? <span className="nc-v-orange">未填</span>
-        : <b className="num"><Money v={r.contractAmt} role={role} /></b>),
+        ? <span className="nc-v-orange" title="合同额未录入：立项时未关联销售合同，待补签后回写">未填</span>
+        : <b className="num"><Money v={r.contractAmt} role={role} wan /></b>),
     },
     {
-      key: 'execAmt', title: '执行额', width: 112, align: 'right' as const,
+      key: 'execAmt', title: '执行额 ↕', width: 112, align: 'right' as const,
       render: (r: Row) => (!r.execAmt
         ? <span className="nc-cell-sub">—</span>
-        : <span className="num"><Money v={r.execAmt} role={role} /></span>),
+        : <span className="num"><Money v={r.execAmt} role={role} wan /></span>),
     },
     {
       key: 'cost', title: '实际成本', width: 112, align: 'right' as const,
       render: (r: Row) => (!money
         ? <span className="nc-muted">—</span>
         : r.cost > 0
-          ? <span className="num"><Money v={r.cost} role={role} /></span>
+          ? <span className="num"><Money v={r.cost} role={role} wan /></span>
           : <span className="nc-cell-sub">—</span>),
     },
     {
       key: 'profit', title: '毛利率', width: 88, align: 'right' as const,
       render: (r: Row) => (r.contractAmt > 0 && r.cost > 0
-        ? <b className={'num' + (r.profitPct < 20 ? ' nc-v-red' : r.profitPct < 28 ? ' nc-v-orange' : ' nc-v-green')}>{fmtPct(r.profitPct)}</b>
+        ? <b
+            className={'num' + (r.profitPct < 20 ? ' nc-v-red' : r.profitPct < 28 ? ' nc-v-orange' : ' nc-v-green')}
+            title={r.profitPct < 20 ? '毛利率低于 20%（红色预警线）' : r.profitPct < 28 ? '毛利率低于 28%（橙色关注线）' : undefined}
+          >{fmtPct(r.profitPct)}</b>
         : <span className="nc-cell-sub">—</span>),
     },
     {
-      key: 'recv', title: '回款比例', width: 104,
+      key: 'recv', title: '回款比例', width: 104, align: 'right' as const,
       render: (r: Row) => (
         <div className="nc-prog-cell">
           <Progress value={r.recvPct} tone={r.recvPct >= 90 ? 'green' : r.recvPct === 0 ? 'red' : undefined} />
@@ -211,7 +253,7 @@ export default function ProjectPage({ go, role, nav }: { go: (p: string) => void
       ),
     },
     {
-      key: 'progress', title: '施工进度', width: 104,
+      key: 'progress', title: '施工进度 ↕', width: 104, align: 'right' as const,
       render: (r: Row) => (r.status === '待启动'
         ? <span className="nc-cell-sub">未开工</span>
         : (
@@ -225,13 +267,12 @@ export default function ProjectPage({ go, role, nav }: { go: (p: string) => void
       key: 'risk', title: '风险标记', width: 128,
       render: (r: Row) => {
         const k = riskOf(r.risk);
-        return k
-          ? <span title={k.hint}><Tag tone={k.tone}>{k.label}</Tag></span>
-          : <span className="nc-cell-sub">—</span>;
+        if (!k || !isProjectRiskEnabled(r.risk)) return <span className="nc-cell-sub">—</span>;
+        return <span title={k.hint}><Tag tone={k.tone}>{k.label}</Tag></span>;
       },
     },
     {
-      key: 'updated', title: '更新时间', width: 100,
+      key: 'updated', title: '更新时间 ↕', width: 100, align: 'right' as const,
       render: (r: Row) => <span className="num">{r.updated}</span>,
     },
     {
@@ -240,8 +281,9 @@ export default function ProjectPage({ go, role, nav }: { go: (p: string) => void
         const done = (PROJECT_TERMINAL as readonly string[]).includes(r.status);
         const ct = contractOf(r.id);
         const more: OpMoreItem[] = [
-          { label: '查看', onClick: () => openProject(r) },
-          ...(ct ? [{ label: '查看合同', onClick: () => { setFocus('contract', ct); go('contract'); } }] : []),
+          { label: '证书占用', title: '查看本项目占用的证书明细', onClick: () => setCertOcc(r) },
+          { label: '质量验收', title: '跳到项目详情 · 质量安全 Tab', onClick: () => { setFocusTab('project-center', 'quality'); setFocus('project-center', r.id); go('project-center'); } },
+          ...(ct ? [{ label: '查看合同', onClick: () => { setFocus('contract-detail', ct); go('contract-detail'); } }] : []),
           ...(r.customerId ? [{ label: '下钻客户档案', onClick: () => { setFocus('customer', r.customerId!); go('customer'); } }] : []),
           ...(r.noContract ? [{ label: '去补签合同', title: '无合同施工：补签并关联销售合同', onClick: () => go('contract-new') }] : []),
         ];
@@ -259,8 +301,9 @@ export default function ProjectPage({ go, role, nav }: { go: (p: string) => void
     <>
       <PageHead
         title="项目管理"
-        sub={`共 ${ALL.length} 个项目 · 在建 ${inProgress} · 风险 ${riskCnt} · 数据来源：项目台账（商机管道见「商机管理」）`}
-        actions={<Btn kind="primary" onClick={() => go('project-new')}>＋ 新建项目</Btn>}
+        sub={<>共 {ALL.length} 个项目 · 在建 {inProgress} · 风险 {riskCnt} · 数据来源：项目台账
+          <span style={{ cursor: 'pointer', marginLeft: 8, fontSize: 12, opacity: 0.75 }} onClick={() => go('cert')}>查看全部证书占用 →</span>
+        </>}
       />
 
       {riskCnt > 0 && (
@@ -268,91 +311,96 @@ export default function ProjectPage({ go, role, nav }: { go: (p: string) => void
           <Ico n="warning" size={14} style={{ color: 'var(--c-warning-mid)' }} /> <b>风险提醒：</b>
           {riskCnt} 个项目存在风险标记
           {ALL.some((r) => r.noContract) && <> ｜ {ALL.filter((r) => r.noContract).length} 个<b>无合同施工</b>（行左侧红条标识）</>}
-          ｜ 成本超支、里程碑逾期、收款逾期均按同一口径计入。
         </Banner>
       )}
 
       {/* 统计卡：口径 = 全部项目台账（金额类按角色权限脱敏） */}
       <div className="nc-tiles nc-tiles-4">
-        <button className="nc-tile is-clickable" onClick={() => { setStatus(''); setPage(1); }} title="口径：全部项目合同额合计（含终态）">
+        <div className="nc-tile" title="口径：全部项目合同额合计（含终态）">
           <div className="nc-tile-value num">{sumCt > 0 ? <Money v={sumCt} role={role} wan /> : <span className="nc-muted">—</span>}</div>
           <div className="nc-tile-label">合同额合计</div>
           <div className="nc-tile-sub">{ALL.length} 个项目</div>
-        </button>
-        <button className="nc-tile is-clickable" onClick={() => { setStatus('执行中'); setPage(1); }} title="口径：全部项目执行额合计（关联销售合同汇总）">
+        </div>
+        <div className={`nc-tile is-clickable${status === '执行中' ? ' is-active' : ''}`} onClick={() => { setStatus(status === '执行中' ? '' : '执行中'); setPage(1); }} title="点击筛选：在建项目（执行中）">
           <div className="nc-tile-value num">{sumExec > 0 ? <Money v={sumExec} role={role} wan /> : <span className="nc-muted">—</span>}</div>
           <div className="nc-tile-label">执行额合计</div>
           <div className="nc-tile-sub">在建 {inProgress} 个</div>
-        </button>
-        <button className="nc-tile is-clickable" onClick={() => { setStatus(''); setPage(1); }} title="口径：全部项目已发生实际成本合计">
+        </div>
+        <div className="nc-tile" title="口径：全部项目已发生实际成本合计">
           <div className={'nc-tile-value num' + (sumCost > 0 ? '' : ' nc-muted')}>{sumCost > 0 ? <Money v={sumCost} role={role} wan /> : '—'}</div>
           <div className="nc-tile-label">实际成本</div>
           <div className="nc-tile-sub">{sumCost > 0 && sumCt > 0 ? `成本率 ${((sumCost / sumCt) * 100).toFixed(1)}%` : '暂无成本数据'}</div>
-        </button>
-        <button className="nc-tile is-clickable" onClick={() => { setStatus(''); setPage(1); }} title="口径：全部项目已回款合计（合同额 × 回款比例）">
-          <div className="nc-tile-value num nc-v-green">{sumRecv > 0 ? <Money v={sumRecv} role={role} wan /> : <span className="nc-muted">—</span>}</div>
+        </div>
+        <div className="nc-tile" title="口径：全部项目已回款合计（合同额 × 回款比例）">
+          <div className="nc-tile-value num">{sumRecv > 0 ? <Money v={sumRecv} role={role} wan /> : <span className="nc-muted">—</span>}</div>
           <div className="nc-tile-label">已回款</div>
           <div className="nc-tile-sub">{sumCt > 0 ? `回款率 ${((sumRecv / sumCt) * 100).toFixed(1)}%` : '暂无回款数据'}</div>
-        </button>
+        </div>
       </div>
 
       <Card flush>
-        <div className="nc-ctbar" style={{ padding: '10px 12px', borderBottom: '1px solid var(--c-hairline)' }}>
-          <input
-            className="nc-input nc-ct-search" value={kw} placeholder="搜索编号 / 项目名 / 客户"
-            onChange={(e) => { setKw(e.target.value); setPage(1); }}
-          />
-          <select className="nc-input" style={{ width: 156 }} value={type} onChange={(e) => { setType(e.target.value); setPage(1); }}>
-            <option value="">全部类型</option>
-            {PROJ_TYPES.map((t) => <option key={t} value={t}>{t}（{ALL.filter((r) => r.type === t).length}）</option>)}
-          </select>
-          <select className="nc-input" style={{ width: 152 }} value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }}>
-            <option value="">全部状态</option>
-            {PROJECT_STATUS.map((s) => <option key={s} value={s}>{s}（{ALL.filter((r) => r.status === s).length}）</option>)}
-          </select>
-          <select className="nc-input" style={{ width: 148 }} value={sortKey} onChange={(e) => { setSortKey(e.target.value); setPage(1); }} title="排序规则">
-            {SORTS.map((x) => <option key={x.key} value={x.key}>{x.label}</option>)}
-          </select>
-          <Btn size="sm" onClick={() => setMoreOpen(!moreOpen)}>{moreOpen ? '收起筛选 ▴' : '展开筛选 ▾'}</Btn>
-          {moreOpen && (<>
-            <select className="nc-input" style={{ width: 148 }} value={source} onChange={(e) => { setSource(e.target.value); setPage(1); }}>
-              <option value="">全部来源</option>
-              {PROJECT_SOURCES.map((s) => <option key={s} value={s}>{s}（{ALL.filter((r) => r.source === s).length}）</option>)}
+        <ListToolbar
+          onReset={reset}
+          search={{ value: kw, onChange: (v) => { setKw(v); setPage(1); }, placeholder: '搜索编号 / 项目名 / 客户' }}
+          actions={<>
+            <ExportButton onClick={exportApi.trigger} selectedCount={projSel.length} />
+            <Btn kind="primary" onClick={() => go('project-new')}>＋ 新建项目</Btn>
+          </>}
+          echoItems={echoItems}
+          onEchoRemove={removeFilter}
+          onEchoClear={reset}
+        >
+          <div className="nc-ltrow">
+            <select className="nc-input" style={{ width: 156 }} value={type} onChange={(e) => { setType(e.target.value); setPage(1); }}>
+              <option value="">全部类型</option>
+              {PROJ_TYPES.map((t) => <option key={t} value={t}>{t}（{ALL.filter((r) => r.type === t).length}）</option>)}
             </select>
-            <select className="nc-input" style={{ width: 132 }} value={pm} onChange={(e) => { setPm(e.target.value); setPage(1); }}>
-              <option value="">全部项目经理</option>
-              {pms.map((o) => <option key={o} value={o}>{o}（{ALL.filter((r) => r.pm === o).length}）</option>)}
+            <select className="nc-input" style={{ width: 152 }} value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }}>
+              <option value="">全部状态</option>
+              {PROJECT_STATUS.map((s) => <option key={s} value={s}>{s}（{ALL.filter((r) => r.status === s).length}）</option>)}
             </select>
-            <select className="nc-input" style={{ width: 200 }} value={customer} onChange={(e) => { setCustomer(e.target.value); setPage(1); }}>
-              <option value="">全部客户</option>
-              {custs.map((c) => <option key={c} value={c}>{c}（{ALL.filter((r) => r.customer === c).length}）</option>)}
-            </select>
-            <select className="nc-input" style={{ width: 168 }} value={risk} onChange={(e) => { setRisk(e.target.value); setPage(1); }}>
-              <option value="">全部风险</option>
-              {riskKeys.map((k) => <option key={k} value={k}>{PROJECT_RISKS[k].label}（{ALL.filter((r) => r.risk === k).length}）</option>)}
-            </select>
-            <Btn size="sm" onClick={reset}>重置</Btn>
-          </>)}
-          <span style={{ marginLeft: 'auto' }}>
-            <Btn size="sm" onClick={() => go('cert')}>证书占用 →</Btn>
-          </span>
-        </div>
+            <Btn size="sm" onClick={() => setMoreOpen(!moreOpen)}>{moreOpen ? '收起筛选 ▴' : '更多筛选 ▾'}</Btn>
+            {moreOpen && (<>
+              <select className="nc-input" style={{ width: 148 }} value={source} onChange={(e) => { setSource(e.target.value); setPage(1); }}>
+                <option value="">全部来源</option>
+                {PROJECT_SOURCES.map((s) => <option key={s} value={s}>{s}（{ALL.filter((r) => r.source === s).length}）</option>)}
+              </select>
+              <select className="nc-input" style={{ width: 132 }} value={pm} onChange={(e) => { setPm(e.target.value); setPage(1); }}>
+                <option value="">全部项目经理</option>
+                {pms.map((o) => <option key={o} value={o}>{o}（{ALL.filter((r) => r.pm === o).length}）</option>)}
+              </select>
+              <CustomerPicker value={customer} onChange={(v) => { setCustomer(v); setPage(1); }} emit="name"
+                options={custOpts} clearLabel="全部客户" width={200} />
+              <select className="nc-input" style={{ width: 168 }} value={risk} onChange={(e) => { setRisk(e.target.value); setPage(1); }}>
+                <option value="">全部风险</option>
+                {riskKeys.map((k) => <option key={k} value={k}>{PROJECT_RISKS[k].label}（{ALL.filter((r) => r.risk === k).length}）</option>)}
+              </select>
+            </>)}
+          </div>
+        </ListToolbar>
 
         <DataTable
-          cols={cols} rows={paged} rowKey={(r) => r.id} minWidth={1660}
+          cols={cols} rows={paged} rowKey={(r) => r.id} minWidth={1530}
           /* 行底色：终态灰底弱化；无合同施工行左侧红色竖条（§9.1 特殊） */
           rowClass={(r) => [
             (PROJECT_TERMINAL as readonly string[]).includes(r.status) ? 'is-dead-row' : '',
             r.noContract ? 'is-nocontract-row' : '',
           ].filter(Boolean).join(' ')}
           onRowClick={(r) => openProject(r)}
+          selectable selected={projSel}
+          onSelectAll={(ids) => {
+            const pageIds = ids.length ? ids : paged.map((r) => r.id);
+            const allChecked = pageIds.length > 0 && pageIds.every((id) => projSel.includes(id));
+            setProjSel(allChecked ? projSel.filter((id) => !pageIds.includes(id)) : Array.from(new Set([...projSel, ...pageIds])));
+          }}
+          onSelectRow={(id) => setProjSel((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]))}
           empty="没有符合条件的项目"
           emptyCta={<Btn kind="primary" onClick={() => go('project-new')}>＋ 新建项目</Btn>}
         />
         <TableFoot
           unit="个项目" total={ALL.length} filtered={rows.length} page={page} pageSize={pageSize}
           onPage={setPage} onPageSize={(n) => { setPageSize(n); setPage(1); }}
-          extra={<span className="nc-cell-sub"> ｜ 行点击进入项目详情 ｜ 来源：{PROJECT_SOURCES.join(' / ')}</span>}
+          extra={<span className="nc-cell-sub"> ｜ 行点击进入项目详情</span>}
         />
       </Card>
 
@@ -390,10 +438,44 @@ export default function ProjectPage({ go, role, nav }: { go: (p: string) => void
 
           <div className="nc-ledhd" style={{ marginTop: 18 }}>扩展</div>
           <div className="nc-form-grid">
+            <Field label="实施地点" span={4} note="点选地图定位或手动输入现场地址；点选后自动带出 mock 经纬度">
+              <MapPicker value={editAddr} onChange={(a) => setEditAddr(a)} placeholder="如：××中心大厦 B2 消防泵房" />
+            </Field>
             <Field label="备注" span={4}><textarea className="nc-input" rows={3} placeholder="现场约束、施工窗口、特殊要求等" /></Field>
           </div>
         </>)}
       </Drawer>
+
+      {/* ============ 行内「证书占用」抽屉：该项目占用的证书明细 ============ */}
+      <Drawer
+        open={!!certOcc} onClose={() => setCertOcc(null)} width={800}
+        title={`证书占用 · ${certOcc?.name ?? ''}`}
+        sub={certOcc ? `${certOcc.id} · 共 ${getCerts().filter((c) => c.used.includes(certOcc.id)).length} 项证书` : ''}
+        foot={<Btn kind="link" onClick={() => go('cert')}>查看全部占用 →</Btn>}
+      >
+        {certOcc && (() => {
+          const usedCerts = getCerts().filter((c) => c.used.includes(certOcc.id));
+          if (!usedCerts.length) return <div className="nc-empty-mini">该项目暂无占用证书</div>;
+          return (
+            <table className="nc-tbl" style={{ minWidth: 560 }}>
+              <thead><tr><th>证书名称</th><th style={{ width: 180 }}>证书编号</th><th style={{ width: 90 }}>持有人</th><th style={{ width: 110 }}>占用方式</th></tr></thead>
+              <tbody>
+                {usedCerts.map((c) => (
+                  <tr key={c.id}>
+                    <td>{c.name}</td>
+                    <td className="num">{c.certNo}</td>
+                    <td>{c.holder}</td>
+                    <td><Tag tone="gray">{CERT_MODE_CN[c.mode] ?? c.mode}</Tag></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          );
+        })()}
+      </Drawer>
+
+      {/* ============ 统一导出 ============ */}
+      <ExportDialog {...exportApi.dialogProps} />
     </>
   );
 }

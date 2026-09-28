@@ -1,11 +1,12 @@
 // 诺安云 6.0 · 审批中心 · PRD §15
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Btn, Card, DataTable, Drawer, Field, ListToolbar, Modal, Money, Op, OpSep,
-  PageHead, TableFoot, Tag, Tabs, Tile, Tip, useToast, type Col, ConfirmModal, EntityLink, pressProps,} from '../components/ui';
+  BatchActionBar, Btn, Card, DataTable, Drawer, Field, ListToolbar, Modal, Money, Op, OpMore, OpSep,
+  PageHead, TableFoot, Tag, Tile, Tabs, Tip, useToast, type Col, type TagTone, ConfirmModal, EntityLink, pressProps,} from '../components/ui';
 import { APPROVALS, approveLevel, fmt, fmtWan, TODAY } from '../components/data';
-import { getApprovals, setApprovalState, syncBizFromApproval, subscribeStore, refBizNo } from '../components/store';
+import { getApprovals, setApprovalState, syncBizFromApproval, subscribeStore, refBizNo, patchCert as patchCertStore, getCerts } from '../components/store';
 import { Ico } from '../components/icons';
+import { ExportButton, useExport, getUserName, ExportDialog, type ExportField } from '../components/export';
 
 /* ============ 审批类型 → 审批链模板（分级路由） ============ */
 type ChainNode = { label: string; role: string };
@@ -41,9 +42,20 @@ const ACTIVE_ST = ['待审批', '审批中'];
 const FINAL_ST = ['已通过', '已终止'];
 type ApprStatus = (typeof APPR_STATUS)[number];
 
+/** 审批类型 → 标签色（不同类型不同色，列表内可快速区分单据类型） */
+const TYPE_TONE: Record<string, TagTone> = {
+  报价审批: 'blue',
+  合同审批: 'green',
+  付款申请: 'orange',
+  变更审批: 'purple',
+  借阅申请: 'link',
+  项目立项: 'solid',
+  证书外借: 'link',
+};
+
 const stTone = (s: string) =>
   s === '待审批' ? 'orange' : s === '审批中' ? 'blue' : s === '已通过' ? 'green'
-    : s === '已退回' ? 'red' : 'gray';
+    : 'gray';
 
 /* ============ 报价审批内嵌：报价明细（快照）+ 历史同类价格参照 ============ */
 const QUOTE_SNAP: [string, string, string, number][] = [
@@ -86,7 +98,7 @@ const MY_NAME = '蓝峰';
  * 按前缀把 ref 映射到可下钻的目标页 + 目标实体 id，实现「审批中 → 原单据」层层透视。
  */
 function refDrill(ref: string): { target: string; id: string; label: string } | null {
-  const m = /^([A-Z]{2}\d{8}-\d{4}|[A-Z]{2}\d{6})/.exec(ref);
+  const m = /^([A-Z]{2}\d{8}-\d{4}|[A-Z]{2}\d{6}|[A-Z]{2}-\d{4}-\d+)/.exec(ref);
   if (!m) return null;
   const no = m[1];
   if (no.startsWith('BJ')) return { target: 'quote-detail', id: no, label: '报价单' };
@@ -103,7 +115,7 @@ export default function ApprovalPage({ go, role, nav }: { go: (p: string) => voi
   const noPermTitle = isApprover ? undefined : `当前角色「${role}」无审批权限`;
 
   const [tab, setTab] = useState('todo');
-  const [types, setTypes] = useState<string[]>(['报价审批', '合同审批', '项目立项', '付款申请', '变更审批']);
+  const [types, setTypes] = useState<string[]>(['报价审批', '合同审批', '项目立项', '付款申请', '变更审批', '证书外借']);
   const [kw, setKw] = useState('');
   const [lv, setLv] = useState('all');
   const [stF, setStF] = useState('all');
@@ -167,6 +179,30 @@ export default function ApprovalPage({ go, role, nav }: { go: (p: string) => voi
   const batchApprovable = filtered.filter((r) => ACTIVE_ST.includes(r.status) && ['借阅申请', '付款申请'].includes(r.type));
   const batchEligible = filtered.filter((r) => ACTIVE_ST.includes(r.status) && r.amt < 500000 && ['合同审批', '报价审批', '变更审批'].includes(r.type));
 
+  /* ============ 统一导出（接入公共组件；选中源复用 picked，与批量通过同一勾选列） ============ */
+  const exportFields: ExportField[] = [
+    { key: 'id', label: '审批编号' },
+    { key: 'type', label: '类型' },
+    { key: 'obj', label: '标题' },
+    { key: 'ap', label: '发起人' },
+    { key: 'time', label: '发起时间' },
+    { key: 'node', label: '当前节点' },
+    { key: 'status', label: '状态' },
+    { key: 'urgency', label: '紧急度' },
+  ];
+  const exportApi = useExport({
+    pageKey: 'approval',
+    pageName: '审批待办',
+    fields: exportFields,
+    defaultFieldKeys: exportFields.map((f) => f.key),
+    totalCount: todo.length,
+    filteredCount: filtered.length,
+    selectedCount: picked.length,
+    previewRows: filtered.slice(0, 5),
+    userName: getUserName(role),
+    onExport: () => { /* 原型：导出动作与审计上报由 useExport 内置完成 */ },
+  });
+
   /** 通过：审批链推进到下一节点；已是末节点则整单通过（结果同步回写上游业务单据） */
   const passRow = (r: VRow, op: string) => {
     const c = chainOf(r.type, r.amt, r.level);
@@ -176,6 +212,11 @@ export default function ApprovalPage({ go, role, nav }: { go: (p: string) => voi
     setApprovalState(r.id, { node: next, status: st, reason: op } as Partial<Row>);
     /* 回写业务单据：终审通过时业务单进入终态，中间节点仅标记流转中 */
     const biz = syncBizFromApproval({ type: r.type, ref: r.ref, status: '已通过' }, allDone);
+    /* 证书外借审批：终审通过 → 证书标记为「已外借」 */
+    if (r.type === '证书外借' && allDone) {
+      const certId = r.ref.split(' ')[0];
+      if (getCerts().some((c) => c.id === certId)) patchCertStore(certId, { loanStatus: '已外借' });
+    }
     toast(allDone
       ? `已通过 ${r.id} · 审批链全部完成，单据归档${biz ? ` · 已回写业务单 ${biz} 状态` : ''}`
       : `已通过 ${r.id} · 状态转为「审批中」，流转至第 ${next}/${c.length - 1} 审批节点「${c[next].label}（${c[next].role}）」`);
@@ -184,6 +225,11 @@ export default function ApprovalPage({ go, role, nav }: { go: (p: string) => voi
   const rejectRow = (r: VRow, reason: string) => {
     setApprovalState(r.id, { status: '已退回', reason } as Partial<Row>);
     const biz = syncBizFromApproval({ type: r.type, ref: r.ref, status: '已退回' }, false);
+    /* 证书外借审批被驳回 → 清除外借标记，证书恢复原状 */
+    if (r.type === '证书外借') {
+      const certId = r.ref.split(' ')[0];
+      if (getCerts().some((c) => c.id === certId)) patchCertStore(certId, { loanStatus: undefined });
+    }
     toast(`已退回 ${r.id} · 退回原因已推送发起人 ${r.ap} 待办${biz ? ` · 业务单 ${biz} 已置为「${refBizNo(r.ref).startsWith('BJ') ? '草稿' : '已退回'}」可修改后重提` : ''}`);
     setReject(null); setRejectTxt(''); setDetail(null);
   };
@@ -217,11 +263,11 @@ export default function ApprovalPage({ go, role, nav }: { go: (p: string) => voi
   };
 
   const cols: Col<VRow>[] = [
-    { key: 'id', title: '审批单号', width: 150, render: (r) => <span className="num nc-link" onClick={() => { setDetail(r); setOpinion(''); }} {...pressProps(() => { setDetail(r); setOpinion(''); })}>{r.id}</span> },
-    { key: 'type', title: '审批类型', width: 96, render: (r) => <Tag tone="blue">{r.type}</Tag> },
-    { key: 'obj', title: '审批对象', render: (r) => <><div>{r.obj}</div><div className="nc-tiny nc-muted">{(() => { const d = refDrill(r.ref); return d ? <EntityLink target={d.target} id={d.id} go={go} title={`下钻到${d.label}详情`}>{r.ref}</EntityLink> : r.ref; })()}</div></> },
+    { key: 'id', title: '审批单号', width: 150, hide: true, render: (r) => <span className="num nc-link" onClick={() => { setDetail(r); setOpinion(''); }} {...pressProps(() => { setDetail(r); setOpinion(''); })}>{r.id}</span> },
+    { key: 'type', title: '审批类型', width: 96, render: (r) => <Tag tone="gray">{r.type}</Tag> },
+    { key: 'obj', title: '审批对象', width: 240, sticky: 'left' as const, render: (r) => <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>{r.obj}<Tag tone="gray">{(() => { const d = refDrill(r.ref); return d ? <EntityLink target={d.target} id={d.id} go={go} title={`下钻到${d.label}详情`}>{r.ref}</EntityLink> : r.ref; })()}</Tag></span> },
     { key: 'ap', title: '发起人', width: 78 },
-    { key: 'amt', title: '金额', width: 110, align: 'right', render: (r) => r.amt ? <b className="num"><Money v={r.amt} role={role} wan /></b> : <span className="nc-muted">—</span> },
+    { key: 'amt', title: '金额 ↕', width: 110, align: 'right', render: (r) => r.amt ? <b className="num"><Money v={r.amt} role={role} wan /></b> : <span className="nc-muted">—</span> },
     {
       key: 'level', title: '分级路由', width: 118, render: (r) => (
         <span className="nc-valid-pill" title={`按金额自动路由：<50万→部门负责人；50~200万→分管副总；≥200万→总经理（采购 30/100 万口径）`}>
@@ -230,23 +276,23 @@ export default function ApprovalPage({ go, role, nav }: { go: (p: string) => voi
       ),
     },
     {
-      key: 'node', title: '当前节点 / 审批进度', width: 170, render: (r) => {
+      key: 'node', title: '当前节点 / 审批进度', width: 180, render: (r) => {
         const c = chainOf(r.type, r.amt, r.level);
         const cur = c[Math.min(r.node, c.length - 1)];
         const isEnd = FINAL_ST.includes(r.status) || r.status === '已撤回';
+        const tip = isEnd ? r.status : `第 ${r.node + 1}/${c.length} 节点 · ${cur?.label}（${cur?.role}）${r.node > 0 ? ` · 前 ${r.node} 个节点已通过` : ''}`;
         return (
-          <span className="nc-tiny">
+          <span className="nc-tiny" style={{ display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={tip}>
             {isEnd ? <span className="nc-muted">—（{r.status}）</span>
-              : <>第 {r.node + 1}/{c.length} 节点 · <b>{cur?.label}</b>（{cur?.role}）</>}
-            {!isEnd && r.status === '审批中' && <div className="nc-muted">前 {r.node} 节点已通过</div>}
+              : <><span className="nc-muted">第{r.node + 1}/{c.length}</span> <Tag tone="blue">{cur?.label}</Tag> <span className="nc-muted">{cur?.role}</span>{r.node > 0 && <span className="nc-muted"> · 前{r.node}节点已通过</span>}</>}
           </span>
         );
       },
     },
-    { key: 'time', title: '提交时间', width: 130, render: (r) => <span className="num nc-tiny">{r.time}</span> },
+    { key: 'time', title: '提交时间', width: 130, align: 'right', render: (r) => <span className="num nc-tiny">{r.time}</span> },
     { key: 'status', title: '状态', width: 92, render: (r) => <Tag tone={stTone(r.status) as 'orange'}>{r.status}</Tag> },
     {
-      key: 'op', title: '操作', width: 210, render: (r) => (
+      key: 'op', title: '操作', width: 150, render: (r) => (
         <span onClick={(e) => e.stopPropagation()}>
           <Op onClick={() => { setDetail(r); setOpinion(''); }}>详情</Op>
           {(r.status === '待审批' || r.status === '审批中') && <>
@@ -254,10 +300,10 @@ export default function ApprovalPage({ go, role, nav }: { go: (p: string) => voi
             <Op disabled={!isApprover} title={noPermTitle} onClick={() => { setDetail(r); setOpinion(''); setPassOpen(r); }}>通过</Op>
             <OpSep />
             <Op danger disabled={!isApprover} title={noPermTitle} onClick={() => { setReject(r); setRejectTxt(''); }}>退回</Op>
-            <OpSep />
-            <Op onClick={() => urgeRow(r)} title={`当前节点已停留 ${r.overdueH} 小时`}>催办</Op>
-            <OpSep />
-            <Op onClick={() => setWithdraw(r)} title="发起人撤回，回到草稿可改">撤回</Op>
+            <OpMore items={[
+              { label: '催办', title: `当前节点已停留 ${r.overdueH} 小时`, onClick: () => urgeRow(r) },
+              { label: '撤回', title: '发起人撤回，回到草稿可改', onClick: () => setWithdraw(r) },
+            ]} />
           </>}
           {/* 评审 B2：已退回补「重新提交 / 作废」出口，原仅「查看业务单」= 流程断点 */}
           {r.status === '已退回' && <>
@@ -277,29 +323,25 @@ export default function ApprovalPage({ go, role, nav }: { go: (p: string) => voi
     },
   ];
 
-  const TYPES = ['报价审批', '合同审批', '付款申请', '变更审批', '借阅申请'];
+  const TYPES = ['报价审批', '合同审批', '付款申请', '变更审批', '借阅申请', '证书外借'];
 
   return (
     <>
       <PageHead
         crumbs={['审批中心']}
         title="审批中心"
-        badges={<><Tag tone="orange">待我审批 {todo.length}</Tag><Tag tone="gray">今日办结 {done.length}</Tag></>}
-        sub={<span>多类型单据统一审批<Tip w={340} text="覆盖报价 / 合同 / 付款 / 变更 / 借阅；审批链按金额分级自动路由，退回必填原因。" /></span>}
+        badges={<Tag tone="gray">本周已处理 {done.length}</Tag>}
+        sub="多类型单据统一审批 · 审批链按金额分级自动路由"
         actions={<>
           <Btn onClick={() => { setKw(''); setLv('all'); setStF('all'); setTypes(TYPES); setSort(SORTS[0]); setPage(1); toast('已刷新待办列表'); }}><Ico n="refresh" size={16} /> 刷新</Btn>
-          <Btn onClick={() => toast('已导出待办清单')}>导出待办</Btn>
-          <Btn kind="primary" disabled={!picked.length || !isApprover} title={noPermTitle} onClick={() => setBatchOpen(true)}>批量通过（{picked.length}）</Btn>
         </>}
       />
 
-      <div className="nc-tiles nc-tiles-6">
-        <Tile label="待我审批" value={todo.length} tone="orange" sub="超 24 小时 = 2 · 超 48 小时 = 0" active={tab === 'todo'} onClick={() => setTab('todo')} />
-        <Tile label="报价审批" value={todo.filter((r) => r.type === '报价审批').length} tone="orange" sub="浮率 / 金额双触发" />
-        <Tile label="合同审批" value={todo.filter((r) => r.type === '合同审批').length} sub="含六条款校验" />
-        <Tile label="付款申请" value={todo.filter((r) => r.type === '付款申请').length} sub="采购 30/100 万口径" />
-        <Tile label="变更审批" value={todo.filter((r) => r.type === '变更审批').length} sub="签证 / 范围变更" />
-        <Tile label="审批中" value={rows.filter((r) => r.status === '审批中').length} tone="blue" sub="多节点流转中" active={stF === '审批中'} onClick={() => setStF(stF === '审批中' ? 'all' : '审批中')} />
+      <div className="nc-tiles nc-tiles-4">
+        <Tile label="待审批" value={rows.filter((r) => r.status === '待审批').length} tone="orange" sub="待我处理" />
+        <Tile label="审批中" value={rows.filter((r) => r.status === '审批中').length} tone="blue" sub="流转中" />
+        <Tile label="已通过" value={rows.filter((r) => r.status === '已通过').length} tone="green" sub="终审归档" />
+        <Tile label="已退回" value={rows.filter((r) => r.status === '已退回').length} sub="退回待改" />
       </div>
 
       <Card flush>
@@ -318,47 +360,54 @@ export default function ApprovalPage({ go, role, nav }: { go: (p: string) => voi
               {
                 label: '状态', value: stF, onChange: (k) => { setStF(k); setPage(1); },
                 items: [
-                  { key: 'all', label: '全部状态', cnt: rows.length },
-                  ...APPR_STATUS.map((s) => ({ key: s, label: s, cnt: rows.filter((a) => a.status === s).length })),
+                  { key: 'all', label: '全部状态', cnt: base.length },
+                  ...APPR_STATUS.map((s) => ({ key: s, label: s, cnt: base.filter((a) => a.status === s).length })),
                 ],
               },
               {
                 label: '层级', value: lv, onChange: (k) => { setLv(k); setPage(1); },
                 items: [
-                  { key: 'all', label: '全部层级', cnt: rows.length },
-                  ...(['部门负责人', '分管副总', '总经理'] as const).map((l) => ({ key: l, label: l, cnt: rows.filter((a) => a.level === l).length })),
+                  { key: 'all', label: '全部层级', cnt: base.length },
+                  ...(['部门负责人', '分管副总', '总经理'] as const).map((l) => ({ key: l, label: l, cnt: base.filter((a) => a.level === l).length })),
                 ],
               },
             ]}
-            right={<>
-              <div className="nc-pick-inline">
-                {TYPES.map((t) => (
-                  <label key={t} className={`nc-pick-chip${types.includes(t) ? ' is-on' : ''}`}>
-                    <input type="checkbox" className="nc-check" checked={types.includes(t)} onChange={() => setTypes((ts) => ts.includes(t) ? ts.filter((x) => x !== t) : [...ts, t])} />
-                    <span>{t}</span>
-                  </label>
-                ))}
-              </div>
-              <select className="nc-input" style={{ width: 140 }} value={sort} onChange={(e) => { setSort(e.target.value); setPage(1); }} title="排序">
-                {SORTS.map((s) => <option key={s} value={s}>{s}</option>)}
-              </select>
-              <input className="nc-input nc-lt-search" value={kw} placeholder="搜索单号 / 对象 / 申请人"
-                onChange={(e) => { setKw(e.target.value); setPage(1); }} />
-              <Btn onClick={() => { setKw(''); setLv('all'); setStF('all'); setTypes(TYPES); setSort(SORTS[0]); setPage(1); }}>重置</Btn>
+            search={{ value: kw, onChange: (v) => { setKw(v); setPage(1); }, placeholder: '搜索单号 / 对象 / 申请人' }}
+            onReset={() => { setKw(''); setLv('all'); setStF('all'); setTypes(TYPES); setSort(SORTS[0]); setPage(1); }}
+            echoItems={[
+              ...(stF !== 'all' ? [{ key: 'stF', label: `状态：${stF}` }] : []),
+              ...(lv !== 'all' ? [{ key: 'lv', label: `层级：${lv}` }] : []),
+            ]}
+            onEchoRemove={(k) => { if (k === 'stF') setStF('all'); if (k === 'lv') setLv('all'); setPage(1); }}
+            onEchoClear={() => { setKw(''); setLv('all'); setStF('all'); setTypes(TYPES); setSort(SORTS[0]); setPage(1); }}
+            actions={<>
+              <ExportButton onClick={exportApi.trigger} selectedCount={picked.length} />
             </>}
-          />
+          >
+            <div className="nc-pick-inline" style={{ marginTop: 8 }}>
+              {TYPES.map((t) => (
+                <label key={t} className={`nc-pick-chip${types.includes(t) ? ' is-on' : ''}`}>
+                  <input type="checkbox" className="nc-check" checked={types.includes(t)} onChange={() => setTypes((ts) => ts.includes(t) ? ts.filter((x) => x !== t) : [...ts, t])} />
+                  <span>{t}</span>
+                </label>
+              ))}
+            </div>
+          </ListToolbar>
         </div>
-        <div className="nc-issuestrip" style={{ padding: '0 16px 10px' }}>
-          <span className="nc-issue is-red">已超 24 小时 {todo.filter((r) => r.overdueH >= 24).length} 单</span>
-          <span className="nc-issue is-orange">安许 60 天内到期 · 关联投标须加急</span>
-          <span className="nc-issue is-gold">批量通过仅适用于「借阅申请 / 付款申请」</span>
-        </div>
+        <BatchActionBar
+          selectedCount={picked.length}
+          onClear={() => setPicked([])}
+          actions={[
+            { label: '批量通过', kind: 'primary', disabled: !picked.length || !isApprover, onClick: () => setBatchOpen(true) },
+            { label: '批量退回', kind: 'danger', disabled: !picked.length || !isApprover, onClick: () => toast(`批量退回（演示态）· 已退回 ${picked.length} 单`) },
+          ]}
+        />
         <DataTable
-          cols={cols} rows={paged} rowKey={(r) => r.id} minWidth={1280}
-          empty="没有符合筛选条件的审批单（审批由合同 / 变更 / 付款 / 开票 / 用章业务单据触发，无需手工新建）"
-          emptyCta={<Btn size="sm" onClick={() => { setTypes(['报价审批', '合同审批', '项目立项', '付款申请', '变更审批']); setStF('all'); setLv('all'); setKw(''); }}>清空筛选条件</Btn>}
+          cols={cols} rows={paged} rowKey={(r) => r.id} minWidth={1130}
+          empty="没有符合筛选条件的审批单"
+          emptyCta={<Btn onClick={() => { setTypes(['报价审批', '合同审批', '项目立项', '付款申请', '变更审批']); setStF('all'); setLv('all'); setKw(''); }}>清空筛选条件</Btn>}
           selectable selected={picked} onSelectAll={setPicked} onSelectRow={(id) => setPicked((p) => p.includes(id) ? p.filter((x) => x !== id) : [...p, id])}
-          foot={<TableFoot total={rows.length} filtered={filtered.length} page={page} pageSize={pageSize} onPage={setPage} onPageSize={(n) => { setPageSize(n); setPage(1); }} extra={<span className="nc-tiny nc-muted"> · 可批量通过 {batchApprovable.length + batchEligible.length} 单</span>} />}
+          foot={<TableFoot total={base.length} filtered={filtered.length} page={page} pageSize={pageSize} onPage={setPage} onPageSize={(n) => { setPageSize(n); setPage(1); }} extra={<span className="nc-tiny nc-muted"> · 可批量通过 {batchApprovable.length + batchEligible.length} 单</span>} />}
         />
       </Card>
 
@@ -569,11 +618,6 @@ export default function ApprovalPage({ go, role, nav }: { go: (p: string) => voi
               toast(`批量通过 ${okIds.length} 单（终审归档 ${doneCnt} 单 · 流转下一节点 ${nextCnt} 单 · 回写业务单 ${bizCnt} 单）；其余不符条件的单据未处理`);
             }, 800);
           }}>{batchRun ? '提交中…' : '确认批量通过'}</Btn></>}>
-        <div className="nc-warnbox is-warn">
-          <b>批量通过仅适用于「借阅申请 / 付款申请」</b>
-          <div>报价 / 合同 / 变更类审批因涉及明细核对与六条款校验，必须逐单审批。</div>
-          <div style={{ marginTop: 6 }}>批量通过与单条通过<b>同规则</b>：按审批链推进一个节点——未到链尾则转「审批中」并流转下一审批人，到链尾才置「已通过」归档，不会一键终审。</div>
-        </div>
         <table className="nc-tbl" style={{ minWidth: 560 }}>
           <thead><tr><th>审批单</th><th>类型</th><th style={{ width: 120, textAlign: 'right' }}>金额</th><th style={{ width: 90 }}>可否批量</th></tr></thead>
           <tbody>
@@ -626,6 +670,9 @@ export default function ApprovalPage({ go, role, nav }: { go: (p: string) => voi
         impact={withdraw && <>将撤回 <b>{withdraw.id}</b>（当前第 {withdraw.node + 1} 节点）。<br />撤回后单据回到发起人处可修改，<b>已产生的审批意见保留留痕</b>；修改后可重新提交，审批链重置至第 1 节点。</>}
         onOk={(r) => withdraw && withdrawRow(withdraw, r)}
       />
+
+      {/* ============ 统一导出弹窗 ============ */}
+      <ExportDialog {...exportApi.dialogProps} />
     </>
   );
 }

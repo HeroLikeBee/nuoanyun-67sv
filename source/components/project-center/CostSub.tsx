@@ -4,9 +4,9 @@
 // 资金实际收支 / 回款口径 / 保证金在「资金台账」，变更摘要在「合同变更」，本页不重复、不重算。
 // 现场投入按业务类型动态裁剪（维保 / 检测无大型机械 / 材料则隐藏，避免空表）。
 import React, { useState } from 'react';
-import { Btn, Card, Code, Drawer, IdCell, Tag, Tip } from '../ui';
+import { Btn, Card, Code, Drawer, Field, IdCell, ItemPicker, Modal, Tag, Tip } from '../ui';
 import { Ico } from '../icons';
-import { BUDGET_SRC_LABEL, TODAY } from '../data';
+import { BUDGET_SRC_LABEL, TODAY, itemByCode } from '../data';
 import { PjSection } from './PjSection';
 import type { PjCtx, PjCostRow } from './ctx';
 
@@ -60,7 +60,7 @@ function FlowDrawer({ C, row, onClose }: { C: PjCtx; row: PjCostRow | null; onCl
           {!merged && row.src !== 'PF' && (
             <div className="nc-gate-block" style={{ background: 'var(--c-primary-bg)', borderColor: 'var(--c-primary-border)' }}>
               <Ico n="help" size={14} />
-              无合同付款（项目级）在归并前单独挂账；归并后原行保留置灰、标记去向，避免重复计入。
+              该笔尚未归并至合同。
             </div>
           )}
           <div style={{ marginTop: 12 }}>
@@ -90,6 +90,23 @@ export default function CostSub({ C }: { C: PjCtx }) {
   const [sub, setSub] = useState('ledger');
   const [flow, setFlow] = useState<PjCostRow | null>(null);
   const [filter, setFilter] = useState('全部');
+  /* 从物料主数据引用登记成本：选择后自动带出名称/编号/规格/单位/参考价，仍可手填覆盖 */
+  const [regOpen, setRegOpen] = useState(false);
+  const [regCode, setRegCode] = useState('');
+  const [regName, setRegName] = useState('');
+  const [regSpec, setRegSpec] = useState('');
+  const [regUnit, setRegUnit] = useState('');
+  const [regPrice, setRegPrice] = useState('');
+  const [regQty, setRegQty] = useState('1');
+  const regAmt = (Number(regPrice) || 0) * (Number(regQty) || 0);
+  const pickRegItem = (code: string) => {
+    setRegCode(code);
+    const it = itemByCode(code);
+    if (it) {
+      setRegName(it.name); setRegSpec(it.spec); setRegUnit(it.unit); setRegPrice(String(it.price));
+    }
+  };
+  const resetReg = () => { setRegCode(''); setRegName(''); setRegSpec(''); setRegUnit(''); setRegPrice(''); setRegQty('1'); };
   const rows = filter === '全部' ? C.costRows : C.costRows.filter((r) => r.type === filter);
   const types = ['全部', ...Array.from(new Set(C.costRows.map((r) => r.type)))];
   const budgetNote = C.BUDGET_EST
@@ -107,12 +124,17 @@ export default function CostSub({ C }: { C: PjCtx }) {
             { k: '已发生成本', v: C.COST_SUM, n: `${C.costRows.length} 笔 · 含审批中` },
             { k: '成本偏差', v: C.dev, n: `${C.dev > 0 ? '超支 +' : '结余 '}${C.devPct.toFixed(1)}%` },
             { k: '实际毛利率', v: Math.round(C.actProfit), n: `计划 ${C.planProfit.toFixed(1)}%` },
-          ].map((x) => (
-            <div key={x.k} className="nc-stat4-cell">
-              {x.k}<b className="num">{x.v.toLocaleString()}</b>
-              <span className="nc-cell-sub">{x.n}</span>
-            </div>
-          ))}
+          ].map((x) => {
+            const isDev = x.k === '成本偏差';
+            const weak = x.v === 0;
+            const toneCls = weak ? ' nc-muted' : (isDev && C.dev > 0) ? ' nc-v-red' : '';
+            return (
+              <div key={x.k} className="nc-stat4-cell">
+                {x.k}<b className={'num' + toneCls}>{x.v.toLocaleString()}</b>
+                <span className="nc-cell-sub">{x.n}</span>
+              </div>
+            );
+          })}
         </div>
       </PjSection>
 
@@ -133,6 +155,7 @@ export default function CostSub({ C }: { C: PjCtx }) {
                 <button key={t} className={`nc-subtab${filter === t ? ' is-on' : ''}`} onClick={() => setFilter(t)}>{t}</button>
               ))}
               <Tip w={360} text="来源单据统一显示为业务名称（采购 / 登记 / 无合同付款），不出现 CG / CB / PF 缩写。红字冲销单以负数追加，原单据保留并置灰。" />
+              <Btn size="sm" onClick={() => { resetReg(); setRegOpen(true); }}><Ico n="building" size={14} /> 从物料主数据引用登记</Btn>
               <span style={{ marginLeft: 'auto' }} className="nc-cell-sub">
                 合计 {C.COST_SUM.toLocaleString()} 元 · 占目标成本 {C.COST_PROGRESS.toFixed(1)}%
               </span>
@@ -146,7 +169,7 @@ export default function CostSub({ C }: { C: PjCtx }) {
                     <th style={{ width: 100 }}>来源</th>
                     <th style={{ width: 90 }}>类别</th>
                     <th style={{ width: 120 }} className="is-num">金额（元）</th>
-                    <th style={{ width: 110 }}>发生日期</th>
+                    <th style={{ width: 110 }} className="is-num">发生日期</th>
                     <th>说明</th>
                     <th style={{ width: 130 }}>状态</th>
                     <th style={{ width: 90 }}>操作</th>
@@ -158,17 +181,16 @@ export default function CostSub({ C }: { C: PjCtx }) {
                         <td>{SRC_NAME[r.src]}</td>
                         <td>{r.type}</td>
                         <td className={`is-num num${r.amt < 0 ? ' nc-v-red' : ''}`}>{r.amt.toLocaleString()}</td>
-                        <td className="num">{r.date}</td>
+                        <td className="is-num num">{r.date}</td>
                         <td>
                           {r.note}
-                          {r.mergedTo && <div className="nc-cell-sub">已归并 → {r.mergedTo}（原行保留置灰，不重复计入）</div>}
                         </td>
                         <td>
-                          {r.mergedTo ? <Tag tone="gray">已归并</Tag>
+                          {r.mergedTo ? <Tag tone="gray">已归并 → {r.mergedTo}</Tag>
                             : r.st ? <Tag tone={COST_ST[r.st]?.t ?? 'gray'}>{COST_ST[r.st]?.n ?? r.st}</Tag>
                               : <Tag tone="green">已计入成本</Tag>}
                         </td>
-                        <td><Btn size="sm" onClick={() => setFlow(r)}>穿透</Btn></td>
+                        <td><Btn size="sm" onClick={() => setFlow(r)}>查看来源单据</Btn></td>
                       </tr>
                     ))}
                   </tbody>
@@ -268,14 +290,14 @@ export default function CostSub({ C }: { C: PjCtx }) {
                     <table className="nc-tbl" style={{ minWidth: 700 }}>
                       <thead><tr>
                         <th>机械名称</th><th style={{ width: 80 }}>计量单位</th><th style={{ width: 90 }} className="is-num">数量</th>
-                        <th style={{ width: 110 }} className="is-num">单价</th><th style={{ width: 120 }} className="is-num">金额（元）</th><th style={{ width: 110 }}>进场日期</th>
+                        <th style={{ width: 110 }} className="is-num">单价</th><th style={{ width: 120 }} className="is-num">金额（元）</th><th style={{ width: 110 }} className="is-num">进场日期</th>
                       </tr></thead>
                       <tbody>
                         {C.machRows.map((r) => (
                           <tr key={r.name}>
                             <td><b>{r.name}</b></td><td>{r.unit}</td>
                             <td className="is-num num">{r.qty}</td><td className="is-num num">{r.price}</td>
-                            <td className="is-num num">{r.amt.toLocaleString()}</td><td className="num">{r.date}</td>
+                            <td className="is-num num">{r.amt.toLocaleString()}</td><td className="is-num num">{r.date}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -295,10 +317,10 @@ export default function CostSub({ C }: { C: PjCtx }) {
                   : (
                     <table className="nc-tbl" style={{ minWidth: 900 }}>
                       <thead><tr>
-                        <th style={{ width: 110 }}>物料号</th><th>名称</th><th style={{ width: 160 }}>规格</th>
+                        <th style={{ width: 110 }}>编号</th><th>名称</th><th style={{ width: 160 }}>规格型号</th>
                         <th style={{ width: 80 }}>单位</th><th style={{ width: 90 }} className="is-num">领用量</th>
                         <th style={{ width: 100 }} className="is-num">单价</th><th style={{ width: 120 }} className="is-num">金额（元）</th>
-                        <th style={{ width: 110 }}>领用日期</th>
+                        <th style={{ width: 110 }} className="is-num">领用日期</th>
                       </tr></thead>
                       <tbody>
                         {C.matRows.map((r) => (
@@ -310,7 +332,7 @@ export default function CostSub({ C }: { C: PjCtx }) {
                             <td className="is-num num">{r.qty.toLocaleString()}</td>
                             <td className="is-num num">{r.price}</td>
                             <td className="is-num num">{r.amt.toLocaleString()}</td>
-                            <td className="num">{r.date}</td>
+                            <td className="is-num num">{r.date}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -323,6 +345,30 @@ export default function CostSub({ C }: { C: PjCtx }) {
       </Card>
 
       <FlowDrawer C={C} row={flow} onClose={() => setFlow(null)} />
+
+      {/* 从物料主数据引用登记成本：选择物料后自动带出名称/编号/规格/单位/参考价，保留手填 */}
+      <Modal open={regOpen} onClose={() => setRegOpen(false)} width={640} title="登记成本 · 从物料主数据引用"
+        foot={<><Btn onClick={() => setRegOpen(false)}>取消</Btn>
+          <Btn kind="primary" disabled={!regName.trim() || !regAmt} onClick={() => {
+            C.toast(`已引用主数据「${regName}」登记成本 ${regAmt.toLocaleString()} 元（演示态，留痕不写入台账）`);
+            setRegOpen(false);
+          }}>保存登记</Btn></>}>
+        <Field label="选择物料 / 服务 / 套件" note="按类型分组（物料 / 服务 / 套件）；选中后自动带出下列字段，仍可手填覆盖">
+          <ItemPicker value={regCode} onChange={pickRegItem} clearLabel="手填（不引用主数据）"
+            placeholder="从物料主数据选择…" />
+        </Field>
+        <div className="nc-form-grid" style={{ marginTop: 12 }}>
+          <Field label="名称" req><input className="nc-input" value={regName} onChange={(e) => setRegName(e.target.value)} placeholder="材料/套件/服务名称" /></Field>
+          <Field label="编号"><input className="nc-input" value={regCode} readOnly placeholder="引用主数据后自动带出" /></Field>
+          <Field label="规格型号"><input className="nc-input" value={regSpec} onChange={(e) => setRegSpec(e.target.value)} placeholder="如 DN100" /></Field>
+          <Field label="单位"><input className="nc-input" value={regUnit} onChange={(e) => setRegUnit(e.target.value)} placeholder="如 米" /></Field>
+          <Field label="参考价（元）" req><input className="nc-input" type="number" value={regPrice} onChange={(e) => setRegPrice(e.target.value)} placeholder="0.00" /></Field>
+          <Field label="数量" req><input className="nc-input" type="number" value={regQty} onChange={(e) => setRegQty(e.target.value)} placeholder="1" /></Field>
+        </div>
+        <div className="nc-gate" style={{ marginTop: 12 }}>
+          <div className="nc-gate-row"><span className="nc-gate-n">登记金额</span><span className="is-num num">¥ {regAmt.toLocaleString()}</span><span className="nc-gate-s" /></div>
+        </div>
+      </Modal>
     </>
   );
 }

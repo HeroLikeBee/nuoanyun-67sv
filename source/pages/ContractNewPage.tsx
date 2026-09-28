@@ -1,5 +1,6 @@
 // 新建合同向导（向导页）—— 布局 / 交互 / 页面结构复刻「合同新增.html」（五来源 · FR-CONT-001）
-// 创建来源：手工录入 / OCR 识别 / 标准模板 / 企业模板 / 复制历史合同。原「报价转化」入口已移除，
+// 创建来源（SRC_CARDS 顺序 = 卡片展示顺序）：OCR 识别 / 复制历史合同 / 标准模板 / 企业模板 / 手工录入。
+// 按「越省事越靠前」排，与向导页统一入口的推荐路径一致。原「报价转化」入口已移除，
 // 改由合同明细的「从报价单导入」承接（报价台账仍可【转合同】直达本页，明细按单勾选导入）。
 // 内部步号 0..5：0 选择创建来源 → 1 来源处理（OCR 上传 / 标准模板 / 企业模板 / 复制历史）
 //   → 2 OCR 左图右字段校对 → 3 合同主体与工期 → 4 金额与收款 → 5 条款与附件
@@ -15,14 +16,16 @@
 //  · 附件：单份 ≤50MB、每类 ≤5 份；DWG / DXF 仅「其他」类可传
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Alert, Banner, Btn, Card, Check, Collapse, EntityLink, Field, Modal, Money, Op, PageHead, Tag, Tip, useToast, pressProps,} from '../components/ui';
+  Alert, Banner, Btn, Card, Check, Collapse, CustomerPicker, EntityLink, Field, Modal, Money, Op, PageHead, ProjectPicker,
+  SupplierPicker, Tag, Tip, useToast, pressProps,} from '../components/ui';
 import { CUSTOMERS, PROJECT_TERMINAL, SUPPLIERS, canSeeMoney, fmt, TODAY } from '../components/data';
 import type { Contract } from '../components/data';
 import {
-  addContract, consumePendingQuote, consumePendingRenew, getBizStatus, getContracts, getPendingContract,
-  getProjects, getQuotes, patchContract, patchQuote, setBizStatus, setPendingContract, subscribeStore,
+  addContract, consumePageAction, consumePendingExec, consumePendingQuote, consumePendingRenew, consumePendingSupplement, getBizStatus, getContracts, getPendingContract,
+  getProjects, getQuotes, nextApprovalNo, patchContract, patchQuote, pushApproval, setBizStatus, setPendingContract, subscribeStore,
 } from '../components/store';
 import { Ico, StatusIco, type IconName } from '../components/icons';
+import MapPicker from '../components/MapPicker';
 
 /* ============================ 常量：来源 / 类型 / 路由 ============================ */
 type Src = 'manual' | 'ocr' | 'std' | 'ent' | 'copy' | null;
@@ -38,23 +41,28 @@ const SRC_META: Record<string, { n: string; r: number[] }> = {
 /** 内部步号 0..5 → 步骤名。内部步号恒定（决定下方渲染哪块内容）；步骤条显示的序号另算 */
 const STEP_NAMES = ['选择创建来源', '来源处理', 'OCR 校对', '合同主体与工期', '金额与收款', '条款与附件'];
 
-const SRC_CARDS: { key: Src; ico: IconName; t: string; d: string; p: string }[] = [
-  { key: 'manual', ico: 'edit', t: '手工录入', d: '空表单直入「合同主体与工期」，从零填写合同信息、明细与收款计划', p: '共 4 步' },
-  { key: 'ocr', ico: 'camera', t: 'OCR 识别', d: '上传 PDF/JPG ≤50MB → 异步识别 ≤10s → 左图右字段校对', p: '共 6 步 · 含上传与 OCR 校对' },
-  { key: 'std', ico: 'scroll', t: '标准模板', d: '全局模板 → 预览（内置风险条款标注）→ 变量替换 → 生成草稿', p: '共 5 步 · 含模板预览与变量替换' },
-  { key: 'ent', ico: 'building', t: '企业模板', d: '先选客户 → 其专属模板 → 同标准模板（预览 + 变量替换）', p: '共 5 步 · 含企业模板预览' },
-  { key: 'copy', ico: 'clipboard', t: '复制历史合同', d: '选择器（本客户优先 + 同类型）→ 差异预览 → 逐项确认带入', p: '共 5 步 · 含源合同差异确认' },
+/* 卡片数组顺序 = Step0 的展示顺序，按「越省事越靠前」排：
+   OCR（传件自动识别）→ 复制历史（拿现成的改）→ 标准模板 → 企业模板 → 手工录入（从零填）。
+   网格是 3 列（.nc-src-grid），故两行为 OCR/复制/标准 + 企业/手工。 */
+const SRC_CARDS: { key: Src; ico: IconName; t: string; d: string; p: string; scene: string; rec?: boolean }[] = [
+  { key: 'ocr', ico: 'camera', t: 'OCR 识别', d: '上传 PDF/JPG ≤50MB → 异步识别 ≤10s → 左图右字段校对', p: '共 6 步 · 含上传与 OCR 校对', scene: '已有合同扫描件，推荐', rec: true },
+  { key: 'copy', ico: 'clipboard', t: '复制历史合同', d: '选择器（本客户优先 + 同类型）→ 差异预览 → 逐项确认带入', p: '共 5 步 · 含源合同差异确认', scene: '基于已有合同快速创建' },
+  { key: 'std', ico: 'scroll', t: '标准模板', d: '全局模板 → 预览（内置风险条款标注）→ 变量替换 → 生成草稿', p: '共 5 步 · 含模板预览与变量替换', scene: '使用公司标准模板' },
+  { key: 'ent', ico: 'building', t: '企业模板', d: '先选客户 → 其专属模板 → 同标准模板（预览 + 变量替换）', p: '共 5 步 · 含企业模板预览', scene: '使用企业自定义模板' },
+  { key: 'manual', ico: 'edit', t: '手工录入', d: '空表单直入「合同主体与工期」，从零填写合同信息、明细与收款计划', p: '共 4 步', scene: '简单合同快速录入' },
 ];
 
-const TYPES = ['销售合同', '维护保养合同', '采购合同', '分包合同', '框架协议'];
-const PREFIX: Record<string, string> = { 销售合同: 'HT', 维护保养合同: 'WB', 采购合同: 'CG', 分包合同: 'FK', 框架协议: 'KJ' };
+const TYPES = ['销售合同', '检测合同', '维护保养合同', '采购合同', '分包合同', '框架协议'];
+const PREFIX: Record<string, string> = { 销售合同: 'HT', 检测合同: 'JC', 维护保养合同: 'WB', 采购合同: 'CG', 分包合同: 'FK', 框架协议: 'KJ' };
 const PNAME: Record<string, string> = {
-  销售合同: '客户', 维护保养合同: '客户', 采购合同: '供应商', 分包合同: '分包商', 框架协议: '客户 / 供应商',
+  销售合同: '客户', 检测合同: '客户', 维护保养合同: '客户', 采购合同: '供应商', 分包合同: '分包商', 框架协议: '客户 / 供应商',
 };
 const CUS = CUSTOMERS.map((c) => `${c.id} ${c.name}`);
 const SUP = SUPPLIERS.filter((s) => !s.blacklist).map((s) => `${s.id} ${s.name}`);
+/** 采购合同相对方的候选集（模块级常量，选择器把它当 useMemo 依赖） */
+const PARTY_SUP = SUPPLIERS.filter((s) => !s.blacklist);
 const PARTIES: Record<string, string[]> = {
-  销售合同: CUS, 维护保养合同: CUS, 采购合同: SUP,
+  销售合同: CUS, 检测合同: CUS, 维护保养合同: CUS, 采购合同: SUP,
   分包合同: ['SUB-000007 云南××机电安装工程有限公司', 'SUB-000011 ××消防工程劳务有限公司'],
   框架协议: [CUS[0], SUP[0]],
 };
@@ -78,6 +86,11 @@ const APPROVAL: Record<string, { max: number; nodes: [string, string?][] }[]> = 
     { max: 2000000, nodes: [['部门负责人', '会签'], ['分管副总'], ['总经理']] },
     { max: Infinity, nodes: [['部门负责人', '会签'], ['分管副总'], ['总经理'], ['财务负责人', '会签']] },
   ],
+  检测合同: [
+    { max: 500000, nodes: [['部门负责人', '会签'], ['分管副总', '或签']] },
+    { max: 2000000, nodes: [['部门负责人', '会签'], ['分管副总'], ['总经理']] },
+    { max: Infinity, nodes: [['部门负责人', '会签'], ['分管副总'], ['总经理'], ['财务负责人', '会签']] },
+  ],
   维护保养合同: [
     { max: 1000000, nodes: [['部门负责人', '会签'], ['分管副总', '或签']] },
     { max: Infinity, nodes: [['部门负责人', '会签'], ['分管副总'], ['总经理']] },
@@ -95,6 +108,7 @@ const APPROVAL: Record<string, { max: number; nodes: [string, string?][] }[]> = 
 };
 const TIER_LABELS: Record<string, string[]> = {
   销售合同: ['<50万', '50–200万', '≥200万'],
+  检测合同: ['<50万', '50–200万', '≥200万'],
   维护保养合同: ['<100万', '≥100万'],
   采购合同: ['<30万', '30–100万', '≥100万'],
   分包合同: ['<100万', '≥100万'],
@@ -135,6 +149,13 @@ const OCR_INIT: OcrField[] = [
   { k: 'sign', l: '签约日期', v: '2026-09-18', c: 93 },
   { k: 'plan', l: '工期起止', v: '2026-09-20 ~ 2027-03-31', c: 82 },
   { k: 'term', l: '付款条款', v: '签订后7日内支付30%预付款，竣工验收后支付60%，质保期满支付10%', c: 91 },
+];
+
+/** OCR 校对分页（模拟 3 页）：P1 甲方信息 / P2 金额条款 / P3 签署页（项15） */
+const OCR_PAGES: { title: string; keys: string[] }[] = [
+  { title: '甲方（发包方）与工程概况', keys: ['name', 'party'] },
+  { title: '价款与履约约定', keys: ['amt', 'term', 'plan'] },
+  { title: '签署页', keys: ['sign'] },
 ];
 
 /** 可关联项目：排除已到终态（已结项 / 已关闭 / 作废）的项目 —— 数据源改为组件内读共享 store（见 projOpts） */
@@ -242,7 +263,7 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
   const projOpts = useMemo(
     () => getProjects()
       .filter((p) => !(PROJECT_TERMINAL as readonly string[]).includes(p.status))
-      .map((p) => ({ id: p.id, name: p.name, a04: p.id === 'XM000087' })),
+      .map((p) => ({ id: p.id, name: p.name, customer: p.customer, type: p.type, status: p.status, a04: p.id === 'XM000087' })),
     [tick, nav],
   );
 
@@ -252,10 +273,15 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
   const [srcBid, setSrcBid] = useState<string | null>(null);
   const [srcOpp, setSrcOpp] = useState<string | null>(null);
   const [srcRenew, setSrcRenew] = useState<string | null>(null);
+  const [srcExec, setSrcExec] = useState<string | null>(null);
+  const [srcSup, setSrcSup] = useState<{ contractId: string; kind: 'price' | 'service' } | null>(null);
 
   /* --- 向导状态 --- */
-  const [src, setSrc] = useState<Src>('manual');
-  const [route, setRoute] = useState<number[]>([0, 3, 4, 5]);
+  /* 默认选中排在首位的「OCR 识别」（卡片已按「越省事越靠前」重排）。
+     默认项必须跟推荐路径一致——否则会出现「默认选中末位卡片」的错位观感。
+     ⚠️ 改这里必须同步 resetAll() 里的 setSrc / setRoute。 */
+  const [src, setSrc] = useState<Src>('ocr');
+  const [route, setRoute] = useState<number[]>(SRC_META.ocr.r);
   const [step, setStep] = useState(0);
 
   /* --- Step1 状态 --- */
@@ -265,6 +291,7 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
   const [tries, setTries] = useState(3);
   const [ocr, setOcr] = useState<OcrField[]>(OCR_INIT);
   const [hot, setHot] = useState('');
+  const [ocrPage, setOcrPage] = useState(1);
   const [entCust, setEntCust] = useState('');
   const [tplVars, setTplVars] = useState({ a: '', b: '诺盾博达消防科技有限公司', p: '', m: '' });
   const [copySel, setCopySel] = useState('');
@@ -295,6 +322,16 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
       ? `已带入商机「${p.name}」· 预计金额 ¥${(p.amt || 0).toLocaleString('en-US')}；本合同为商机直签（未过报价 / 投标），签署后可在项目台账生成项目`
       : `已带入中标标的「${p.name}」· 中标金额 ¥${(p.amt || 0).toLocaleString('en-US')}；合同签署后可在项目台账生成项目`);
     setPendingContract(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nav]);
+
+  /* AI 助手快捷操作：助手在合同管理页点「OCR 识别创建合同」→ 跳本页并直接选好「OCR 识别」来源、
+     进到上传识别步。省掉「先选来源再点下一步」这两下 —— 用户点这个动作就是想传件。 */
+  useEffect(() => {
+    if (consumePageAction('contract-new') !== 'new-ocr') return;
+    setSrc('ocr');
+    setRoute(SRC_META.ocr.r);
+    setStep(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nav]);
 
@@ -355,6 +392,60 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
       s: TODAY, e: '', a: k.amt, r: `续签自 ${k.id} ${k.name}`,
     }]);
     toast(`已按原合同 ${k.id} 生成续签草稿 · 请核对期限与金额后提交`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nav]);
+
+  /**
+   * 框架执行单：从框架协议详情「＋ 新增执行单」跳转过来，按框架协议预填执行单草稿，
+   * 提交时落 parentId（挂框架协议）+ contractRole = supplement_service，与续签共用同一条落库通道。
+   */
+  useEffect(() => {
+    const pr = consumePendingExec();
+    if (!pr) return;
+    const k = getContracts().find((x) => x.id === pr.contractId);
+    if (!k) return;
+    setSrcExec(k.id);
+    setF((prev) => ({
+      ...prev,
+      name: `${k.name}执行单`,
+      type: `维护保养合同`,
+      party: partyOptOf(k.party),
+      amt: 0,
+      start: k.start,
+      end: k.end,
+      p1: k.start,
+      p2: k.end,
+      term: prev.term,
+    }));
+    setDtl([]);
+    toast(`正在为框架协议 ${k.id} 创建执行单 · 请填写执行金额与收款计划（单笔 ≥50 万须财务复核）`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nav]);
+
+    /**
+   * 补充协议：从合同详情变更区块「＋ 发起补充协议」跳转过来，按父合同预填草稿，
+   * 提交时落 parentId + contractRole = supplement_price / supplement_service，编号 = 父合同号 + S序号。
+   */
+  useEffect(() => {
+    const pr = consumePendingSupplement();
+    if (!pr) return;
+    const k = getContracts().find((x) => x.id === pr.contractId);
+    if (!k) return;
+    setSrcSup(pr);
+    setF((prev) => ({
+      ...prev,
+      name: `${k.name}${pr.kind === 'price' ? '价格调整补充协议' : '新增服务补充协议'}`,
+      type: k.type,
+      party: partyOptOf(k.party),
+      amt: 0,
+      start: k.start,
+      end: k.end,
+      p1: k.start,
+      p2: k.end,
+      term: prev.term,
+    }));
+    setDtl([]);
+    toast(`正在为合同 ${k.id} 创建${pr.kind === 'price' ? '价格调整' : '新增服务'}补充协议 · 请填写增量金额后提交`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nav]);
 
@@ -434,11 +525,14 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
   if (dtlSum > 0 && plnSum !== dtlSum) issues.push(['plan', `收款合计 ≠ 明细合计（差 ${fmt(gap)}），可一键补平`]);
   if (+f.ratm > 24) issues.push(['rat', `缺陷责任期 ${f.ratm} 个月超过 24 个月：请确认资金占用与回收风险`]);
   if (f.multi === '是' && plan.length === 0) issues.push(['plan', '已选择多年期维护保养：收款计划为空，建议按服务年度生成']);
-  if (src && src !== 'manual') issues.push(['name', `名称 / 相对方 / 金额等已由「${SRC_META[src].n}」带出，请确认`]);
+  /* 只在字段确实被来源带出后提示——来源处理步（step 0/1/2）字段还是空的，
+   此时说「已由 XX 带出」是不实提醒。默认来源为 OCR 时尤其明显（一进页面字段全空）。 */
+if (src && src !== 'manual' && step >= 3) issues.push(['name', `名称 / 相对方 / 金额等已由「${SRC_META[src].n}」带出，请确认`]);
   if (srcQuote) issues.push(['name', `本单由报价单 ${srcQuote} 转入，提交后将回写该报价单状态`]);
   if (srcBid) issues.push(['name', `本单由中标投标单 ${srcBid} 转入，中标依据将随合同存档`]);
   if (srcOpp) issues.push(['name', `本单由商机 ${srcOpp} 直签转入（未经过报价 / 投标），预计金额以商机为准`]);
   if (srcRenew) issues.push(['name', `本单为 ${srcRenew} 的续签合同，提交后原合同将标记「续签 → 新合同号」`]);
+  if (srcSup) issues.push(['name', `本单为 ${srcSup.contractId} 的补充协议（${srcSup.kind === 'price' ? '价格调整' : '新增服务'}），提交后挂载至父合同、不独立计入合同台账`]);
 
   const moreFilled = [
     !!f.term, !!f.pbr, !!f.pbm, !!f.war, !!f.rat, !!f.ratm, f.multi === '是', !!f.renew,
@@ -677,7 +771,9 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
       });
       return;
     }
-    const no = `${PREFIX[f.type]}-2026-021`;
+    const no = srcSup
+    ? `${srcSup.contractId}S${getContracts().filter((s) => s.parentId === srcSup.contractId && /S\d+$/.test(s.id)).length + 1}`
+    : `${PREFIX[f.type]}-2026-021`;
     setConfirm({
       title: '提交确认',
       ok: '确认提交',
@@ -718,8 +814,17 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
           ...(srcBid ? { bidId: srcBid } : {}),
           ...(srcOpp ? { oppId: srcOpp } : {}),
           ...(srcRenew ? { parentId: srcRenew } : {}),
+          ...(srcExec ? { parentId: srcExec, contractRole: 'supplement_service' as const } : {}),
+          ...(srcSup ? { parentId: srcSup.contractId, contractRole: (srcSup.kind === 'price' ? 'supplement_price' : 'supplement_service') } : {}),
         };
         addContract(newContract);
+        /* 合同提交审批 → 同步推送审批中心待办，形成与报价一致的正向闭环。
+           修复前只把合同自身置「待审批」、不生成审批单，导致「合同提交了审批，审批中心里查不到」。 */
+        pushApproval({
+          id: nextApprovalNo(), ap: '蓝峰', type: '合同审批', obj: newContract.name,
+          ref: `${no} ${f.type}`, amt: newContract.amt, time: `${TODAY} 14:00`,
+          status: '待审批', level: chain.label || '部门负责人', node: 0, reason: '', cc: ['李思敏'],
+        } as Parameters<typeof pushApproval>[0]);
         /* 续签回写：源合同记 renewedTo = 新合同号，形成「原合同 ⇄ 续签合同」双向链。
            源合同状态不在此时改「已续签」—— 续签合同仍处待审批，签约后才算真正续上。 */
         if (srcRenew) patchContract(srcRenew, { renewedTo: no });
@@ -738,8 +843,8 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
   };
 
   const resetAll = () => {
-    setSrc('manual'); setRoute([0, 3, 4, 5]); setStep(0);
-    setOcrRun(false); setOcrPct(0); setOcrDone(false); setTries(3); setOcr(OCR_INIT); setHot('');
+    setSrc('ocr'); setRoute(SRC_META.ocr.r); setStep(0);
+    setOcrRun(false); setOcrPct(0); setOcrDone(false); setTries(3); setOcr(OCR_INIT); setHot(''); setOcrPage(1);
     setEntCust(''); setTplVars({ a: '', b: '诺盾博达消防科技有限公司', p: '', m: '' });
     setCopySel(''); setPmode('exist'); setCal('inc'); setMore(false); setForce(false);
     setChk(SIX_CLAUSES.slice(0, 5));
@@ -763,8 +868,8 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
       <PageHead
         title="新建合同"
         badges={<><Tag tone="blue">五来源向导 · 共 {route.length} 步</Tag><Tag tone="gray">{src ? SRC_META[src].n : '未选择来源'}</Tag></>}
-        sub="合同创建统一入口：手工录入 / OCR 识别 / 标准模板 / 企业模板 / 复制历史（合同明细支持从报价单导入）"
-        actions={<Btn onClick={askReset}>重置向导</Btn>}
+        sub="合同创建统一入口：OCR 识别 / 复制历史合同 / 标准模板 / 企业模板 / 手工录入（合同明细支持从报价单导入）"
+        actions={<Btn kind="ghost" onClick={askReset} title="清空已填内容，重新开始向导">重置向导</Btn>}
       />
 
       {/* ② 步骤条 —— 只列「当前来源实际会走的步」（route），并按显示顺序连续编号 Step1..StepN。
@@ -801,20 +906,19 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
         <Card>
           <div className="nc-src-grid">
             {SRC_CARDS.map((s) => (
-              <button key={s.t} type="button" className={`nc-src-card${src === s.key ? ' is-on' : ''}`} title={s.d}
+              <button key={s.t} type="button" className={`nc-src-card${src === s.key ? ' is-on' : ''}${s.rec ? ' is-rec' : ''}`} title={s.d}
                 onClick={() => {
                   setSrc(s.key); setRoute(SRC_META[s.key!].r);
                   if (s.key === 'manual') { toast('已选择「手工录入」，直入「合同主体与工期」'); goStep(3); } else goStep(1);
                 }}>
+                {s.rec && <span className="nc-rec-badge">推荐</span>}
                 <div className="nc-src-ico"><Ico n={s.ico} size={22} /></div>
                 <h3>{s.t}</h3>
                 <p>{s.d}</p>
+                <p className="nc-src-scene"><Tag tone="green">{s.scene}</Tag></p>
                 <p className="nc-src-path">路径：{s.p}</p>
               </button>
             ))}
-          </div>
-          <div className="nc-pgfoot" style={{ marginTop: 12 }}>
-            选择来源后进入分叉：OCR → 上传 + 校对；模板 → 预览 + 变量；复制 → 差异 + 确认；手工 → 直入「合同主体与工期」。<b>创建方式选定后锁定只读；步骤条按所选来源重排，只列这条路径实际要走的步。</b>
           </div>
         </Card>
       )}
@@ -852,10 +956,7 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
           {src === 'ent' && (
             <div className="nc-form-grid">
               <Field label="先选客户" req note="企业模板按客户授权隔离，仅展示该客户可见的专属模板">
-                <select className="nc-input" value={entCust} onChange={(e) => setEntCust(e.target.value)}>
-                  <option value="">请选择客户</option>
-                  {CUSTOMERS.slice(0, 6).map((c) => <option key={c.id} value={c.id}>{c.id} {c.name}</option>)}
-                </select>
+                <CustomerPicker value={entCust} onChange={setEntCust} />
               </Field>
               <Field label="选择模板" req>
                 <select className="nc-input" disabled={!entCust}>
@@ -952,44 +1053,55 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
       {step === 2 && src === 'ocr' && (
         <Card hd="OCR 校对（左图右字段）" extra={<Btn size="sm" disabled={tries <= 0} title={tries > 0 ? `每日重新识别上限 3 次，剩余 ${tries} 次` : '重新识别次数已用完（每日上限 3 次），请人工校对'} onClick={reOcr}>重新识别（剩 {tries} 次）</Btn>}>
           <div className="nc-listhint">
-            <span>校对说明<Tip w={360} text="置信度 <90% 黄底提示；点击右侧字段可高亮左侧识别框；重新识别 ≤3 次（按单据计次）。" /></span>
+            <span>校对说明<Tip w={360} text="置信度 <90% 黄底提示；点击右侧字段可高亮左侧识别框；重新识别 ≤3 次（按单据计次）。识别结果按页分组，可翻页逐页核对，选错图可重新指定该页图片。" /></span>
+          </div>
+          {/* 项16：跨页一致性校验提示（mock：检测到 P1 相对方与 P3 盖章抬头不一致） */}
+          <div style={{ marginBottom: 12 }}>
+          <Banner tone="warn">
+            <Ico n="warning" size={14} /> <b>跨页信息一致性校验：</b>
+            检测到 P1「相对方」与 P3 签署页盖章抬头不一致（「昆明万达广场商业管理有限公司」 vs 「昆明万达广场商业管理公司」），可能上传时选错图片页，请逐页核对或点「重新选择本页图片」。
+          </Banner>
           </div>
           <div className="nc-ocr-grid">
             <div className="nc-ocr-scan">
-              <div className="nc-ocr-scan-hd"><span>合同扫描件 · P1（模拟）</span><span>ht-scan-demo.pdf</span></div>
+              <div className="nc-ocr-scan-hd"><span>合同扫描件 · P{ocrPage}（模拟）</span><span>ht-scan-demo.pdf</span></div>
               <div className="nc-ocr-scan-bd">
-                <div className="nc-ocr-sec">甲方（发包方）与工程概况</div>
-                <div className="nc-ocr-row"><span className="nc-ocr-line" style={{ width: '62%' }} /></div>
-                <div className="nc-ocr-row"><span className="nc-ocr-line" style={{ width: '40%' }} /></div>
-                {ocr.map((x, i) => {
+                <div className="nc-ocr-sec">{OCR_PAGES[ocrPage - 1].title}</div>
+                {OCR_PAGES[ocrPage - 1].keys.map((k) => {
+                  const x = ocr.find((f) => f.k === k)!;
                   const low = x.c < 90;
                   return (
-                    <React.Fragment key={x.k}>
-                      {i === 2 && <div className="nc-ocr-sec">价款与履约约定</div>}
-                      <div className="nc-ocr-row">
-                        <div className={`nc-ocr-box${low ? ' is-low' : ''}${hot === x.k ? ' is-hot' : ''}`}
-                          style={{ width: [70, 56, 46, 52, 64, 100][i] + '%' }}
-                          onClick={() => setHot(x.k)} {...pressProps(() => setHot(x.k))}>
-                          <span className="nc-ocr-line" />
-                        </div>
+                    <div className="nc-ocr-row" key={k}>
+                      <div className={`nc-ocr-box${low ? ' is-low' : ''}${hot === k ? ' is-hot' : ''}`}
+                        style={{ width: [70, 56, 46, 52, 64, 100][ocr.indexOf(x)] + '%' }}
+                        onClick={() => setHot(k)} {...pressProps(() => setHot(k))}>
+                        <span className="nc-ocr-line" />
                       </div>
-                    </React.Fragment>
+                    </div>
                   );
                 })}
               </div>
             </div>
             <div>
               <div className="nc-ocr-fields">
-                {ocr.map((x) => {
+                {OCR_PAGES[ocrPage - 1].keys.map((k) => {
+                  const x = ocr.find((f) => f.k === k)!;
                   const low = x.c < 90;
                   return (
-                    <div key={x.k} className={`nc-ocr-field${low ? ' is-low' : ''}${hot === x.k ? ' is-hot' : ''}`} onClick={() => setHot(x.k)} {...pressProps(() => setHot(x.k))}>
+                    <div key={k} className={`nc-ocr-field${low ? ' is-low' : ''}${hot === k ? ' is-hot' : ''}`} onClick={() => setHot(k)} {...pressProps(() => setHot(k))}>
                       <span className="nc-ocr-fl">{x.l}</span>
                       <Tag tone={low ? 'orange' : 'green'}>{low ? '低置信' : '置信'} {x.c}%</Tag>
                       <input className="nc-ocr-val" value={x.v} onChange={(e) => setOcr((p) => p.map((o) => (o.k === x.k ? { ...o, v: e.target.value } : o)))} />
                     </div>
                   );
                 })}
+              </div>
+              {/* 项15 翻页 + 项16 重新指定本页图片 */}
+              <div className="nc-ocr-pager">
+                <Btn size="sm" disabled={ocrPage <= 1} onClick={() => setOcrPage((p) => Math.max(1, p - 1))}>‹ 上一页</Btn>
+                <span className="nc-cell-sub">第 {ocrPage} / {OCR_PAGES.length} 页 · {OCR_PAGES[ocrPage - 1].title}</span>
+                <Btn size="sm" disabled={ocrPage >= OCR_PAGES.length} onClick={() => setOcrPage((p) => Math.min(OCR_PAGES.length, p + 1))}>下一页 ›</Btn>
+                <Btn size="sm" onClick={() => toast(`请重新上传 P${ocrPage} 扫描图片以替换本页识别来源`)} title="选错图时可重新指定该页图片">↺ 重新选择本页图片</Btn>
               </div>
               <div className="nc-cell-sub" style={{ marginTop: 12 }}>确认后 OCR 值带入「合同主体与工期」（可继续修改）</div>
             </div>
@@ -1004,7 +1116,7 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
           <Card hd="基本信息">
             <div className="nc-form-grid">
               <Field label="合同编号" note={`前缀由合同类型决定，当前前缀：${PREFIX[f.type]}（提交时生成 · 不可改）`}>
-                <input className="nc-input" disabled placeholder="提交时系统生成（HT/WB/CG/FK/KJ 前缀 · 不可改）" />
+                <input className="nc-input" disabled placeholder="提交时系统生成（HT/JC/WB/CG/FK/KJ 前缀 · 不可改）" />
               </Field>
               <Field label="合同类型" req note="决定前缀 · 相对方控件 · 审批路由">
                 <select className="nc-input" value={f.type} onChange={(e) => {
@@ -1022,10 +1134,16 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
               <Field label="创建方式"><input className="nc-input" value={`${src ? SRC_META[src].n : '—'}（选择来源后锁定只读）`} readOnly /></Field>
               <Field label={`相对方（${PNAME[f.type]}）`} req err={showErr('party')} note={`${f.type} → ${PNAME[f.type]}选择器（强校验，校验后可新建${PNAME[f.type]}）`}>
                 <Sec id="party">
-                  <select className="nc-input" value={f.party} onChange={(e) => set('party', e.target.value)}>
-                    <option value="">请选择{PNAME[f.type]}（强校验）</option>
-                    {PARTIES[f.type].map((p) => <option key={p}>{p}</option>)}
-                  </select>
+                  {f.type === '采购合同' ? (
+                    /* 采购合同的相对方 = 供应商主数据（黑名单不参与）；值形如「GYS000012 云南××消防设备有限公司」 */
+                    <SupplierPicker value={f.party} onChange={(v) => set('party', v)} emit="label" scope="all"
+                      options={PARTY_SUP} placeholder="请选择供应商（强校验）" />
+                  ) : (
+                    <select className="nc-input" value={f.party} onChange={(e) => set('party', e.target.value)}>
+                      <option value="">请选择{PNAME[f.type]}（强校验）</option>
+                      {PARTIES[f.type].map((p) => <option key={p}>{p}</option>)}
+                    </select>
+                  )}
                 </Sec>
               </Field>
               <Field label="负责人">
@@ -1033,8 +1151,8 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
                   {OWNERS.map((o) => <option key={o}>{o}</option>)}
                 </select>
               </Field>
-              <Field label="实施地点">
-                <input className="nc-input" value={f.addr} onChange={(e) => set('addr', e.target.value)} placeholder="如：××中心大厦 B2 消防泵房" />
+              <Field label="实施地点" span={2} note="点选地图定位或手动输入；点选后自动带出 mock 经纬度">
+                <MapPicker value={f.addr} onChange={(addr) => set('addr', addr)} placeholder="如：××中心大厦 B2 消防泵房" />
               </Field>
             </div>
 
@@ -1053,11 +1171,8 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
                 </Field>
                 {pmode === 'exist' && (
                   <Field label="关联项目" span={2} err={showErr('proj')}>
-                    <select className="nc-input" value={f.proj} onChange={(e) => set('proj', e.target.value)}>
-                      <option value="">请选择项目</option>
-                      {projOpts.map((p) => <option key={p.id} value={p.id}>{p.id} {p.name}</option>)}
-                    </select>
-                    <div className="nc-field-note"><Ico n="bolt" size={16} />A-04：提交时检测所选项目是否存在未归并收支（演示：XM000087 产业园一期消防工程 将被硬拦截）</div>
+                    <ProjectPicker value={f.proj} onChange={(id) => set('proj', id)} options={projOpts} />
+                    <div className="nc-field-note"><Ico n="bolt" size={16} />A-04：提交时检测所选项目是否存在未归并收支</div>
                   </Field>
                 )}
                 {pmode === 'draft' && (
@@ -1430,17 +1545,9 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
         </Card>
       )}
 
-      {/* ⑥ 底部规则行 */}
-      <div className="nc-pgfoot">
-        编号规则：HT 销售 / WB 维护保养 / CG 采购 / FK 分包 / KJ 框架（提交时生成 · 不可改）｜审批路由：合同类型 × 金额档矩阵（自动计算）｜OCR 重识别 ≤3 次｜附件：单份 ≤50MB · 每类 ≤5 份 · DWG/DXF 仅「其他」类｜A-04：提交时检测「选择已有」项目未归并收支（硬拦截）｜草稿项目 PRJ-DRAFT-xxx 签约后自动转「待启动」
-      </div>
-
       {/* 吸底操作栏 */}
       {!okInfo && (
         <div className="nc-navbar">
-          <button type="button" className={`nc-vpill ${errors.length ? 'is-bad' : 'is-ok'}`} onClick={locateFirstErr}>
-            {errors.length ? `${errors.length} 项待完善` : ' 校验通过'}
-          </button>
           <div className="nc-nav-acts">
             <Btn onClick={() => setConfirm({
               title: '放弃编辑？', danger: true, ok: '仍要取消',
@@ -1448,6 +1555,7 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
               cb: () => { resetAll(); go('contract'); },
             })}>取消</Btn>
             <Btn disabled={step === 0} title={step === 0 ? '已在第一步，无上一步' : undefined} onClick={goBack}>← 上一步</Btn>
+            <span style={{ marginLeft: 16 }} />
             <Btn onClick={() => toast('草稿已保存：HT-DRAFT-001')}>保存草稿</Btn>
             <Btn kind="primary" onClick={advance}>{nextLabel}</Btn>
           </div>
@@ -1464,7 +1572,7 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
 
       {/* 从报价单导入合同明细 */}
       <Modal
-        open={quoteImport} onClose={() => setQuoteImport(false)} width={640}
+        open={quoteImport} onClose={() => setQuoteImport(false)} size="L"
         title="从报价单导入合同明细"
         foot={<><Btn onClick={() => setQuoteImport(false)}>取消</Btn><Btn kind="primary" disabled={!qSel.length} onClick={importQuotes}>导入选中（{qSel.length}）</Btn></>}>
         <div className="nc-form-grid" style={{ marginBottom: 10 }}>

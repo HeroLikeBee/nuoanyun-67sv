@@ -48,7 +48,7 @@ function IdMarkFlow({ C }: { C: PjCtx }) {
         <thead><tr>
           <th style={{ width: 150 }}>物料</th><th style={{ width: 240 }}>号段（14 位明码）</th>
           <th style={{ width: 70, textAlign: 'right' }}>数量</th><th>安装部位 / 点位</th>
-          <th style={{ width: 110 }}>回写日期</th><th style={{ width: 90 }}>状态</th>
+          <th style={{ width: 110 }} className="is-num">回写日期</th><th style={{ width: 90 }}>状态</th>
         </tr></thead>
         <tbody>
           {rows.map((f) => {
@@ -59,7 +59,7 @@ function IdMarkFlow({ C }: { C: PjCtx }) {
                 <td className="num nc-tiny">{fmtMark(f.from)} ~ {fmtMark(f.to)}</td>
                 <td className="is-num num">{f.qty}</td>
                 <td className="nc-tiny">{f.part}</td>
-                <td className="num">{f.date}</td>
+                <td className="is-num num">{f.date}</td>
                 <td><Tag tone={f.status === '已报验' ? 'green' : f.status === '已安装' ? 'blue' : 'orange'}>{f.status}</Tag></td>
               </tr>
             );
@@ -76,7 +76,7 @@ function IdMarkFlow({ C }: { C: PjCtx }) {
   );
 }
 
-/** 材料进场报验：系统按材料主数据的「进场报验要求」自动校验附件，缺件硬拦截 */
+/** 材料进场报验：系统按物料主数据的「进场报验要求」自动校验附件，缺件硬拦截 */
 function Arrival({ C }: { C: PjCtx }) {
   const lack = C.arrivals.filter((a) => a.have.length < a.need.length);
   if (C.arrivals.length === 0) {
@@ -92,14 +92,14 @@ function Arrival({ C }: { C: PjCtx }) {
       title={<><Ico n="check" size={16} /> {C.scene.arrivalTitle}</>}
       extra={<>
         <span className="nc-cell-sub">{C.arrivals.length} 批 · 缺件退回 {lack.length} 批</span>
-        <Tip w={400} text="系统按材料主数据自动校验收货附件（合格证 / 检测报告 / 3C 证书），属强制性认证目录的产品还会校验「B 签清单」；缺件硬拦截，不允许先用于施工后补件。" />
+        <Tip w={400} text="系统按物料主数据自动校验收货附件（合格证 / 检测报告 / 3C 证书），属强制性认证目录的产品还会校验「B 签清单」；缺件硬拦截，不允许先用于施工后补件。" />
         <Btn size="sm" kind="primary" onClick={() => C.openM('upload')}>＋ 新增报验</Btn>
       </>}
     >
       <table className="nc-tbl" style={{ minWidth: 960 }}>
         <thead><tr>
           <th style={{ width: 130 }}>报验单号</th><th style={{ width: 90 }}>批次</th>
-          <th style={{ width: 110 }}>进场日期</th><th>材料 / 设备</th>
+          <th style={{ width: 110 }} className="is-num">进场日期</th><th>物料</th>
           <th style={{ width: 230 }}>报验要求核验</th><th style={{ width: 110 }}>监理签认</th>
           <th style={{ width: 110 }}>操作</th>
         </tr></thead>
@@ -110,7 +110,7 @@ function Arrival({ C }: { C: PjCtx }) {
               <tr key={a.no} className={miss.length ? 'is-warn-row' : ''}>
                 <td><IdCell>{a.no}</IdCell></td>
                 <td>{a.batch}</td>
-                <td className="num">{a.date}</td>
+                <td className="is-num num">{a.date}</td>
                 <td>{a.items}</td>
                 <td>
                   {a.need.map((n) => (
@@ -150,14 +150,14 @@ function HiddenWorks({ C }: { C: PjCtx }) {
     >
       <table className="nc-tbl" style={{ minWidth: 820 }}>
         <thead><tr>
-          <th style={{ width: 230 }}>部位</th><th style={{ width: 110 }}>验收日期</th>
+          <th style={{ width: 230 }}>部位</th><th style={{ width: 110 }} className="is-num">验收日期</th>
           <th>验收内容</th><th style={{ width: 90 }}>影像</th><th style={{ width: 160 }}>签认</th>
         </tr></thead>
         <tbody>
           {C.hidden.map((h) => (
             <tr key={h.part}>
               <td><b>{h.part}</b></td>
-              <td className="num">{h.date}</td>
+              <td className="is-num num">{h.date}</td>
               <td className="nc-cell-sub">{h.content}</td>
               <td className="num">{h.photos} 张</td>
               <td><Tag tone="green">{h.sign}</Tag></td>
@@ -253,7 +253,7 @@ function Acceptance({ C }: { C: PjCtx }) {
                   <table className="nc-tbl" style={{ minWidth: 760 }}>
                     <thead><tr>
                       <th>整改项</th><th style={{ width: 150 }}>部位</th>
-                      <th style={{ width: 110 }}>检查日期</th><th style={{ width: 110 }}>复验日期</th>
+                      <th style={{ width: 110 }} className="is-num">检查日期</th><th style={{ width: 110 }} className="is-num">复验日期</th>
                       <th style={{ width: 100 }}>责任人</th><th style={{ width: 100 }}>闭环</th>
                     </tr></thead>
                     <tbody>
@@ -261,8 +261,8 @@ function Acceptance({ C }: { C: PjCtx }) {
                         <tr key={i.n}>
                           <td>{i.n}</td>
                           <td className="nc-cell-sub">{i.pos}</td>
-                          <td className="num">{r.check}</td>
-                          <td className="num">{r.recheck}</td>
+                          <td className="is-num num">{r.check}</td>
+                          <td className="is-num num">{r.recheck}</td>
                           <td>{r.owner}</td>
                           <td><Tag tone={i.done ? 'green' : 'orange'}>{i.done ? '已闭环' : '待整改'}</Tag></td>
                         </tr>
@@ -307,7 +307,7 @@ function Safety({ C }: { C: PjCtx }) {
       <table className="nc-tbl" style={{ minWidth: 700 }}>
         <thead><tr>
           <th>检查项</th><th style={{ width: 130 }}>结果</th>
-          <th style={{ width: 100 }}>检查人</th><th style={{ width: 110 }}>检查日期</th>
+          <th style={{ width: 100 }}>检查人</th><th style={{ width: 110 }} className="is-num">检查日期</th>
         </tr></thead>
         <tbody>
           {C.safeRows.map((s) => (
@@ -315,7 +315,7 @@ function Safety({ C }: { C: PjCtx }) {
               <td>{s.item}</td>
               <td><Tag tone={s.res === '合格' ? 'green' : 'orange'}>{s.res}</Tag></td>
               <td>{s.by}</td>
-              <td className="num">{s.date}</td>
+              <td className="is-num num">{s.date}</td>
             </tr>
           ))}
         </tbody>

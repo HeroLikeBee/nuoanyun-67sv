@@ -15,17 +15,17 @@
 // ⚠️ 合同额口径（规格 §6.1）：contractAmt = **关联销售合同汇总**，无合同时为 0；
 //    预计额另存 expectAmt，避免把「预计」当成「已签」污染回款比例与亏损判定。
 // 施工型项目建成后，进入详情页会提示「套用里程碑模板」。
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import {
-  Banner, Btn, Card, Check, Field, Money, PageHead, Tag, Tip, useToast, pressProps,
+  Banner, Btn, Card, Check, ContractPicker, CustomerPicker, Field, Money, PageHead, Tag, Tip, useToast, pressProps,
 } from '../components/ui';
 import {
-  CERTS, CUSTOMERS, DEPT_STAFF, PROJECT_SOURCES, PROJ_TYPES, TODAY, addDays, fmt, fmtAmt,
+  CUSTOMERS, DEPT_STAFF, PROJECT_SOURCES, PROJ_TYPES, TODAY, addDays, fmt, fmtAmt,
   isContractClosed, normContractStatus, occCount, projectSourceOfContract,
 } from '../components/data';
 import type { Project } from '../components/data';
 import {
-  addProject, consumePendingProject, getBids, getContracts, getPendingProject, getProjects, getQuotes, patchContract,
+  addProject, consumePendingProject, getBids, getCerts, getContracts, getPendingProject, getProjects, getQuotes, patchContract, subscribeStore,
   reassignCertsToProject,
 } from '../components/store';
 import { Ico } from '../components/icons';
@@ -49,6 +49,8 @@ const certReqOf = (type: string) => (type === '维护保养'
   : ['消防设施工程专业承包资质', '注册建造师（机电）+ B 证（有效且无在建）', '安全生产许可证']);
 
 export default function ProjectNewPage({ go, role, nav }: { go: (p: string) => void; role: string; nav?: number }) {
+  /* 证书读**跨页 store**：证书管理页收回 / 借出后，项目经理资格校验即时按最新占用情况判定 */
+  const certs = useSyncExternalStore(subscribeStore, getCerts, getCerts);
   const toast = useToast();
 
   /* ---------- 入口判定（三类，共用一个表单） ---------- */
@@ -146,7 +148,7 @@ export default function ProjectNewPage({ go, role, nav }: { go: (p: string) => v
   const pmCheck = useMemo(() => {
     if (!pm) return null;
     if (ptype === '维护保养') {
-      const cert = CERTS.find((c) => c.subType === '注册消防工程师' && c.holder === pm);
+      const cert = certs.find((c) => c.subType === '注册消防工程师' && c.holder === pm);
       if (!cert) return { pass: false, label: '注册消防工程师证', note: `${pm} 名下无注册消防工程师证` };
       const used = occCount(cert.id);
       const ok = cert.validTo >= TODAY && used === 0;
@@ -156,7 +158,7 @@ export default function ProjectNewPage({ go, role, nav }: { go: (p: string) => v
           : `${cert.id} ${cert.validTo < TODAY ? `已于 ${cert.validTo} 过期` : `正被 ${used} 个项目占用`}`,
       };
     }
-    const b = CERTS.find((c) => (c as { isBuilder?: boolean }).isBuilder && c.holder === pm);
+    const b = certs.find((c) => (c as { isBuilder?: boolean }).isBuilder && c.holder === pm);
     if (!b) return { pass: false, label: '建造师三要素', note: `${pm} 名下无注册建造师证，工程施工类不可担任项目经理` };
     const okValid = b.validTo >= TODAY;
     const okB = !!(b as { hasB?: boolean }).hasB && ((b as { bValidTo?: string }).bValidTo || '') >= TODAY;
@@ -166,7 +168,7 @@ export default function ProjectNewPage({ go, role, nav }: { go: (p: string) => v
       pass: !miss.length, label: '建造师三要素',
       note: miss.length ? `${b.id}：${miss.join(' / ')}，三要素未齐备` : `${b.id} 建造师证 + B 证有效，且无在建项目`,
     };
-  }, [pm, ptype]);
+  }, [pm, ptype, certs]);
 
   /* ---------- 保存 → 待启动 ---------- */
   const save = () => {
@@ -353,10 +355,7 @@ export default function ProjectNewPage({ go, role, nav }: { go: (p: string) => v
             {(entryA || entryBid || entryOpp)
               ? <input className="nc-input" readOnly value={customer} />
               : (
-                <select className="nc-input" value={customer} onChange={(e) => { setCustomer(e.target.value); setContractId(''); }}>
-                  <option value="">请选择客户</option>
-                  {CUSTOMERS.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
-                </select>
+                <CustomerPicker value={customer} onChange={(v) => { setCustomer(v); setContractId(''); }} emit="name" />
               )}
           </Field>
           <Field label="项目类型" req>
@@ -401,10 +400,8 @@ export default function ProjectNewPage({ go, role, nav }: { go: (p: string) => v
             {entryA
               ? <input className="nc-input" readOnly value={`${contractId} · ${srcContract?.name || ''}`} />
               : (
-                <select className="nc-input" value={contractId} onChange={(e) => setContractId(e.target.value)}>
-                  <option value="">暂不关联（后续在「关联合同」Tab 补充）</option>
-                  {ctOptions.map((c) => <option key={c.id} value={c.id}>{c.id} · {c.name} · {fmt(c.amt)}</option>)}
-                </select>
+                <ContractPicker value={contractId} onChange={setContractId} options={ctOptions} scope="all"
+                  clearLabel="暂不关联（后续在「关联合同」Tab 补充）" />
               )}
           </Field>
         </div>

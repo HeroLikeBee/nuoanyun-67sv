@@ -3,12 +3,13 @@
 // 硬规则：税率口径公式写死 · 区域上浮 0~30 越界拦截且联动顶部卡与单方造价 · 升版必填变更原因 · 版本对比含「不变/已删除/新增」性质
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Btn, Banner, Card, EntityLink, KvGrid, Modal, Money, PageHead, Tag, Timeline, useToast, Code,
+  Btn, Banner, Card, EntityLink, KvGrid, Modal, Money, Tag, Timeline, useToast, Code,
 } from '../components/ui';
 import { RECIPES, fmt, lineMarginBelow, marginGuardOf, marginGuardText, verNo } from '../components/data';
 import type { QuoteVersion } from '../components/data';
 import { getApprovals, getBizStatus, getFocus, setFocus, getProjects, getQuotes, subscribeStore } from '../components/store';
 import { DiffTable, prevOf, sortVers } from '../components/quoteDiff';
+import { ExportButton, ExportDialog, useExport, getUserName, type ExportField } from '../components/export';
 
 /* G3：原 const Q = QUOTES[0] 硬编码索引 0 —— 从任何入口进入都只看 BJ000011。
    改为组件内读取聚焦 ID（上游页面跳转前写入 store），并以 nav 为依赖重新解析，
@@ -46,9 +47,9 @@ const REF = [
 ];
 
 /**
- * 该物料所属套件的「当前」配方版本（M8）。
- * 明细行只记了「按 V1.2 计价」，要提示「当前 V1.3」需反查套件配方；
- * 两者不一致即说明配方在上游升过版，本单成本口径需复核。
+ * 该物料所属套件的「当前」配置版本（M8）。
+ * 明细行只记了「按 V1.2 计价」，要提示「当前 V1.3」需反查套件配置；
+ * 两者不一致即说明配置在上游升过版，本单成本口径需复核。
  */
 const kitCurVer = (code: string): string | undefined => {
   for (const key of Object.keys(RECIPES)) {
@@ -95,14 +96,14 @@ export default function QuoteDetailPage({ go, role, nav }: { go: (p: string) => 
     const stored = (Q as any).lines as { matId?: string; name: string; spec?: string; unit: string; qty: number; price: number; recipeVer?: string; catId?: string; markup?: number; baseMarkup?: number; basis?: string }[] | undefined;
     if (stored && stored.length) {
       return stored.map((l) => ({
-        bt: l.matId ? '材料/设备（从物料库选择）' : '安装工程',
+        bt: l.matId ? '物料（从物料库选择）' : '安装工程',
         name: l.spec ? `${l.name}（${l.spec}）` : l.name,
         unit: l.unit, qty: l.qty, price: l.price, w: 0,
         /* 低于目录标准毛利的行要在明细里就地说明（4.6），记账口径取自 data.ts */
         below: lineMarginBelow({ catId: l.catId ?? '', markup: l.markup ?? 0, baseMarkup: l.baseMarkup, basis: l.basis }),
-        /** 配方版本快照（M8）：该行来自套件配方时记下当时的版本号 */
+        /** 配置版本快照（M8）：该行来自套件配置时记下当时的版本号 */
         recipeVer: l.recipeVer,
-        /** 该物料所属套件的当前配方版本（用于提示「按 V1.2 计价 · 当前 V1.3」） */
+        /** 该物料所属套件的当前配置版本（用于提示「按 V1.2 计价 · 当前 V1.3」） */
         curVer: l.matId ? kitCurVer(l.matId) : undefined,
       }));
     }
@@ -164,17 +165,53 @@ export default function QuoteDetailPage({ go, role, nav }: { go: (p: string) => 
       ? '偏离幅度超出 ±20%，需重点说明定价依据后再送审。'
       : '偏离幅度处于 ±10%~20%，建议复核定价依据。';
 
+  /* 统一导出：单单导出当前报价单（mode=single），金额 / 毛利为敏感字段 */
+  const exportFields: ExportField[] = [
+    { key: 'id', label: '报价编号' },
+    { key: 'customer', label: '客户' },
+    { key: 'name', label: '项目名称' },
+    { key: 'taxMode', label: '计价方式' },
+    { key: 'items', label: '明细行数' },
+    { key: 'net', label: '不含税金额', sensitive: true },
+    { key: 'tax', label: '税额' },
+    { key: 'total', label: '含税金额', sensitive: true },
+    { key: 'markup', label: '毛利', sensitive: true },
+    { key: 'status', label: '状态' },
+  ];
+  const exportApi = useExport({
+    mode: 'single', pageKey: 'quote-detail', pageName: '报价单',
+    fields: exportFields, defaultFieldKeys: exportFields.map((f) => f.key),
+    totalCount: 1, filteredCount: 1, selectedCount: 0,
+    previewRows: Q ? [Q] : [],
+    userName: getUserName(role),
+    onExport: () => {},
+  });
+
   return (
     <>
-      <PageHead
-        title={<span className="nc-mono-lg">{Q.id}</span>}
-        badges={<><Tag tone="blue">{Q.ver} 当前版本</Tag><Tag tone="blue">{Q_ST}</Tag><Tag tone="orange">{t.mode} {t.rate}%</Tag></>}
-        sub={`${Q.name} · ${Q.customer} · 负责人 ${Q.owner}`}
-        actions={<>
+      <div className="nc-crumbs">
+        <a className="nc-link" onClick={() => go('quote')}>报价台账</a>
+        <span className="nc-crumbs-sep">/</span>
+        <span>{Q.id}</span>
+      </div>
+      <div className="nc-d2-head">
+        <div className="nc-d2-titlerow">
+          <span className="nc-d2-id">{Q.id}</span>
+          <Tag tone="blue">{Q.ver} 当前版本</Tag>
+          <Tag tone="blue">{Q_ST}</Tag>
+          <span className="spacer" />
           <Btn onClick={() => go('quote')}>← 返回台账</Btn>
+          <ExportButton onClick={exportApi.trigger} />
           <Btn kind="primary" onClick={() => { setFocus('quote-edit', Q.id); go('quote-edit'); }}>编辑报价</Btn>
-        </>}
-      />
+        </div>
+        <div className="nc-d2-name">{Q.name}</div>
+        <div className="nc-d2-sub">
+          <span>{Q.customer}</span>
+          <span>负责人 {Q.owner}</span>
+          <span>{t.mode} {t.rate}%</span>
+          <span>报价后 30 天</span>
+        </div>
+      </div>
 
       {/* ---------- 顶部派生卡（随税率 / 上浮实时重算） ----------
           单方造价不在此处重复：它的唯一出处是下方「历史同类项目价格参照」的「本单」行，
@@ -192,7 +229,7 @@ export default function QuoteDetailPage({ go, role, nav }: { go: (p: string) => 
         </div>
         <div className="nc-tile">
           <div className="nc-tile-label">区域上浮</div>
-          <div className="nc-tile-value num" style={{ color: 'var(--c-primary)' }}>+{uplift}%</div>
+          <div className="nc-tile-value num">+{uplift}%</div>
         </div>
       </div>
 
@@ -206,10 +243,10 @@ export default function QuoteDetailPage({ go, role, nav }: { go: (p: string) => 
             { k: '行业', v: Q.base },
             { k: '项目面积', v: <span className="num">{AREA.toLocaleString('en-US')} ㎡</span> },
             { k: '提交人 / 日期', v: `${Q.owner} · ${Q.date}` },
-            { k: '税率口径', v: <b>{Q.taxMode} {Q.taxRate}%（税额按「{Q.taxMode === '含税' ? '总额×税率÷(100+税率)' : '总额×税率÷100'}」计算）</b> },
+            { k: '税率口径', v: <b>{Q.taxMode} {Q.taxRate}%</b> },
             { k: '有效期', v: `报价后 30 天（至 2026-10-12）` },
             { k: '关联商机', v: Q.opp ? <EntityLink target="opp" id={Q.opp} go={go} title="下钻到商机详情">{Q.opp}</EntityLink> : <span className="nc-cell-sub">—</span> },
-            { k: '整体浮率', v: <b className={`num${Q.markup >= 30 ? ' is-red' : ''}`}>{Q.markup}%</b> },
+            { k: '整体浮率', v: <b className={`num${Q.markup < 15 ? ' is-red' : ''}`} title="浮率 <15% 视为低毛利预警，触发审批">{Q.markup}%</b> },
             { k: '低于标准毛利', v: <span title={marginGuardText(guard)}>{guard.rows.length
               ? <Tag tone={guard.level === '—' ? 'gold' : 'red'}>{`低 ${guard.gap.toFixed(1)} 个百分点${guard.level === '—' ? '' : ` · ${guard.level}特批`}`}</Tag>
               : <span className="nc-cell-sub">各明细行均未低于目录默认毛利</span>} </span> },
@@ -238,19 +275,17 @@ export default function QuoteDetailPage({ go, role, nav }: { go: (p: string) => 
                 <tr key={`${i}-${l.name}`}>
                   <td><Tag tone="gray">{l.bt}</Tag></td>
                   <td>
-                    {l.name}
-                    {/* M8：配方版本快照 —— 上游配方升版后此处给出「当前 Vx」提示，提醒复核成本口径 */}
-                    {l.recipeVer && (
-                      <div className="nc-cell-sub">
-                        按 {l.recipeVer} 配方计价
-                        {l.curVer && l.curVer !== l.recipeVer ? ` · 套件当前 ${l.curVer}，成本口径需复核` : ''}
-                      </div>
-                    )}
-                    {l.below > 0 && (
-                      <div className="nc-cell-sub" style={{ color: 'var(--c-warning-deep)' }}>
-                        低于该目录默认毛利 {l.below.toFixed(1)} 个百分点
-                      </div>
-                    )}
+                    {/* 补充提示改 Tag 与名称同行，不再叠 nc-cell-sub 小字行 */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      <span>{l.name}</span>
+                      {/* M8：配置版本快照 —— 上游配置升版后给「配置已升版」Tag，提醒复核成本口径 */}
+                      {l.recipeVer && l.curVer && l.curVer !== l.recipeVer && (
+                        <span title={`按 ${l.recipeVer} 配置计价，套件当前 ${l.curVer}，成本口径需复核`}><Tag tone="gold">配置已升版</Tag></span>
+                      )}
+                      {l.below > 0 && (
+                        <span title={`低于该目录默认毛利 ${l.below.toFixed(1)} 个百分点`}><Tag tone="orange">低 {l.below.toFixed(1)} 个百分点</Tag></span>
+                      )}
+                    </div>
                   </td>
                   <td className="is-num">{l.qty.toLocaleString('en-US')} {l.unit}</td>
                   <td className="is-num"><Money v={l.price} role={role} /></td>
@@ -336,7 +371,7 @@ export default function QuoteDetailPage({ go, role, nav }: { go: (p: string) => 
       {/* 流转记录：按审批单 ref 命中本单派生（不再写死昆明万达的 5 行文案） */}
       <Card hd="流转记录" extra={
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-          <span className="nc-cell-sub">按审批单留痕自动汇总</span>
+          <span className="nc-cell-sub">{flows.length} 条</span>
           {['待审批', '审批中'].includes(Q_ST) && <Btn size="sm" danger onClick={() => setRecallOpen(true)}>撤回审批</Btn>}
         </span>
       }>
@@ -383,6 +418,9 @@ export default function QuoteDetailPage({ go, role, nav }: { go: (p: string) => 
         )}
         {!diffPair && <div className="nc-cell-sub">该报价单未留存两个及以上版本快照，暂无可对比的差异。</div>}
       </Modal>
+
+      {/* ============ 统一导出弹窗 ============ */}
+      <ExportDialog {...exportApi.dialogProps} />
     </>
   );
 }

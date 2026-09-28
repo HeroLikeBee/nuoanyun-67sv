@@ -99,7 +99,7 @@ function Certs({ C }: { C: PjCtx }) {
         <table className="nc-tbl" style={{ minWidth: 760 }}>
           <thead><tr>
             <th style={{ width: 130 }}>证书号</th><th>证书名称</th>
-            <th style={{ width: 110 }}>持证人</th><th style={{ width: 120 }}>有效期至</th>
+            <th style={{ width: 110 }}>持证人</th><th style={{ width: 120 }} className="is-num">有效期至</th>
             <th style={{ width: 110 }}>占用状态</th><th style={{ width: 140 }}>到期风险</th>
           </tr></thead>
           <tbody>
@@ -108,7 +108,7 @@ function Certs({ C }: { C: PjCtx }) {
                 <td><EntityLink target="cert" id={r.id} go={C.go} title="下钻到证书管理"><Code>{r.id}</Code></EntityLink></td>
                 <td><b>{r.name}</b></td>
                 <td>{r.holder}</td>
-                <td className="num">{r.to}</td>
+                <td className="is-num num">{r.to}</td>
                 <td><Tag tone="blue">本项目在用</Tag></td>
                 <td>
                   {r.expired ? <Tag tone="red">已过期</Tag>

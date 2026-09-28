@@ -2,21 +2,24 @@
 // 核心：8 目录批量调价 · 明细 5 列内嵌可编辑 · 汇总项只读自动计算 · 粘性汇总条触发提示
 import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
-  Btn, Banner, Card, Field, KvGrid, Modal, Money, Op, OpSep, PageHead, SearchInput,
-  Tag, Tip, useToast, Check, Code, Collapse, ChainBar, DataTable, Drawer, EntityLink,
+  Btn, Banner, Card, Field, KvGrid, Modal, Money, Op, OpMore, OpSep, PageHead, ProjectPicker, SearchInput,
+  Tag, Tip, useToast, Check, Code, Collapse, ChainBar, CustomerPicker, DataTable, Drawer, EntityLink, OppPicker, usePaged,
 } from '../components/ui';
 import {
-  REAL_SCOPES, SCOPE_UNASSIGNED, UNITS, MATERIALS, KITS, RECIPES, bomCost, itemByCode, CUSTOMERS, OPPS,
+  REAL_SCOPES, SCOPE_UNASSIGNED, UNITS, MATERIALS, KITS, RECIPES, bomCost, itemByCode, CUSTOMERS,
   PROJECTS, QUOTES, matPriceRef, catLeafOptions, catPath, catScopeName, catDefaultMarkup, quoteScopeOf, scopeName, scopeMarkup,
-  fmt, fmtWan, approveLevel, quoteTrigger, TODAY, isOppClosed, verNo, ITEM_KINDS, isStocked, itemCostBase,
+  fmt, approveLevel, quoteTrigger, TODAY, verNo, ITEM_KINDS, isStocked, itemCostBase,
   catVersion, subscribeCats, certRuleCn, itemCertMiss, listCodeOf,
   higherLevel, lineBaseMarkup, lineMarginBelow, marginApprover, marginGuardOf, marginGuardText,
   SRV_RATES, BILL_BASIS_CN, assetPctOf, projFacilityOf, srvRateOf, wbQuoteOf,
   type BillBasis, type ProjPoint, type QuoteScopeKey, type SrvRate, type WbQuote,
 } from '../components/data';
 import type { Quote, QuoteLine } from '../components/data';
-import { addQuote, consumePendingOppQuote, getFocus, getItems, getOpps, getQuote, getQuotes, nextApprovalNo, patchQuote, pushApproval, setBizStatus, setFocus, setPendingQuote, snapshotQuoteVersion, subscribeStore } from '../components/store';
+import { addQuote, consumePendingOppQuote, getFocus, getItems, getQuote, getQuotes, nextApprovalNo, patchQuote, pushApproval, setBizStatus, setFocus, setPendingQuote, snapshotQuoteVersion, subscribeStore } from '../components/store';
 import { Ico } from '../components/icons';
+import { EditDiffTable, buildEditDiff, type DiffLineView, type EditChange } from '../components/quoteEditDiff';
+import { ExportButton, ExportDialog, useExport, getUserName, type ExportField } from '../components/export';
+import { RecognitionWorkbench, type RecognitionField } from '../components/RecognitionWorkbench';
 
 type Item = {
   /**
@@ -26,16 +29,22 @@ type Item = {
    */
   id: number; catId: string; name: string; spec: string; unit: string;
   qty: number; cost: number; markup: number; note: string;
-  /** 材料编码：来自材料库 / 项目用料时写入，用于「¥参考」三源价格查询；自定义行无编码 */
+  /**
+   * 基线行序（1-based）：由「进入编辑时载入的已保存明细」按行序打上，本次新增的行没有它。
+   * 「本次改动对比」靠它把草稿行认回原来的那一行 —— 而不是靠编码 / 名称对齐：
+   * 编辑期把名称或目录改掉的行，必须仍被认成「这一行改了」，而不是「删一行 + 加一行」。
+   */
+  srcId?: number;
+  /** 物料编码：来自物料库 / 项目用料时写入，用于「¥参考」三源价格查询；自定义行无编码 */
   code?: string;
   /** 手改行标记：手改成本价后批量调价不重算（对齐参考口径） */
   manual?: boolean;
   /**
-   * 配方版本快照（M8）：该行由套件配方展开时，记下当时的配方版本号。
-   * 配方「已被引用则升版」，若不记版本，配方升版后历史报价无法还原当时成本 —— 版本控制维度失效。
+   * 配置版本快照（M8）：该行由套件配置展开时，记下当时的配置版本号。
+   * 配置「已被引用则升版」，若不记版本，配置升版后历史报价无法还原当时成本 —— 版本控制维度失效。
    */
   recipeVer?: string;
-  /** 来源套件编码（配方版本快照的归属，用于反查该套件当前版本） */
+  /** 来源套件编码（配置版本快照的归属，用于反查该套件当前版本） */
   kitCode?: string;
   /* 维保 / 检测行的计价口径与基数（仅 SRV_RATES 登记过的服务行生效）：
      这类行的金额 = wbQuoteOf(口径, 基数)，与 qty / markup 无关。 */
@@ -48,10 +57,15 @@ type Item = {
   basisArea?: number;
   basisAsset?: number;
   basisPoints?: ProjPoint[];
+  /** 本次编辑会话内新增行的加入序号（越大越新）：组内把新增行排到最前并按加入时间倒序；载入行无此字段 */
+  addedAt?: number;
 };
 
 /** 成本参考价采纳留痕（谁 · 何时 · 旧值→新值 · 来源） */
 type CostEdit = { row: string; old: number; nu: number; by: string; t: string; src: string };
+
+/** 改动痕迹：某字段 旧值→新值（仅视觉，不落行数据） */
+type CellDiff = { prev: number; cur: number };
 
 const INIT: Item[] = [
   { id: 1, catId: 'm11', name: '点型感烟火灾探测器', spec: 'JBF-3131（含底座）', unit: '个', qty: 860, cost: 92, markup: 25, note: '' },
@@ -78,6 +92,18 @@ const INIT: Item[] = [
  */
 let rowSeq = 1000;
 const nextRowId = () => ++rowSeq;
+/** 新增行加入序号（模块作用域，独立于行 id）：组内排序用，越大越新；不要用 id+长度，删行后会撞号 */
+let addSeq = 0;
+
+/** AI 识别图纸 → 识别工作台 mock 字段：一行明细的名称/规格/单位/数量/单价/备注 */
+const QUOTE_RECOG_FIELDS: RecognitionField[] = [
+  { key: 'name', label: '物料名称', value: '镀锌钢管', type: 'text' },
+  { key: 'spec', label: '规格型号', value: 'DN50 · 热镀锌', type: 'text' },
+  { key: 'unit', label: '单位', value: 'm', type: 'text' },
+  { key: 'qty', label: '数量', value: '100', type: 'number' },
+  { key: 'price', label: '单价（元）', value: '35.50', type: 'number' },
+  { key: 'note', label: '识别备注', value: 'AI 识别：图纸标注「消防给水立管」', type: 'text' },
+];
 
 /* ------------------------------------------------------------------
  * 「目录 → 报价科目 → 默认上浮率」的换算全部由 data.ts 的 quoteScopeOf / markupOf 完成。
@@ -116,7 +142,7 @@ const projKitList = (projId: string) => {
   const picked = kits.filter((_, i) => (i + h) % 2 === 0);
   return picked.length ? picked : kits.slice(0, 1);
 };
-/** 项目用料材料：从项目关联报价单的明细行取（matId 存在的行） */
+/** 项目用料物料：从项目关联报价单的明细行取（matId 存在的行） */
 const projMatList = (projId: string) => {
   const q = QUOTES.find((x) => x.projectId === projId);
   if (!q?.lines) return [];
@@ -134,7 +160,7 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
     const id = getFocus('quote-edit');
     return id ? getQuote(id) : null;
   }, [nav]);
-  /** store 变更脉冲：材料页新增 / 停用物料后，本页材料库候选即时跟随 */
+  /** store 变更脉冲：物料页新增 / 停用物料后，本页物料库候选即时跟随 */
   const [tick, setTick] = useState(0);
   useEffect(() => subscribeStore(() => setTick((n) => n + 1)), []);
   /** 分类树变更脉冲：树上新增 / 改名 / 挪子树后，本页的目录下拉与科目归集即时跟随 */
@@ -164,7 +190,25 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
   const [bRate, setBRate] = useState(25);
   const [bPrice, setBPrice] = useState(0);
   // 明细
-  const [items, setItems] = useState<Item[]>(INIT);
+  const [items, setItems] = useState<Item[]>([]);
+  /**
+   * 本次编辑的对比基线：进入编辑时的已保存明细（新建模式为空）。
+   * 保存成功后基线前移 —— 「改动对比」始终回答「相对上次保存改了什么」，
+   * 而不是把已经存下去的内容一直挂在清单里当未保存改动。
+   */
+  const [baseLines, setBaseLines] = useState<QuoteLine[]>([]);
+  const [diffOpen, setDiffOpen] = useState(false);
+  /* —— 改动痕迹（编辑态视觉，不落行数据）：key=`${rowId}:${field}`，field ∈ qty/cost/price/amt ——
+     上浮率不参与标记（保留其区间色）；金额/上浮单价为派生值，随 数量/成本参考价 联动。 */
+  const [diffMap, setDiffMap] = useState<Map<string, CellDiff>>(new Map());
+  /** 批量调价应用前的命中行快照：供「重置」仅回退本次批量调价产生的改动（手改痕迹保留） */
+  const batchSnapRef = useRef<{ rows: { id: number; markup: number }[]; prevDiffs: Map<string, CellDiff> } | null>(null);
+  const [canResetBatch, setCanResetBatch] = useState(false);
+  /** items 最新值引用：onBlur 闭包可能拿到旧渲染的 it，这里取最新 */
+  const itemsRef = useRef<Item[]>(items);
+  useEffect(() => { itemsRef.current = items; }, [items]);
+  /** 聚焦瞬间快照：失焦时与最新值比对，得出 prev/cur */
+  const snapRef = useRef<Map<string, { qty: number; cost: number; price: number; amt: number }>>(new Map());
   // 弹窗
   const [addOpen, setAddOpen] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
@@ -182,9 +226,9 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
     (q?.lines ?? []).forEach((ln) => { if (ln.matId) m[ln.matId] = { qty: ln.qty, cost: ln.cost, markup: ln.markup, price: ln.price, catId: ln.catId }; });
     return m;
   }, [projPick]);
-  /** 已勾选的用料编码（套件 = CP 编码 / 材料 = CL 编码） */
+  /** 已勾选的用料编码（套件 = CP 编码 / 物料 = CL 编码） */
   const [projSel, setProjSel] = useState<Set<string>>(new Set());
-  /** 套件带入方式：expand 展开为材料明细 / whole 整体带入 1 行 */
+  /** 套件带入方式：expand 展开为物料明细 / whole 整体带入 1 行 */
   const [kitMode, setKitMode] = useState<Record<string, 'expand' | 'whole'>>({});
   const [kitLineQty, setKitLineQty] = useState<Record<string, number>>({});
   const [matLineQty, setMatLineQty] = useState<Record<string, number>>({});
@@ -208,13 +252,46 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
   const [nqCust, setNqCust] = useState('');
   const [nqType, setNqType] = useState('改造');
   const [matCat, setMatCat] = useState<BatchScope>('__all');
-  /** 选料抽屉的类型筛选：材料 / 设备 / 服务 / 套件（默认全部类型） */
+  /** 选料抽屉的类型筛选：物料 / 服务 / 套件（默认全部类型） */
   const [matTy, setMatTy] = useState('全部类型');
   /** 项目面积（㎡）：工程费单方造价的分母，落到 Quote.area 供报价详情 / 历史参照使用 */
   const [area, setArea] = useState(0);
 
   /* ---------- 载入编辑目标（明细已落库 → 回到工作台无损还原 cost / markup） ---------- */
   useEffect(() => {
+    /* ⚠️ 载入行与对比基线必须「同源派生」：
+       ① 起步行（INIT 15 行）**只服务「新建报价单」**。已有单据一律按落库明细如实还原 ——
+          打开一张明细尚未落库的旧单（如草稿 BJ000017 · total 0）时若也塞起步行，
+          页面合计会凭空变成 ¥739,015，与台账的 ¥0 对不上：那不是这张单的内容。
+       ② 原先写成 `if (editing.lines?.length) { setItems(...) }`：条件不成立时 items 不重置，
+          「编辑完 BJ000021（9 行）→ 返回 → 新建报价单」会把上一张单的明细留在新单里。
+       起步行必须补 srcId（载入行序）：改动对比靠 srcId 配对，缺了它每行都会落成「新增」。
+       基线口径与保存后的 rebase() 完全一致 —— 进页即「相对上次保存零改动」。 */
+    const ls = editing?.lines ?? [];
+    const starter = editing ? [] : INIT;
+    const rows: Item[] = ls.length
+      ? ls.map((l, i) => ({
+          /* srcId 与 id 同为「载入行序」，但语义不同：id 是 React key / setIt 的定位键（新增行会另发号），
+             srcId 只用于改动对比配对，一旦载入就不再变 —— 中间插行 / 删行都不会错位。 */
+          id: i + 1, srcId: i + 1, catId: l.catId ?? '', name: l.name, spec: l.spec ?? '', unit: l.unit,
+          qty: l.qty, cost: l.cost, markup: l.markup, note: l.note ?? '', code: l.matId,
+          recipeVer: l.recipeVer, kitCode: l.kitCode, baseMarkup: l.baseMarkup,
+          /* 计价行的口径与基数随行还原，否则回到工作台后维保行会退回「按数量 × 成本」算错钱 */
+          basis: l.basis, basisArea: l.basisArea, basisAsset: l.basisAsset, basisPoints: l.basisPoints,
+        }))
+      : starter.map((it, i) => ({ ...it, srcId: i + 1 }));
+    setItems(rows);
+    setBaseLines(
+      ls.length
+        ? ls /* 已落库明细原样作基线：price 是保存当日的价格（试算价行也含在内） */
+        : starter.map((it) => ({
+            catId: it.catId, name: it.name, spec: it.spec, unit: it.unit,
+            qty: it.qty, cost: it.cost, markup: it.markup,
+            /* 起步行按普通行计价：price = 成本 ×（1 + 上浮率），与 line() 同口径 */
+            price: Math.round((it.cost + (it.cost * it.markup) / 100) * 100) / 100,
+            note: it.note || undefined,
+          })),
+    );
     if (!editing) return;
     setCustomer(editing.customer);
     setOpp(editing.opp);
@@ -222,15 +299,6 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
     setTaxRate(editing.taxRate);
     setUpRate(editing.markup || 20);
     setArea(editing.area ?? 0);
-    if (editing.lines?.length) {
-      setItems(editing.lines.map((l, i) => ({
-        id: i + 1, catId: l.catId ?? '', name: l.name, spec: l.spec ?? '', unit: l.unit,
-        qty: l.qty, cost: l.cost, markup: l.markup, note: l.note ?? '', code: l.matId,
-        recipeVer: l.recipeVer, kitCode: l.kitCode, baseMarkup: l.baseMarkup,
-        /* 计价行的口径与基数随行还原，否则回到工作台后维保行会退回「按数量 × 成本」算错钱 */
-        basis: l.basis, basisArea: l.basisArea, basisAsset: l.basisAsset, basisPoints: l.basisPoints,
-      })));
-    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nav]);
 
@@ -248,12 +316,12 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nav]);
 
-  /* ---------- 材料库候选：读共享 store 且只取「启用」物料 ----------
-     修复两处缺陷：① 原先只读 data.ts 常量 MATERIALS，材料页新维护的物料选不到、停用的物料照样能选；
-     ② 原先「目录」筛选拿材料分类码（m21）去比报价目录名（消防水），永远筛不出结果。 */
+  /* ---------- 物料库候选：读共享 store 且只取「启用」物料 ----------
+     修复两处缺陷：① 原先只读 data.ts 常量 MATERIALS，物料页新维护的物料选不到、停用的物料照样能选；
+     ② 原先「目录」筛选拿物料分类码（m21）去比报价目录名（消防水），永远筛不出结果。 */
   const matCandidates = useMemo(() => {
-    /* 四类主数据全部可选：材料 / 设备按含税采购价、服务按人工构成、套件按配方展开计价。
-       修复缺陷：原先白名单只放「材料 / 设备」，报价 8 目录里的「服务费」格永远只能靠手输
+    /* 三类主数据全部可选：物料按含税采购价、服务按人工构成、套件按配置展开计价。
+       修复缺陷：原先白名单只放「物料」，报价 8 目录里的「服务费」格永远只能靠手输
        自定义行 —— 维保 / 检测 / 深化设计等服务型主数据维护了却选不到，即「物料与服务没对应」。 */
     const active = getItems().filter((m) => m.status === '启用' && (matTy === '全部类型' || m.ty === matTy));
     return active.filter((m) => {
@@ -261,6 +329,9 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
       return !matKw || (m.name + m.code + (m.spec || '')).includes(matKw);
     });
   }, [matCat, matKw, matTy, nav, tick]);
+
+  /* 物料库候选分页：Drawer 内一次渲染全部候选过长，按页切分 + TableFoot 紧凑展示 */
+  const matPaged = usePaged(matCandidates, 10);
 
   /* ---------- 派生计算（只读，不可手填） ---------- */
   /**
@@ -273,7 +344,9 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
   const line = (it: Item): LineCalc => {
     if (isRateRow(it)) {
       const q = wbQuoteOf(it.code!, { area: it.basisArea, points: it.basisPoints, assetAmt: it.basisAsset }, it.basis);
-      return { price: q.total, amt: q.total, before: it.cost, rate: srvRateOf(it.code), q };
+      /* before（上浮前金额）只对「数量 × 单价」行成立；试算价行不走上浮，置 0，
+         页面按 isRateRow 显示「—」，不再把成本参考价冒充成上浮前金额。 */
+      return { price: q.total, amt: q.total, before: 0, rate: srvRateOf(it.code), q };
     }
     const uplift = it.cost * (it.markup / 100);
     const price = it.cost + uplift;
@@ -306,6 +379,56 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
   const routeLvl = higherLevel(hit ? approveLevel(sumExTax) : '—', guard.level);
 
   const setIt = (id: number, patch: Partial<Item>) => setItems((p) => p.map((it) => (it.id === id ? { ...it, ...patch } : it)));
+
+  /* ---------- 改动痕迹：聚焦快照 → 失焦比对（仅 数量 / 成本参考价 / 上浮单价 / 金额） ---------- */
+  const focusSnap = (id: number, kind: 'qty' | 'cost') => {
+    const row = itemsRef.current.find((r) => r.id === id);
+    if (!row) return;
+    const l = line(row);
+    snapRef.current.set(`${kind}-${id}`, { qty: row.qty, cost: row.cost, price: l.price, amt: l.amt });
+  };
+  const blurRec = (id: number, kind: 'qty' | 'cost') => {
+    const snap = snapRef.current.get(`${kind}-${id}`);
+    if (!snap) return;
+    snapRef.current.delete(`${kind}-${id}`);
+    const curRow = itemsRef.current.find((r) => r.id === id);
+    if (!curRow) return;
+    const nl = line(curRow);
+    setDiffMap((m) => {
+      const n = new Map(m);
+      const set = (key: string, prev: number, cur: number) => {
+        if (prev === cur) { n.delete(key); return; }
+        const ex = n.get(key);
+        n.set(key, { prev: ex?.prev ?? prev, cur });
+      };
+      if (kind === 'qty') {
+        set(`qty-${id}`, snap.qty, curRow.qty);
+        set(`amt-${id}`, snap.amt, nl.amt);
+      } else {
+        set(`cost-${id}`, snap.cost, curRow.cost);
+        set(`price-${id}`, snap.price, nl.price);
+        set(`amt-${id}`, snap.amt, nl.amt);
+      }
+      return n;
+    });
+  };
+  const enterBlur = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+  };
+  /** 清除某行全部痕迹（删行时调用） */
+  const clearRowDiff = (id: number) => setDiffMap((m) => {
+    const n = new Map(m);
+    [`qty-${id}`, `cost-${id}`, `price-${id}`, `amt-${id}`].forEach((k) => n.delete(k));
+    return n;
+  });
+  /* 有未保存改动时离开页面提示 */
+  useEffect(() => {
+    const h = (e: BeforeUnloadEvent) => {
+      if (diffMap.size > 0) { e.preventDefault(); e.returnValue = ''; }
+    };
+    window.addEventListener('beforeunload', h);
+    return () => window.removeEventListener('beforeunload', h);
+  }, [diffMap.size]);
 
   /* 版本记录（多轮报价逐版留痕，可对比追溯） */
   /**
@@ -396,13 +519,69 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
     const name = isAll ? '' : scopeName(bCat);
     const hitRows = isAll ? items : items.filter((it) => quoteScopeOf(it.catId) === bCat);
     if (!hitRows.length) { toast(isAll ? '暂无明细行' : `科目「${name}」下暂无明细行`); return; }
-    setItems((p) => p.map((it) => {
+    /* 先纯计算 nextItems，再据真实 line() 重算结果记录 上浮单价/金额 痕迹（批量调价 = 改单价） */
+    const nextItems = items.map((it) => {
       if (!isAll && quoteScopeOf(it.catId) !== bCat) return it;
       if (bMode === 'rate') return { ...it, markup: bRate };
       const price = it.cost + (it.markup / 100) * it.cost;
       return { ...it, markup: price ? Math.max(0, ((bPrice - it.cost) / it.cost) * 100) : it.markup };
+    });
+    /* 只统计「实际变化」的行：目标值 == 现值时不落痕迹、不夸大成"已应用" */
+    let changedRows = 0;
+    const changedSnap: { id: number; markup: number }[] = [];
+    const prevDiffs = new Map<string, CellDiff>();
+    hitRows.forEach((it) => {
+      const prevL = line(it);
+      const nextIt = nextItems.find((x) => x.id === it.id)!;
+      const nextL = line(nextIt);
+      if (nextL.price !== prevL.price || nextL.amt !== prevL.amt) {
+        changedRows++;
+        changedSnap.push({ id: it.id, markup: it.markup });
+        const pk = `price-${it.id}`, ak = `amt-${it.id}`;
+        if (diffMap.has(pk)) prevDiffs.set(pk, diffMap.get(pk)!);
+        if (diffMap.has(ak)) prevDiffs.set(ak, diffMap.get(ak)!);
+      }
+    });
+    /* 目标值与现值完全相同：不写 items、不留痕迹，如实提示无变化 */
+    if (!changedRows) {
+      toast(`目标${bMode === 'rate' ? `上浮率 ${bRate}%` : `上浮单价 ¥${bPrice}`} 与当前值相同，无变化`);
+      return;
+    }
+    setDiffMap((m) => {
+      const n = new Map(m);
+      hitRows.forEach((it) => {
+        const prevL = line(it);
+        const nextIt = nextItems.find((x) => x.id === it.id)!;
+        const nextL = line(nextIt);
+        if (nextL.price !== prevL.price) n.set(`price-${it.id}`, { prev: prevL.price, cur: nextL.price });
+        if (nextL.amt !== prevL.amt) n.set(`amt-${it.id}`, { prev: prevL.amt, cur: nextL.amt });
+      });
+      return n;
+    });
+    /* 应用前快照：仅记实际变化行的原 markup 与被覆盖前的旧痕迹，供「重置」精确回退 */
+    batchSnapRef.current = { rows: changedSnap, prevDiffs };
+    setCanResetBatch(true);
+    setItems(nextItems);
+    toast(`已${isAll ? '整体调价' : `应用于「${name}」科目`} ${changedRows} 条明细（覆盖原上浮率，非累计）`);
+  };
+
+  /** 重置：恢复本次批量调价应用前的命中行上浮率（单价/金额随之重算），并清除本次应用产生的痕迹；手改痕迹保留 */
+  const resetBatch = () => {
+    const snap = batchSnapRef.current;
+    if (!snap) { toast('尚未执行批量调价'); return; }
+    setItems((p) => p.map((it) => {
+      const s = snap.rows.find((r) => r.id === it.id);
+      return s ? { ...it, markup: s.markup } : it;
     }));
-    toast(`已${isAll ? '整体调价' : `应用于「${name}」科目`} ${hitRows.length} 条明细（覆盖原上浮率，非累计）`);
+    setDiffMap((m) => {
+      const n = new Map(m);
+      snap.rows.forEach((r) => { n.delete(`price-${r.id}`); n.delete(`amt-${r.id}`); });
+      snap.prevDiffs.forEach((v, k) => n.set(k, v));
+      return n;
+    });
+    batchSnapRef.current = null;
+    setCanResetBatch(false);
+    toast('已恢复应用前状态');
   };
 
   const useCatDef = () => {
@@ -417,14 +596,27 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
     setAiRun(true);
     setTimeout(() => {
       const add: Item[] = [
-        { id: 101, catId: 'm11', name: '消防应急广播扬声器', spec: '3W · 吸顶式', unit: '个', qty: 68, cost: 96, markup: 25, note: 'AI 识别：图纸标注「应急广播」' },
-        { id: 102, catId: 'm211', name: '减压孔板', spec: 'DN100', unit: '个', qty: 14, cost: 168, markup: 20, note: 'AI 识别：图纸标注「减压」' },
-        { id: 103, catId: 'm3', name: '止回阀', spec: 'DN800 · 排烟系统', unit: '个', qty: 6, cost: 1240, markup: 22, note: 'AI 识别：风管节点' },
+        { id: nextRowId(), catId: 'm11', name: '消防应急广播扬声器', spec: '3W · 吸顶式', unit: '个', qty: 68, cost: 96, markup: 25, note: 'AI 识别：图纸标注「应急广播」', addedAt: ++addSeq },
+        { id: nextRowId(), catId: 'm211', name: '减压孔板', spec: 'DN100', unit: '个', qty: 14, cost: 168, markup: 20, note: 'AI 识别：图纸标注「减压」', addedAt: ++addSeq },
+        { id: nextRowId(), catId: 'm3', name: '止回阀', spec: 'DN800 · 排烟系统', unit: '个', qty: 6, cost: 1240, markup: 22, note: 'AI 识别：风管节点', addedAt: ++addSeq },
       ];
       setItems((p) => [...p, ...add]);
       setAiRun(false); setAiPicked(add.map((a) => ({ name: a.name, qty: a.qty, unit: a.unit })));
       toast('AI 已识别图纸并生成 3 条明细，请逐条核对规格与数量');
     }, 700);
+  };
+
+  /** 识别工作台「全部确认并写入」：把核对后的字段转成 1 行报价明细 append 进去 */
+  const onQuoteRecog = (fs: RecognitionField[]) => {
+    const get = (k: string) => fs.find((f) => f.key === k)?.value ?? '';
+    const row: Item = {
+      id: nextRowId(), catId: 'm11',
+      name: get('name') || '未命名明细', spec: get('spec'), unit: get('unit') || '项',
+      qty: parseFloat(get('qty')) || 1, cost: parseFloat(get('price')) || 0,
+      markup: 20, note: get('note') || 'AI 识别写入', addedAt: ++addSeq,
+    };
+    setItems((p) => [...p, row]);
+    toast('已从识别结果写入 1 行明细，请核对规格与单价');
   };
 
   /**
@@ -456,6 +648,7 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
         id: nextRowId(), catId, name: m?.name ?? '物料', spec: m?.spec ?? '', unit: m?.unit ?? '个',
         /* 数量默认填 1：报价数量是「需求量」，不能拿库存量当默认值 */
         qty: 1, cost: m ? itemCostBase(m) : 0, markup: catDefaultMarkup(catId), note: `来自${m?.ty ?? '物料'}主数据`,
+        addedAt: ++addSeq,
         code: m?.code,
         /* 套件记 kitCode 身份：既用于展开查看构成，也用于报价引用留痕 */
         kitCode: m?.ty === '套件' ? m.code : undefined,
@@ -468,8 +661,8 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
   };
 
   /**
-   * 切换项目 → 重置勾选状态并默认全选该项目下的套件、配方行与材料。
-   * 配方行（kitCode__行序）必须一并选上，否则「展开为材料明细」会一条都拉不进来 ——
+   * 切换项目 → 重置勾选状态并默认全选该项目下的套件、配置行与物料。
+   * 配置行（kitCode__行序）必须一并选上，否则「展开为物料明细」会一条都拉不进来 ——
    * 套件主行勾选与否只决定整包行，构成部分组成 driven by 行级勾选。
    */
   const pickProject = (pid: string) => {
@@ -500,22 +693,22 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
     });
 
     const add: Item[] = [];
-    let seq = 400 + items.length;
     projKitList(projPick).filter((k) => projSel.has(k.code)).forEach((k) => {
       const R = RECIPES[k.code];
       const ver = R?.versions.find((v) => v.v === R.cur);
       /**
        * 套件带入的两种粒度（用户在用料清单里按套件切换）：
-       *   whole  整包行 —— 一行 = 一个套件，取配方展开成本自动合计，保留 kitCode + recipeVer 身份；
-       *   expand 展开 —— 按当前生效配方逐行摊平为材料 / 设备 / 服务。
+       *   whole  整包行 —— 一行 = 一个套件，取配置展开成本自动合计，保留 kitCode + recipeVer 身份；
+       *   expand 展开 —— 按当前生效配置逐行摊平为物料 / 服务。
        * 此前无论用户选哪种都只走 expand，套件身份退化为备注里的一句文本，
-       * 既不能按套整包报价，也无法回溯这行从哪个套件、哪个配方版本来的。
+       * 既不能按套整包报价，也无法回溯这行从哪个套件、哪个配置版本来的。
        */
       if (kitMode[k.code] === 'whole') {
         const catId = k.cat ?? '';
         const lines = ver?.lines ?? [];
         add.push({
-          id: seq++,
+          id: nextRowId(),
+          addedAt: ++addSeq,
           catId,
           name: k.name, spec: `${lines.length || 0} 项构成 · ${k.spec}`.trim(), unit: k.unit,
           qty: 1,
@@ -532,12 +725,13 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
         const m = itemByCode(l.code);
         if (!m) return;
         const hist = quoteMap[l.code];
-        /* 行键与抽屉里的配方行勾选一致：`套件编码__行序`（编码可能重复，按行序才唯一） */
+        /* 行键与抽屉里的配置行勾选一致：`套件编码__行序`（编码可能重复，按行序才唯一） */
         const lineKey = `${k.code}__${li}`;
         if (!projSel.has(lineKey)) return;
         add.push({
-          id: seq++,
-          /* 目录取物料主数据自身的归属，与「材料 / 套件同源一棵树」保持一致 */
+          id: nextRowId(),
+          addedAt: ++addSeq,
+          /* 目录取物料主数据自身的归属，与「物料 / 套件同源一棵树」保持一致 */
           catId: m.cat ?? '',
           name: m.name, spec: m.spec, unit: m.unit,
           qty: hist?.qty ?? (kitLineQty[lineKey] ?? l.qty),
@@ -553,7 +747,8 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
     projMatList(projPick).filter((m) => projSel.has(m.code)).forEach((m) => {
       const hist = quoteMap[m.code];
       add.push({
-        id: seq++,
+        id: nextRowId(),
+        addedAt: ++addSeq,
         catId: m.cat ?? '',
         name: m.name, spec: m.spec, unit: m.unit,
         qty: matLineQty[m.code] ?? hist?.qty ?? 10,
@@ -573,14 +768,14 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
     if (!cName.trim() || !cCost) { toast('名称与成本参考价必填'); return; }
     /* 自编行必须落在具体目录：留悬念会导致科目归集失准，也过不了提交拦截 */
     if (!cCat) { toast('请先选择所属目录（最细一级）', 'err'); return; }
-    setItems((p) => [...p, { id: 300 + p.length, catId: cCat, name: cName, spec: cSpec, unit: cUnit, qty: cQty, cost: cCost, markup: catDefaultMarkup(cCat), note: '手输自定义行' }]);
+    setItems((p) => [...p, { id: nextRowId(), addedAt: ++addSeq, catId: cCat, name: cName, spec: cSpec, unit: cUnit, qty: cQty, cost: cCost, markup: catDefaultMarkup(cCat), note: '手输自定义行' }]);
     setCustomOpen(false); setCName(''); setCSpec(''); setCQty(1); setCCost(0);
     toast('自定义行已添加');
   };
 
   /**
-   * 已停用材料集合（H8）：明细行引用的材料被停用后，行内标红并在提交时硬阻断。
-   * 修复前工作台只读材料常量、不筛 status —— 停用材料仍可被报价选中，且引用后毫无提示。
+   * 已停用物料集合（H8）：明细行引用的物料被停用后，行内标红并在提交时硬阻断。
+   * 修复前工作台只读物料常量、不筛 status —— 停用物料仍可被报价选中，且引用后毫无提示。
    */
   const deadCodes = useMemo(
     () => new Set(getItems().filter((i) => i.status === '停用').map((i) => i.code)),
@@ -593,7 +788,7 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
     if (m.length) { toast(`有 ${m.length} 行缺少必填（名称 / 数量 / 成本参考价），已红框定位`); return; }
     const dead = items.filter((it) => it.code && deadCodes.has(it.code));
     if (dead.length) {
-      toast(`有 ${dead.length} 行引用的材料已停用（${dead.map((it) => it.code).join('、')}），请替换为在用材料后再提交`);
+      toast(`有 ${dead.length} 行引用的物料已停用（${dead.map((it) => it.code).join('、')}），请替换为在用物料后再提交`);
       return;
     }
     /* 维保 / 检测行必须有计量基数才能出价：没有面积 / 点位台账 = 报价无依据，
@@ -637,9 +832,9 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
       qty: it.qty, cost: it.cost, markup: it.markup,
       price: Math.round(line(it).price * 100) / 100,
       note: it.note || undefined,
-      /* M8：配方版本快照随行落库，配方升版后历史报价仍可还原当时成本口径 */
+      /* M8：配置版本快照随行落库，配置升版后历史报价仍可还原当时成本口径 */
       recipeVer: it.recipeVer,
-      /* 套件整包行的身份：留了 kitCode 才能反查这行属于哪个套件、当时用了哪一版配方 */
+      /* 套件整包行的身份：留了 kitCode 才能反查这行属于哪个套件、当时用了哪一版配置 */
       kitCode: it.kitCode,
       /* 目录默认毛利快照（4.6）：老行沿用当初的目录值，新留的行写上当天的目录值，
          之后在树上调默认毛利，这一版报价的让价判定不会被追溯改写。 */
@@ -675,6 +870,7 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
       toast(`报价单 ${no} 已创建并提交审批 · 明细 ${lines.length} 行 · 路由至${lvl === '—' ? '免审' : lvl}`);
     }
     setSubmitOpen(false); setReason(''); setGuardReason('');
+    setDiffMap(new Map());
     go('quote');
   };
 
@@ -697,14 +893,96 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
     const all = [...REAL_SCOPES.map((s) => s.key), SCOPE_UNASSIGNED];
     return all
       .map((k) => ({ key: k, name: scopeName(k), markup: scopeMarkup(k), rows: items.filter((it) => quoteScopeOf(it.catId) === k) }))
-      .filter((g) => g.rows.length);
+      .filter((g) => g.rows.length)
+      .map((g) => ({
+        ...g,
+        /* 组内排序：本次新增行（有 addedAt）排最前、按加入时间倒序（最新在上）；
+           载入的原有行（无 addedAt）保持原相对顺序排在其后。 */
+        rows: g.rows.slice().sort((a, b) => {
+          const an = a.addedAt != null, bn = b.addedAt != null;
+          if (an !== bn) return an ? -1 : 1;
+          if (an && bn) return (b.addedAt ?? 0) - (a.addedAt ?? 0);
+          return 0;
+        }),
+      }));
   }, [items]);
 
-  /** 缺证行：该行材料按其所属目录要求强制性认证（CCCF），但主数据里没有证书 —— 报价环节必须看得见 */
+  /** 缺证行：该行物料按其所属目录要求强制性认证（CCCF），但主数据里没有证书 —— 报价环节必须看得见 */
   const certMissRows = useMemo(
     () => items.filter((it) => !!it.code && itemCertMiss(itemByCode(it.code))),
     [items],
   );
+
+  /* ---------- 本次改动对比：当前草稿 vs 进入编辑时的已保存明细 ----------
+     金额一律取本页同一条计价链 line()：维保 / 检测行不是「数量 × 单价」，
+     用 qty × price 反推会得出一个业务上根本不存在的数，改没改也判错。
+     行配对用 srcId（载入行序），不用编码 —— 改了名称 / 目录的行必须算「这行改了」。 */
+  const baseViews: DiffLineView[] = useMemo(
+    () => baseLines.map((l, i) => ({
+      srcId: i + 1, no: i + 1, name: l.name, code: l.matId, catId: l.catId ?? '',
+      spec: l.spec ?? '', unit: l.unit, qty: l.qty, cost: l.cost, markup: l.markup,
+      note: l.note ?? '', price: l.price, amt: Math.round(l.qty * l.price),
+    })),
+    [baseLines],
+  );
+  const curViews: DiffLineView[] = useMemo(
+    () => {
+      /* 行号跟随渲染顺序：组内新增行已排到最前，这里按 grouped 拍平后的顺序编号，
+         保证表格 # 列、改动清单行号与屏幕上看到的行序一致 */
+      const flat = grouped.flatMap((g) => g.rows);
+      return flat.map((it, i) => {
+        const l = line(it);
+        return {
+          srcId: it.srcId, no: i + 1, name: it.name, code: it.code, catId: it.catId,
+          spec: it.spec, unit: it.unit, qty: it.qty, cost: it.cost, markup: it.markup,
+          note: it.note, price: l.price, amt: l.amt,
+        };
+      });
+    },
+    [grouped],
+  );
+  const editChanges = useMemo(() => buildEditDiff(baseViews, curViews, catPath), [baseViews, curViews]);
+  /** 显示行号 → 该行改动（明细表就地标注用；删除行没有当前行号，只进清单不进表） */
+  const rowChg = useMemo(() => {
+    const m = new Map<number, EditChange>();
+    editChanges.forEach((c) => { if (c.kind !== 'del') m.set(c.no, c); });
+    return m;
+  }, [editChanges]);
+  /** 渲染行号映射：行 id → 屏幕显示序号（按 grouped 拍平顺序，与表格 # 列、curViews.no 一致） */
+  const rowNoMap = useMemo(() => {
+    const m = new Map<number, number>();
+    let n = 0;
+    grouped.forEach((g) => g.rows.forEach((it) => { n += 1; m.set(it.id, n); }));
+    return m;
+  }, [grouped]);
+  /** 保存成功后基线前移：把刚存下去的内容作为新的对比起点 */
+  const rebase = () => setBaseLines(items.map((it) => ({
+    matId: it.code, catId: it.catId, name: it.name, spec: it.spec, unit: it.unit,
+    qty: it.qty, cost: it.cost, markup: it.markup,
+    price: Math.round(line(it).price * 100) / 100, note: it.note || undefined,
+  })));
+
+  /* 统一导出：单单导出当前报价单（mode=single），金额 / 毛利为敏感字段 */
+  const exportFields: ExportField[] = [
+    { key: 'id', label: '报价编号' },
+    { key: 'customer', label: '客户' },
+    { key: 'name', label: '项目名称' },
+    { key: 'taxMode', label: '计价方式' },
+    { key: 'items', label: '明细行数' },
+    { key: 'net', label: '不含税金额', sensitive: true },
+    { key: 'tax', label: '税额' },
+    { key: 'total', label: '含税金额', sensitive: true },
+    { key: 'markup', label: '毛利', sensitive: true },
+    { key: 'status', label: '状态' },
+  ];
+  const exportApi = useExport({
+    mode: 'single', pageKey: 'quote-edit', pageName: '报价单',
+    fields: exportFields, defaultFieldKeys: exportFields.map((f) => f.key),
+    totalCount: 1, filteredCount: 1, selectedCount: 0,
+    previewRows: editing ? [editing] : [],
+    userName: getUserName(role),
+    onExport: () => {},
+  });
 
   return (
     <>
@@ -713,10 +991,25 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
         badges={<><Tag tone="gray">{editing ? editing.status : '新建草稿'}</Tag><Tag tone="blue">{editing ? `${editing.id} ${editing.ver}` : '未生成单号'}</Tag></>}
         sub={<span>目录化组价工作台<Tip text="目录化组价 · 批量调价 · 汇总项自动计算（不可手填）。" /></span>}
         actions={<>
-          <Btn onClick={() => go('quote')}>← 返回台账</Btn>
+          <Btn onClick={() => {
+            if (diffMap.size > 0 && !window.confirm(`有 ${diffMap.size} 处改动未保存，确定离开？`)) return;
+            go('quote');
+          }}>← 返回台账</Btn>
+          {diffMap.size > 0 && (
+            <>
+              <Tag tone="blue" className="nc-tag-btn">已改 {diffMap.size} 处</Tag>
+              <Btn onClick={() => setDiffMap(new Map())} title="仅清除视觉标记，数值保留不变">清除改动标记</Btn>
+            </>
+          )}
+          <Btn onClick={() => setDiffOpen(true)} title="查看本次编辑改了哪些行、原来是什么">
+            改动对比{editChanges.length ? `（${editChanges.length}）` : ''}
+          </Btn>
           <Btn onClick={() => { setSaveChoiceOpen(true); }}>保存</Btn>
-          <Btn onClick={() => setPrintOpen(true)}><Ico n="file" size={16} /> 打印预览</Btn>
-          <Btn onClick={() => setVerOpen(true)}><Ico n="folder" size={16} /> 版本管理</Btn>
+          <ExportButton onClick={exportApi.trigger} />
+          <OpMore label="更多 ⋯" items={[
+            { label: '打印预览', onClick: () => setPrintOpen(true) },
+            { label: '版本管理', onClick: () => setVerOpen(true) },
+          ]} />
           <Btn kind="primary" onClick={preSubmit}>提交审批</Btn>
         </>}
       />
@@ -724,22 +1017,12 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
       {/* ===== L0 头部 ===== */}
       <Card>
         <div className="nc-l0">
-          <Field label="客户" req><select className="nc-input" value={customer} onChange={(e) => setCustomer(e.target.value)}>
-            <option value="">请选择客户</option>
-            {CUSTOMERS.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
-          </select></Field>
-          <Field label="关联商机"><select className="nc-input" value={opp} onChange={(e) => setOpp(e.target.value)}>
-            <option value="">暂不关联</option>
-            {getOpps().filter((o) => !isOppClosed(o)).map((o) => <option key={o.id} value={o.id}>{o.id} · {o.name}</option>)}
-          </select></Field>
+          <Field label="客户" req><CustomerPicker value={customer} onChange={setCustomer} emit="name" /></Field>
+          <Field label="关联商机"><OppPicker value={opp} onChange={setOpp} clearLabel="暂不关联" /></Field>
           <Field label="项目类型" req><select className="nc-input" value={pType} onChange={(e) => setPType(e.target.value)}>
             <option>新建</option><option>改造</option><option>维护保养</option>
           </select></Field>
           <Field label="报价名称" req><input className="nc-input" value={qName} onChange={(e) => setQName(e.target.value)} /></Field>
-          <Field label="项目面积（㎡）" note="工程费单方造价的分母；维护保养 / 服务类报价可留空">
-            <input className="nc-input" type="number" value={area || ''} placeholder="如 26000"
-              onChange={(e) => setArea(Number(e.target.value) || 0)} />
-          </Field>
         </div>
 
         <Collapse title="高级" open={adv} onToggle={() => setAdv(!adv)} badge={<span className="nc-cell-sub">上浮方式 / 有效期 / 税率 / 区域 / 列显示 / 口径</span>}>
@@ -758,9 +1041,11 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
                 <option value={9}>9%（建筑业）</option><option value={13}>13%</option><option value={6}>6%（服务·维护保养）</option><option value={3}>3%</option>
               </select>
             </Field>
-            <Field label="关联项目"><select className="nc-input" value={linkedProj} onChange={(e) => setLinkedProj(e.target.value)}>
-              <option value="">暂不关联</option><option>XM000007 昆明万达广场消防设施改造</option>
-            </select></Field>
+            <Field label="关联项目"><ProjectPicker value={linkedProj} onChange={setLinkedProj} clearLabel="暂不关联" /></Field>
+            <Field label="项目面积（㎡）" note="工程费单方造价的分母；维护保养 / 服务类报价可留空">
+              <input className="nc-input" type="number" value={area || ''} placeholder="如 26000"
+                onChange={(e) => setArea(Number(e.target.value) || 0)} />
+            </Field>
             <Field label="列显示">
               <div className="nc-inline-checks">
                 <Check checked={showSpec} onChange={setShowSpec} label="规格列" />
@@ -779,11 +1064,11 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
         <div className="nc-addbar">
           <div className="nc-ops">
             <Btn kind="primary" size="sm" onClick={() => { setProjOpen(true); setProjPick(PROJECTS[0]?.id || ''); setProjSel(new Set()); setKitMode({}); }}><Ico n="star" size={16} /> 从项目拉取用料</Btn>
-            <Btn size="sm" onClick={() => setAddOpen(true)}><Ico n="building" size={16} /> 从材料库添加</Btn>
-            <Btn size="sm" onClick={() => { setAiOpen(true); setAiPicked([]); }}><Ico n="bolt" size={16} /> AI 识别图纸生成</Btn>
+            <Btn size="sm" onClick={() => setAddOpen(true)}><Ico n="building" size={16} /> 从物料库添加</Btn>
+            <Btn size="sm" onClick={() => setAiOpen(true)}><Ico n="bolt" size={16} /> AI 识别图纸生成</Btn>
             <Btn size="sm" onClick={() => setCustomOpen(true)}>＋ 手输自定义行</Btn>
           </div>
-          <span className="nc-listhint">材料自动带出<Tip text="编码 / 规格 / 单位 / 目录 / 成本参考价；目录列来自材料档案，只读锁定。" /></span>
+          <span className="nc-listhint">物料自动带出<Tip text="编码 / 规格 / 单位 / 目录 / 成本参考价；目录列来自物料主数据，只读锁定。" /></span>
         </div>
         <div className="nc-catbar">
           <span className="nc-catbar-lb">按科目批量调价</span>
@@ -800,13 +1085,14 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
             : <input className="nc-input nc-input-sm" type="number" value={bPrice} onChange={(e) => setBPrice(Number(e.target.value))} />}
           <Btn size="sm" onClick={useCatDef}>按目录默认上浮率带出</Btn>
           <Btn size="sm" kind="primary" onClick={applyCat}>应用</Btn>
+          <Btn size="sm" onClick={resetBatch} disabled={!canResetBatch} title={canResetBatch ? '恢复本次批量调价应用前的行值（仅回退本次批量调价，手改保留）' : '尚未执行批量调价'}>重置</Btn>
           <span className="nc-cell-sub">命中 <b className="num">{bCat === '__all' ? items.length : items.filter((it) => quoteScopeOf(it.catId) === bCat).length}</b> 条</span>
         </div>
 
-        {/* 缺证风险：要求的认证由物料所属目录派生（品目决定要不要证），不带证的材料进了报价就是交付事故 */}
+        {/* 缺证风险：要求的认证由物料所属目录派生（品目决定要不要证），不带证的物料进了报价就是交付事故 */}
         {certMissRows.length > 0 && (
           <Banner tone="warn">
-            有 <b>{certMissRows.length}</b> 行材料按其所属目录要求 <b>强制性认证 CCCF</b>，但在主数据中未登记证书：
+            有 <b>{certMissRows.length}</b> 行物料按其所属目录要求 <b>强制性认证 CCCF</b>，但在主数据中未登记证书：
             {certMissRows.slice(0, 3).map((r) => r.name).join('、')}{certMissRows.length > 3 ? ' 等' : ''}。
             无有效证书的批次不得用于工程，请先到「物料主数据」补录证书再提交。
           </Banner>
@@ -818,14 +1104,14 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
             <thead>
               <tr>
                 <th style={{ width: 44 }}>#</th>
-                <th style={{ width: 176 }}>所属目录 <span className="nc-req">√</span></th>
-                <th style={{ width: 230 }}>名称 <span className="nc-req">√≤50</span></th>
-                {showSpec && <th style={{ width: 200 }}>规格</th>}
+                <th style={{ width: 176 }}>所属目录 <span className="nc-req">*</span></th>
+                <th style={{ width: 230 }}>名称 <span className="nc-req">*≤50</span></th>
+                {showSpec && <th style={{ width: 200 }}>规格型号</th>}
                 <th style={{ width: 80 }}>单位</th>
-                <th style={{ width: 90 }} className="is-num">数量 √</th>
-                <th style={{ width: 120 }} className="is-num">成本参考价 √</th>
+                <th style={{ width: 90 }} className="is-num">数量 <span className="nc-req">*</span></th>
+                <th style={{ width: 120 }} className="is-num">成本参考价 <span className="nc-req">*</span></th>
                 <th style={{ width: 110 }} className="is-num">上浮率 %</th>
-                <th style={{ width: 110 }} className="is-num">上浮单价 √</th>
+                <th style={{ width: 110 }} className="is-num">上浮单价 <span className="nc-req">*</span></th>
                 <th style={{ width: 130 }} className="is-num">上浮前</th>
                 <th style={{ width: 130 }} className="is-num">金额</th>
                 {showNote && <th style={{ width: 160 }}>备注</th>}
@@ -833,6 +1119,13 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
               </tr>
             </thead>
             <tbody>
+              {/* 空态：明细被逐行删空、或该单本身未落库明细时显示（列数与表头保持一致）。
+                  只有「新建报价单」会带 15 行起步行，不走这里 */}
+              {!grouped.length && (
+                <tr><td colSpan={showSpec && showNote ? 13 : showSpec || showNote ? 12 : 11} className="nc-cell-sub is-center" style={{ padding: 22 }}>
+                  暂无明细行 —— 用上方「从物料库添加」或「从项目拉取用料」开始编制
+                </td></tr>
+              )}
               {grouped.map((g) => (
                 <React.Fragment key={g.key}>
                   <tr className="nc-tbl-group"><td colSpan={showSpec && showNote ? 13 : showSpec || showNote ? 12 : 11}>
@@ -848,16 +1141,32 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
                     const below = lineMarginBelow(it);
                     const rowLevel = marginApprover(below);
                     const isDead = !!it.code && deadCodes.has(it.code);
-                    /** 来自主数据的行：目录由物料档案决定，锁只读；其余行（自编 / 未归类）可在本页指定 */
+                    /** 来自主数据的行：目录由物料主数据决定，锁只读；其余行（自编 / 未归类）可在本页指定 */
                     const catLocked = !!it.code && quoteScopeOf(it.catId) !== SCOPE_UNASSIGNED;
                     const rate = srvRateOf(it.code);
                     const quote = isRateRow(it);
+                    /** 本行在改动清单里的位置（显示行号 = 全表行号，与 # 列一致） */
+                    const rn = rowNoMap.get(it.id) ?? 0;
+                    const chg = rowChg.get(rn);
+                    const dQty = diffMap.get(`qty-${it.id}`);
+                    const dCost = diffMap.get(`cost-${it.id}`);
+                    const dPrice = diffMap.get(`price-${it.id}`);
+                    const dAmt = diffMap.get(`amt-${it.id}`);
                     return (
-                      <tr key={it.id} className={miss.includes(it.id) || isDead ? 'is-miss' : ''}>
-                        <td className="is-num">{items.indexOf(it) + 1}</td>
+                      <tr key={it.id} className={`${miss.includes(it.id) || isDead ? 'is-miss' : ''}${chg ? ' is-chg-row' : ''}`}>
+                        <td className="is-num">
+                          <span className="nc-row-no">
+                            {chg && (
+                              <span className={`nc-chg-dot is-${chg.kind}`} title={chg.kind === 'add' ? '本次新增' : '本次修改'}>
+                                {chg.kind === 'add' ? '新' : '改'}
+                              </span>
+                            )}
+                            <span>{rn}</span>
+                          </span>
+                        </td>
                         <td>
                           {catLocked ? (
-                            <span className="nc-cell-sub" title={`${catPath(it.catId)} · 取自物料主数据，如需调整请到物料档案修改`}>{catPath(it.catId)}</span>
+                            <span className="nc-cell-sub" title={`${catPath(it.catId)} · 取自物料主数据，如需调整请到物料主数据修改`}>{catPath(it.catId)}</span>
                           ) : (
                             <select
                               className={`nc-cell-in${quoteScopeOf(it.catId) === SCOPE_UNASSIGNED ? ' miss' : ''}`}
@@ -871,9 +1180,15 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
                           )}
                         </td>
                         <td className={miss.includes(it.id) && !it.name.trim() ? 'cell-miss' : ''}>
-                          <input className={`nc-cell-in${miss.includes(it.id) && !it.name.trim() ? ' miss' : ''}`} value={it.name} maxLength={50} onChange={(e) => setIt(it.id, { name: e.target.value })} />
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <input className={`nc-cell-in${miss.includes(it.id) && !it.name.trim() ? ' miss' : ''}`} value={it.name} maxLength={50} onChange={(e) => setIt(it.id, { name: e.target.value })} />
+                            {isDead && <Tag tone="red">{it.code} 已停用</Tag>}
+                            {it.code && itemCertMiss(itemByCode(it.code)) && <span title={`${catPath(it.catId)} 要求 ${certRuleCn(it.catId)}，该物料未登记 CCCF 证书`}><Tag tone="orange">缺CCCF证</Tag></span>}
+                          </div>
                           {rate && (
-                            <div className="nc-cell-sub nc-rate-row">
+                            <details className="nc-rate-drawer">
+                              <summary>计量口径 ▾</summary>
+                              <div className="nc-cell-sub nc-rate-row">
                               <select className="nc-cell-in" value={it.basis || rate.basis}
                                 onChange={(e) => {
                                   const b = e.target.value as BillBasis;
@@ -921,11 +1236,8 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
                                   {l.q.hitMin ? ` · 低于最低限价 ${fmt(l.q.minFee)}，已按保底计` : ''}
                                 </span>
                               )}
-                            </div>
-                          )}
-                          {isDead && <div className="nc-field-err">{it.code} 已在材料主数据中停用，请替换为在用材料</div>}
-                          {it.code && itemCertMiss(itemByCode(it.code)) && (
-                            <div className="nc-field-err">{catPath(it.catId)} 要求 {certRuleCn(it.catId)}，该材料未登记 CCCF 证书</div>
+                              </div>
+                            </details>
                           )}
                         </td>
                         {showSpec && <td><span className="nc-cell-sub">{it.spec || '/'}</span></td>}
@@ -934,39 +1246,75 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
                             {UNITS.map((u) => <option key={u}>{u}</option>)}
                           </select>
                         </td>
-                        <td className="is-num">
+                        <td className={`is-num${dQty ? ' nc-diff-bg' : ''}`}>
                           {quote
                             ? <span className="nc-cell-sub">按{l.q && BILL_BASIS_CN[l.q.basis].replace('按', '')}</span>
-                            : <input className={`nc-cell-in is-num${miss.includes(it.id) && !it.qty ? ' miss' : ''}`} type="number" value={it.qty} onChange={(e) => setIt(it.id, { qty: Number(e.target.value) })} />}
+                            : (
+                              <div className="nc-diff-cell">
+                                <input className={`nc-cell-in is-num${miss.includes(it.id) && !it.qty ? ' miss' : ''}`} type="number" value={it.qty}
+                                  onFocus={() => focusSnap(it.id, 'qty')}
+                                  onBlur={() => blurRec(it.id, 'qty')}
+                                  onKeyDown={enterBlur}
+                                  onChange={(e) => setIt(it.id, { qty: Number(e.target.value) })} />
+                                {dQty && <div className="nc-diff-old">原 {dQty.prev}</div>}
+                              </div>
+                            )}
                         </td>
-                        <td className="is-num nc-cost-cell">
-                          <input className={`nc-cell-in is-num${miss.includes(it.id) && !it.cost ? ' miss' : ''}`} type="number" value={it.cost} onChange={(e) => setIt(it.id, { cost: Number(e.target.value) })} />
-                          <button className="nc-refbtn" onClick={() => setRefOpen(it)} title="查看成本参考价三源">¥参考</button>
+                        <td className={`is-num nc-cost-cell${dCost ? ' nc-diff-bg' : ''}`}>
+                          {/* ⚠️「输入框 + ¥参考」必须一起包在 .nc-cost-line 里，不能把 flex 挂在 <td> 上 ——
+                              否则 td 的 table-cell 盒被打掉：行高被「计量口径」撑到 128 时这一格贴行顶、
+                              ¥参考 也会掉到输入框下方（2026-09-28 修，与 style.css 同一条约定）。 */}
+                          <div className="nc-diff-cell">
+                            <div className="nc-cost-line">
+                              <input className={`nc-cell-in is-num${miss.includes(it.id) && !it.cost ? ' miss' : ''}`} type="number" value={it.cost}
+                                title={quote ? '按计量口径试算的行：此值不参与本行金额，仅用于整单毛利与审批口径' : undefined}
+                                onFocus={() => focusSnap(it.id, 'cost')}
+                                onBlur={() => blurRec(it.id, 'cost')}
+                                onKeyDown={enterBlur}
+                                onChange={(e) => setIt(it.id, { cost: Number(e.target.value) })} />
+                              <button className="nc-refbtn" onClick={() => setRefOpen(it)} title="查看成本参考价三源">¥参考</button>
+                            </div>
+                            {dCost && <div className="nc-diff-old">原 {fmt(dCost.prev)}</div>}
+                          </div>
                         </td>
                         <td className="is-num">
                           {quote
                             ? <span className="nc-cell-sub">试算价，不适用</span>
                             : (
-                              <>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
                                 <select className={`nc-cell-in${offTone}`} value={it.markup} onChange={(e) => setIt(it.id, { markup: Number(e.target.value) })}>
                                   {[0, 5, 8, 10, 12, 15, 18, 20, 22, 25, 28, 30, 35, 40].map((n) => <option key={n} value={n}>{n}%</option>)}
                                 </select>
-                                {/* 低于本目录默认毛利的当场提示：
-                                    让价不是一个抽象数字，得让人在改这一秒就知道它要付出什么代价（写理由 / 加签谁）。 */}
+                                {/* 低于本目录默认毛利的当场提示：让价不是一个抽象数字，得让人在改这一秒就知道它要付出什么代价。
+                                    提示改 Tag 与下拉同行，不再另起小字行；保留“个百分点”口径。 */}
                                 {below > 0 && (
-                                  <div className="nc-cell-sub" style={{ color: 'var(--c-warning-deep)' }}>
-                                    低于标准 {lineBaseMarkup(it)}% {below.toFixed(1)}pp
-                                    {rowLevel === '—' ? ' · 须写理由' : ` · 走${rowLevel}特批`}
-                                  </div>
+                                  <span title={`低于本目录标准毛利 ${lineBaseMarkup(it)}%，让利 ${below.toFixed(1)} 个百分点`}><Tag tone="orange">
+                                    低 {below.toFixed(1)} 个百分点{rowLevel === '—' ? ' · 须写理由' : ` · ${rowLevel}特批`}
+                                  </Tag></span>
                                 )}
-                              </>
+                              </div>
                             )}
                         </td>
-                        <td className="is-num"><b className={`num${offTone}`}>{fmt(l.price)}</b></td>
-                        <td className="is-num nc-cell-sub">{fmt(l.before)}</td>
-                        <td className="is-num"><b className="num">{fmt(l.amt)}</b></td>
+                        <td className={`is-num${dPrice ? ' nc-diff-bg' : ''}`}>
+                          <div className="nc-diff-cell">
+                            <b className={`num${offTone}`}>{fmt(l.price)}</b>
+                            {dPrice && <div className="nc-diff-old">{fmt(dPrice.prev)}</div>}
+                          </div>
+                        </td>
+                        {/* 试算价行没有「上浮前」这个中间量：金额由「服务单价 × 计量基数」直接得出，
+                            不经过 成本 × 上浮率。此前直接显示 it.cost，同一行就出现「上浮前 ¥20 / 金额 ¥108,000」
+                            两个毫不相干的数（2026-09-28 修）。 */}
+                        <td className="is-num nc-cell-sub" title={quote ? '按计量口径试算的行不走上浮，没有上浮前金额' : undefined}>
+                          {quote ? '—' : fmt(l.before)}
+                        </td>
+                        <td className={`is-num${dAmt ? ' nc-diff-bg' : ''}`}>
+                          <div className="nc-diff-cell">
+                            <b className="num">{fmt(l.amt)}</b>
+                            {dAmt && <div className="nc-diff-old">{fmt(dAmt.prev)}</div>}
+                          </div>
+                        </td>
                         {showNote && <td><input className="nc-cell-in" value={it.note} onChange={(e) => setIt(it.id, { note: e.target.value })} placeholder="—" /></td>}
-                        <td className="is-center"><Op danger onClick={() => { setItems((p) => p.filter((x) => x.id !== it.id)); toast('已删除明细行'); }}>删</Op></td>
+                        <td className="is-center"><Op danger onClick={() => { clearRowDiff(it.id); setItems((p) => p.filter((x) => x.id !== it.id)); toast('已删除明细行'); }}>删</Op></td>
                       </tr>
                     );
                   })}
@@ -981,13 +1329,13 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
           <div className="nc-sum-cell"><span>不含税合计</span><b className="num">{fmt(sumExTax - (exTax ? 0 : tax))}</b></div>
           <div className="nc-sum-cell"><span>税额（{taxRate}%）</span><b className="num">{fmt(tax)}</b></div>
           <div className="nc-sum-cell is-hl"><span>报价总额（含税 / 不含税）</span><b className="num">{fmt(total)}</b></div>
-          <div className="nc-sum-cell"><span>整体浮率</span><b className={`num${grossMarkup >= 30 ? ' is-red' : ''}`}>{grossMarkup.toFixed(1)}%</b></div>
+          <div className="nc-sum-cell"><span>整体浮率</span><b className={`num${grossMarkup < 15 ? ' is-red' : ''}`} title="浮率 &lt;15% 视为低毛利预警，触发审批">{grossMarkup.toFixed(1)}%</b></div>
           <div className={`nc-sum-trig${hit ? ' is-hit' : ' is-ok'}`}>{hitWhy}</div>
         </div>
       </Card>
 
-      {/* ===== 从材料库添加 ===== */}
-      <Drawer open={addOpen} onClose={() => setAddOpen(false)} width={1040} title="从物料与服务库添加" sub="材料 / 设备 / 服务 / 套件四类同表；编码 / 规格 / 单位 / 报价目录 / 成本参考价自动带出，目录列只读锁定"
+      {/* ===== 从物料库添加 ===== */}
+      <Drawer open={addOpen} onClose={() => setAddOpen(false)} width={1040} title="从物料库添加" sub="物料 / 服务 / 套件三类同表；编码 / 规格 / 单位 / 报价目录 / 成本参考价自动带出，目录列只读锁定"
         foot={<><Btn onClick={() => setAddOpen(false)}>取消</Btn><Btn kind="primary" onClick={addFromMat}>添加 {matPick.length || 0} 条</Btn></>}>
         <div className="nc-toolbar">
           <SearchInput value={matKw} onChange={setMatKw} placeholder="名称 / 编码 / 规格" width={240} />
@@ -999,7 +1347,7 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
             {REAL_SCOPES.map((s) => <option key={s.key} value={s.key}>{s.name}</option>)}
             <option value={SCOPE_UNASSIGNED}>未归类</option>
           </select>
-          <span className="nc-cell-sub">成本参考价按类型分档：材料 / 设备还原含税采购价 · 服务取人工 + 耗材构成 · 套件取配方展开成本</span>
+          <span className="nc-cell-sub">成本参考价按类型分档：物料还原含税采购价 · 服务取人工 + 耗材构成 · 套件取配置展开成本</span>
         </div>
         <DataTable
           cols={[
@@ -1011,35 +1359,33 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
             { key: 'stock', title: '库存', width: 70, align: 'right' as const, render: (m: any) => (isStocked(m.ty) ? <span className="num">{m.stock}</span> : <span className="nc-cell-sub">—</span>) },
             { key: 'price', title: '参考价', width: 100, align: 'right' as const, render: (m: any) => <b className="num">{fmt(m.price)}</b> },
             { key: 'cost', title: '成本参考价', width: 110, align: 'right' as const, render: (m: any) => <span className="num nc-cell-sub">{fmt(itemCostBase(m))}</span> },
-            { key: 'src', title: '价格来源', width: 120, render: (m: any) => <span className="nc-cell-sub">{m.ty === '服务' ? '人工 + 耗材构成' : m.ty === '套件' ? '配方展开成本' : '采购合同沉淀'}</span> },
+            { key: 'src', title: '价格来源', width: 120, render: (m: any) => <span className="nc-cell-sub">{m.ty === '服务' ? '人工 + 耗材构成' : m.ty === '套件' ? '配置展开成本' : '采购合同沉淀'}</span> },
           ]}
-          rows={matCandidates}
+          rows={matPaged.paged}
           rowKey={(m: any) => m.code}
           minWidth={860}
           selectable
+          foot={matPaged.foot}
           selected={matPick}
           onSelectAll={(ids) => setMatPick(ids)}
           onSelectRow={(id) => setMatPick((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]))}
         />
       </Drawer>
 
-      {/* ===== AI 识别图纸 ===== */}
-      <Modal open={aiOpen} onClose={() => setAiOpen(false)} width={480} title="AI 识别图纸生成明细"
-        foot={<><Btn onClick={() => setAiOpen(false)}>取消</Btn><Btn kind="primary" disabled={aiRun} onClick={() => { doAI(); }}>{aiRun ? '识别中…' : '开始识别'}</Btn><Btn disabled={!aiPicked.length} onClick={() => { setAiOpen(false); toast(`已确认 ${aiPicked.length} 条 AI 明细`); }}>确认采用</Btn></>}>
-        <Banner tone="info">上传消防图纸（PDF / DWG 导出图 / 照片）→ 自动识别系统类型、点位数量、设备型号，生成待确认明细行；<b>识别结果须逐条核对</b>。</Banner>
-        <div className="nc-dropzone"><Ico n="edit" size={16} /> 拖入图纸或 <Btn size="sm">选择文件</Btn><div className="nc-cell-sub">支持 PDF / PNG / JPG / DWG 导出图，单文件 ≤50MB</div></div>
-        {aiRun && <div className="nc-rulebar">识别中：正在解析图层与图例…</div>}
-        {!!aiPicked.length && (
-          <>
-            <div className="nc-sec-title">识别结果（{aiPicked.length} 条待确认）</div>
-            <ul className="nc-check-list">{aiPicked.map((n) => <li key={n.name}><Ico n="check" size={16} /> {n.name} <span className="nc-tiny nc-muted" style={{ marginLeft: 8 }}>×{n.qty} {n.unit}</span></li>)}</ul>
-          </>
-        )}
-      </Modal>
+      {/* ===== AI 识别图纸 → 识别工作台 ===== */}
+      <RecognitionWorkbench
+        open={aiOpen}
+        onClose={() => setAiOpen(false)}
+        title="报价明细识别"
+        fields={QUOTE_RECOG_FIELDS}
+        pageCount={2}
+        onConfirm={onQuoteRecog}
+      />
 
       {/* ===== 手输自定义行 ===== */}
       <Modal open={customOpen} onClose={() => setCustomOpen(false)} width={640} title="＋ 手输自定义行"
         foot={<><Btn onClick={() => setCustomOpen(false)}>取消</Btn><Btn kind="primary" onClick={addCustom}>添加</Btn></>}>
+        <Banner tone="info">仅本报价单临时使用，<b>不会自动写入物料主数据</b>；如需沉淀请到物料主数据新建后从物料库添加。</Banner>
         <div className="nc-form-grid">
           <Field label="所属目录" req note="只能选最细一级，报价科目与默认上浮率由此派生">
             <select className="nc-input" value={cCat} onChange={(e) => setCCat(e.target.value)}>
@@ -1048,7 +1394,7 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
             </select>
           </Field>
           <Field label="名称" req><input className="nc-input" value={cName} onChange={(e) => setCName(e.target.value)} maxLength={50} placeholder="≤50 字" /></Field>
-          <Field label="规格"><input className="nc-input" value={cSpec} onChange={(e) => setCSpec(e.target.value)} /></Field>
+          <Field label="规格型号"><input className="nc-input" value={cSpec} onChange={(e) => setCSpec(e.target.value)} /></Field>
           <Field label="单位" req><select className="nc-input" value={cUnit} onChange={(e) => setCUnit(e.target.value)}>
             {UNITS.map((u) => <option key={u}>{u}</option>)}
           </select></Field>
@@ -1059,7 +1405,7 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
 
       {/* ===== 从项目拉取用料 ===== */}
       <Drawer open={projOpen} onClose={() => setProjOpen(false)} width={880} title="从项目拉取用料"
-        sub="选项目 → 勾材料 / 套件 → 一键生成报价明细（支持部分选择）"
+        sub="选项目 → 勾物料 / 套件 → 一键生成报价明细（支持部分选择）"
         foot={<>
           <span className="nc-cell-sub" style={{ marginRight: 'auto' }}>已选 {projSel.size} 项</span>
           <Btn onClick={() => setProjOpen(false)}>取消</Btn>
@@ -1075,12 +1421,10 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
           const proj = PROJECTS.find((p) => p.id === projPick);
           return (
             <>
-              <Banner tone="info">按项目用料清单拉取：材料自动带出规格 / 单位 / 成本参考价；<b>套件可选「整体带入」或「展开为材料明细」</b>。</Banner>
+              <Banner tone="info">按项目用料清单拉取：物料自动带出规格 / 单位 / 成本参考价；<b>套件可选「整体带入」或「展开为物料明细」</b>。</Banner>
               <div className="nc-form-grid">
                 <Field label="选择项目" req span={2}>
-                  <select className="nc-input" value={projPick} onChange={(e) => pickProject(e.target.value)}>
-                    {PROJECTS.map((p) => <option key={p.id} value={p.id}>{p.id} · {p.name}（{p.type}）</option>)}
-                  </select>
+                  <ProjectPicker value={projPick} onChange={pickProject} />
                 </Field>
                 <Field label="客户" span={2}>
                   <input className="nc-input" readOnly value={proj?.customer ?? ''} />
@@ -1096,7 +1440,7 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
                   return (
                     <div key={k.code} style={{ border: '1px solid var(--c-hairline)', borderRadius: 8, marginBottom: 8, overflow: 'hidden' }}>
                       {/* 套件主行 */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: kitChecked ? 'var(--c-primary-bg)' : '#fafbfc' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: kitChecked ? 'var(--c-primary-bg)' : 'var(--c-surface-soft)' }}>
                         <Check checked={kitChecked} onChange={(v) => {
                           toggleOne(k.code, v);
                           (ver?.lines ?? []).forEach((_, li) => {
@@ -1107,22 +1451,22 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
                         }} />
                         <b>{k.name}</b> <Tag tone="purple">套件</Tag>
                         <span className="nc-tiny nc-muted">{k.code} · {k.spec}</span>
-                        {/* 带入粒度：整体 = 报价明细 1 行 = 1 个套件；展开 = 按当前生效配方逐行摊平 */}
+                        {/* 带入粒度：整体 = 报价明细 1 行 = 1 个套件；展开 = 按当前生效配置逐行摊平 */}
                         <select
                           className="nc-input nc-input-sm"
                           style={{ width: 168 }}
                           value={kitMode[k.code] ?? 'expand'}
                           onChange={(e) => setKitMode((m) => ({ ...m, [k.code]: e.target.value as 'expand' | 'whole' }))}
-                          title="整包：报价明细生成 1 行套件（保留套件编码与配方版本）；展开：按配方逐条生成材料 / 设备 / 服务行"
+                          title="整包：报价明细生成 1 行套件（保留套件编码与配置版本）；展开：按配置逐条生成物料 / 服务行"
                         >
-                          <option value="expand">展开为材料明细</option>
+                          <option value="expand">展开为物料明细</option>
                           <option value="whole">作为套件整包（1 行）</option>
                         </select>
                         <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--ink-3)' }}>
-                          含材料 {ver?.lines.length ?? 0} 项 · 套件成本 {fmt(c.total)}
+                          含 {ver?.lines.length ?? 0} 项构成 · 套件成本 {fmt(c.total)}
                         </span>
                       </div>
-                      {/* 展开材料明细：整包模式下逐行勾选不再有意义，整块收起避免误操作 */}
+                      {/* 展开物料明细：整包模式下逐行勾选不再有意义，整块收起避免误操作 */}
                       {kitMode[k.code] !== 'whole' && ver?.lines.map((ln, li) => {
                         const item = itemByCode(ln.code);
                         const lineKey = `${k.code}__${li}`;
@@ -1151,7 +1495,7 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
                 })}
               </div>
 
-              <div className="nc-sec-title" style={{ marginTop: 16 }}>材料（{mats.length}）<span className="nc-tiny nc-muted">勾选后可修改数量</span></div>
+              <div className="nc-sec-title" style={{ marginTop: 16 }}>物料（{mats.length}）<span className="nc-tiny nc-muted">勾选后可修改数量</span></div>
               <table className="nc-tbl" style={{ minWidth: 840 }}>
                 <thead><tr>
                   <th style={{ width: 40 }}><Check checked={allMats} onChange={(v) => toggleAll(mats.map((m) => m.code), v)} /></th>
@@ -1190,17 +1534,17 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
       <Drawer open={!!refOpen} onClose={() => setRefOpen(null)} width={720} title="价格参考"
         sub={refOpen && (() => {
           const m = MATERIALS.find((x) => x.code === refOpen.code) || MATERIALS.find((x) => x.name === refOpen.name);
-          return `${refOpen.name}${m ? `（${m.code}）` : '（自定义材料）'} · 当前成本 ${fmt(refOpen.cost)}`;
+          return `${refOpen.name}${m ? `（${m.code}）` : '（自定义物料）'} · 当前成本 ${fmt(refOpen.cost)}`;
         })()}>
         {refOpen && (() => {
           const mat = MATERIALS.find((x) => x.code === refOpen.code) || MATERIALS.find((x) => x.name === refOpen.name);
-          /* 自定义材料：无价格档案 → 仅支持手工填写 */
+          /* 自定义物料：无价格档案 → 仅支持手工填写 */
           if (!mat) {
             const guess = MATERIALS.filter((x) => x.name.slice(0, 2) === refOpen.name.slice(0, 2)).slice(0, 3);
             return (
               <>
                 <Banner tone="warn">
-                  该行为<b>自定义材料</b>，无价格档案。{guess.length ? <>可参考同类材料（{guess.map((g) => g.name).join(' / ')}）。</> : null}
+                  该行为<b>自定义物料</b>，无价格档案。{guess.length ? <>可参考同类物料（{guess.map((g) => g.name).join(' / ')}）。</> : null}
                 </Banner>
                 <div className="nc-form-grid">
                   <Field label="手工填写成本参考价" req span={2}>
@@ -1212,7 +1556,7 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
                     const el = document.getElementById('nc-ref-manual') as HTMLInputElement | null;
                     const v = Number(el?.value || 0);
                     if (!(v > 0)) { toast('请填写价格'); return; }
-                    adopt(v, '手工填写（自定义材料）');
+                    adopt(v, '手工填写（自定义物料）');
                   }}>采纳并留痕</Btn>
                 </div>
               </>
@@ -1229,7 +1573,7 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
           return (
             <>
               <div className="nc-cell-sub" style={{ marginBottom: 10 }}>
-                编码 <b>{mat.code}</b> · 规格 {mat.spec || '—'} · 单位 {mat.unit} ｜ 材料库参考成本 <b className="num">{fmt(R.libPrice)}</b> ｜ 当前成本 <b className="num">{fmt(refOpen.cost)}</b>
+                编码 <b>{mat.code}</b> · 规格 {mat.spec || '—'} · 单位 {mat.unit} ｜ 物料库参考成本 <b className="num">{fmt(R.libPrice)}</b> ｜ 当前成本 <b className="num">{fmt(refOpen.cost)}</b>
               </div>
 
               {/* 三源对比条 + 综合建议价 */}
@@ -1358,6 +1702,15 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
           { k: '整体浮率', v: grossMarkup.toFixed(1) + '%' },
           { k: '税率', v: `含税 ${taxRate}%` },
         ]} />
+        {/* 「变更原因」要写的是本次到底改了什么 —— 改动清单就在旁边，别让人凭记忆写 */}
+        {editing && (
+          <div className="nc-editdiff-savehint">
+            相对进入编辑时的内容，本次共 <b className="num">{editChanges.length}</b> 处改动
+            {editChanges.length > 0
+              ? <button className="nc-btn nc-btn-link" style={{ marginLeft: 8 }} onClick={() => { setSubmitOpen(false); setDiffOpen(true); }}>查看改动明细 →</button>
+              : <span className="nc-cell-sub">（明细未变，仅状态推进）</span>}
+          </div>
+        )}
         <Field label="变更原因" req note={`${reason.length}/200 字`}>
           <textarea className="nc-input" rows={3} maxLength={200} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="例：按客户预算删减应急照明系统，报警点位优化" />
         </Field>
@@ -1517,10 +1870,23 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
         </Field>
       </Modal>
 
+      {/* ===== 本次改动对比 ===== */}
+      <Drawer open={diffOpen} onClose={() => setDiffOpen(false)} width={920} title="本次改动对比"
+        sub={<>对比基准：进入编辑时的已保存内容{editing ? `（${editing.id} ${editing.ver}）` : '（新建报价单，无基线，全部按新增计）'} · 当前 {items.length} 行明细</>}
+        foot={<Btn onClick={() => setDiffOpen(false)}>关闭</Btn>}>
+        <EditDiffTable base={baseViews} cur={curViews} labelOf={catPath} />
+      </Drawer>
+
       {/* ===== 保存方式选择弹窗 ===== */}
       <Modal open={saveChoiceOpen} onClose={() => setSaveChoiceOpen(false)} width={520} title="保存方式">
         <div style={{ padding: 24, textAlign: 'center' }}>
           <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 16, color: 'var(--ink-1)' }}>请选择保存方式</div>
+          {editChanges.length > 0 && (
+            <div className="nc-editdiff-savehint">
+              本次编辑共 <b className="num">{editChanges.length}</b> 处改动（新增 {editChanges.filter((c) => c.kind === 'add').length} · 删除 {editChanges.filter((c) => c.kind === 'del').length} · 修改 {editChanges.filter((c) => c.kind === 'mod').length}）
+              <button className="nc-btn nc-btn-link" style={{ marginLeft: 8 }} onClick={() => { setSaveChoiceOpen(false); setDiffOpen(true); }}>查看改动明细 →</button>
+            </div>
+          )}
           <div style={{ display: 'flex', gap: 16, justifyContent: 'center' }}>
             <div style={{ 
               flex: 1, 
@@ -1531,7 +1897,7 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
               transition: 'all 0.2s',
               background: 'var(--c-canvas)'
             }}
-            onClick={() => { setSaveChoiceOpen(false); if (editing) { patchQuote(editing.id, { update: TODAY }); toast(`${editing.id} 已保存为当前版本`); }; }}
+            onClick={() => { setSaveChoiceOpen(false); if (editing) { patchQuote(editing.id, { update: TODAY }); rebase(); setDiffMap(new Map()); toast(`${editing.id} 已保存为当前版本`); }; }}
             onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--c-primary)'; e.currentTarget.style.background = 'var(--c-primary-bg)'; }}
             onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--c-border)'; e.currentTarget.style.background = 'var(--c-canvas)'; }}
             >
@@ -1548,7 +1914,7 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
               transition: 'all 0.2s',
               background: 'var(--c-canvas)'
             }}
-            onClick={() => { setSaveChoiceOpen(false); if (editing) { toast(`已基于 ${editing.ver} 保存为新版本 ${nextVerNo}`); }; }}
+            onClick={() => { setSaveChoiceOpen(false); if (editing) { setDiffMap(new Map()); toast(`已基于 ${editing.ver} 保存为新版本 ${nextVerNo}`); }; }}
             onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--c-primary)'; e.currentTarget.style.background = 'var(--c-primary-bg)'; }}
             onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--c-border)'; e.currentTarget.style.background = 'var(--c-canvas)'; }}
             >
@@ -1598,10 +1964,7 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
         <div className="nc-warnbox is-info">独立新建不继承当前页明细；单号自动生成，初始状态「草稿」，组价完成后再提交审批。</div>
         <div className="nc-form-grid">
           <Field label="客户" req span={2}>
-            <select className="nc-input" value={nqCust} onChange={(e) => setNqCust(e.target.value)}>
-              <option value="">请选择客户</option>
-              {CUSTOMERS.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
-            </select>
+            <CustomerPicker value={nqCust} onChange={setNqCust} emit="name" />
           </Field>
           <Field label="报价名称" req span={2}>
             <input className="nc-input" value={nqName} onChange={(e) => setNqName(e.target.value)} placeholder="如：××医院住院楼消防系统升级报价" />
@@ -1618,6 +1981,9 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
           </Field>
         </div>
       </Modal>
+
+      {/* ============ 统一导出弹窗 ============ */}
+      <ExportDialog {...exportApi.dialogProps} />
     </>
   );
 }

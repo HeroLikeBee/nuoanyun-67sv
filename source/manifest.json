@@ -9,11 +9,35 @@
       "kind": "source"
     },
     {
+      "path": "components/ai/actions.ts",
+      "kind": "source"
+    },
+    {
+      "path": "components/ai/presets.ts",
+      "kind": "source"
+    },
+    {
+      "path": "components/ai/store.ts",
+      "kind": "source"
+    },
+    {
+      "path": "components/AiAssistant.tsx",
+      "kind": "source"
+    },
+    {
       "path": "components/AppShell.tsx",
       "kind": "source"
     },
     {
+      "path": "components/attImport.ts",
+      "kind": "source"
+    },
+    {
       "path": "components/CategoryTree.tsx",
+      "kind": "source"
+    },
+    {
+      "path": "components/certImport.ts",
       "kind": "source"
     },
     {
@@ -33,11 +57,23 @@
       "kind": "source"
     },
     {
+      "path": "components/export.css",
+      "kind": "source"
+    },
+    {
+      "path": "components/export.tsx",
+      "kind": "source"
+    },
+    {
       "path": "components/icons.tsx",
       "kind": "source"
     },
     {
       "path": "components/IdMarkVerify.tsx",
+      "kind": "source"
+    },
+    {
+      "path": "components/MapPicker.tsx",
       "kind": "source"
     },
     {
@@ -85,11 +121,23 @@
       "kind": "source"
     },
     {
+      "path": "components/quoteEditDiff.tsx",
+      "kind": "source"
+    },
+    {
+      "path": "components/RecognitionWorkbench.tsx",
+      "kind": "source"
+    },
+    {
       "path": "components/store.ts",
       "kind": "source"
     },
     {
       "path": "components/ui.tsx",
+      "kind": "source"
+    },
+    {
+      "path": "components/xlsx.ts",
       "kind": "source"
     },
     {
@@ -102,6 +150,10 @@
     },
     {
       "path": "pages/AttendancePage.tsx",
+      "kind": "source"
+    },
+    {
+      "path": "pages/BidDetailPage.tsx",
       "kind": "source"
     },
     {

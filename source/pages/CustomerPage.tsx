@@ -2,11 +2,13 @@
 // 十要素：骨架/统计卡/筛选/完整列/新建弹窗/详情抽屉/状态机/规则/示例数据
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Btn, Banner, Card, DataTable, Drawer, EntityLink, Field, KvGrid, ListToolbar, Modal, Op, OpSep,
-  PageHead, Progress, TableFoot, Tabs, Tag, Timeline, Tip, useToast, Code, IdCell, pressProps,} from '../components/ui';
-import { CUSTOMERS, CONTRACT_STATUS_TONE, FOLLOWS, OPPS, isOppClosed, PROJECTS, QUOTES, CONTRACTS, fmtWan, canSeeMoney, normContractStatus, oppStageTone, TODAY } from '../components/data';
-import { consumeFocus, getOppStageIdx, getOppStages, setFocus } from '../components/store';
+  Btn, Banner, BatchActionBar, Card, DataTable, Drawer, EntityLink, Field, KvGrid, ListToolbar, Modal, Op, OpMore, OpSep,
+  PageHead, Progress, TableFoot, Tabs, Tag, Timeline, useToast, Code, CustomerPicker, IdCell, pressProps,
+  maskPhone, canSeePhone,} from '../components/ui';
+import { CUST_GRADES, CUST_GRADE_LABEL, CUST_INDUSTRIES, CUST_REGIONS, CUST_SOURCES, CUST_STATUS_NEW, CUSTOMERS, CONTRACT_STATUS_TONE, FOLLOWS, OPPS, isOppClosed, PROJECTS, QUOTES, CONTRACTS, fmtWan, canSeeMoney, normContractStatus, oppStageTone, TODAY, getCustomerLevelRules, getTodoConfig } from '../components/data';
+import { consumeFocus, consumePageAction, getOppStageIdx, getOppStages, setFocus } from '../components/store';
 import { Ico } from '../components/icons';
+import { ExportButton, ExportDialog, useExport, getUserName, type ExportField } from '../components/export';
 
 const ST_TONE: Record<string, 'green' | 'blue' | 'gray'> = { 成交: 'green', 意向: 'blue', 潜在: 'gray' };
 const G_TONE: Record<string, 'orange' | 'blue' | 'gray'> = { A: 'orange', B: 'blue', C: 'gray', 潜: 'gray' };
@@ -24,6 +26,8 @@ const quotesOf = (c: C) => QUOTES.filter((q) => q.customerId === c.id || q.custo
 const contractsOf = (c: C) => CONTRACTS.filter((x) => x.party === c.name);
 /** 项目关联（优先按 customerId 外键，回落按客户名） */
 const projectsOf = (c: C) => PROJECTS.filter((p) => ((p as { customerId?: string }).customerId === c.id) || p.customer === c.name);
+/** 已有合同 / 项目的客户已进入成交阶段：隐藏「转商机」，仅保留跟进等当前阶段操作（项19） */
+const hasBiz = (c: C) => contractsOf(c).length > 0 || projectsOf(c).length > 0;
 
 /** 联系人：主联系人 + 决策链其他成员（客户决策链留痕，跨团队脱敏） */
 const CONTACT_SEED: Record<string, Contact[]> = {
@@ -41,11 +45,11 @@ const pipeAmtOf = (c: C) => pipeOf(c).reduce((a, o) => a + (o.amt || 0), 0);
 /** 合同回款率 = 1 − 应收余额 / 累计成交 */
 const recvRate = (c: C) => (c.dealAmt > 0 ? Math.round((1 - c.recv / c.dealAmt) * 100) : 0);
 
-const GRADE_RULE = '等级规则：A 年成交 ≥300 万 · B 100~300 万 · C <100 万 · 潜在 = 尚无成交（按累计成交自动归档，可手工覆盖并留痕）';
-
 export default function CustomerPage({ go, role, nav }: { go: (p: string) => void; role: string; nav?: number }) {
   const toast = useToast();
   const money = canSeeMoney(role);
+  const remindDays = getTodoConfig().remindDays;
+  const remindWarn = Math.max(1, Math.floor(remindDays / 2));
   const [tab, setTab] = useState('all');
   const [kw, setKw] = useState('');
   const [industry, setIndustry] = useState('');
@@ -76,8 +80,23 @@ export default function CustomerPage({ go, role, nav }: { go: (p: string) => voi
   const [transferOpen, setTransferOpen] = useState<C | null>(null);
   const [convertOpen, setConvertOpen] = useState<C | null>(null);
   const [quickOpen, setQuickOpen] = useState(false);
+  const [quickCust, setQuickCust] = useState('');
   const [batchOpen, setBatchOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [more, setMore] = useState(false);
+  /* 项1：客户分级规则说明抽屉（只读；阈值在系统设置「业务字典」维护） */
+  const [ruleOpen, setRuleOpen] = useState(false);
+  /* 项1：新增客户分级自动建议（mock：依据客户状态推断；阈值读取 BUSINESS_CONFIG，可在系统设置调整） */
+  const custLvlRules = getCustomerLevelRules();
+
+  /* AI 助手快捷操作：助手在本页点「Excel 导入客户」/「现场拍照登记」→ 直接打开对应窗口。
+     以 nav（路由脉冲）为依赖，已在客户管理时再点一次也能重新打开。 */
+  useEffect(() => {
+    const a = consumePageAction('customer');
+    if (a === 'import') setImportOpen(true);
+    else if (a === 'quick') setQuickOpen(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nav]);
   // 联系人（决策链多人）
   const [ctOv, setCtOv] = useState<Record<string, Contact[]>>({});
   const [delCt, setDelCt] = useState<{ c: C; i: number } | null>(null);
@@ -97,6 +116,8 @@ export default function CustomerPage({ go, role, nav }: { go: (p: string) => voi
   const [fNote, setFNote] = useState('');
   const [errs, setErrs] = useState<Record<string, string>>({});
   const [dupTip, setDupTip] = useState('');
+  /* 项1：新增客户分级自动建议（mock：依据客户状态推断；阈值读 BUSINESS_CONFIG。须在 fStatus 声明之后） */
+  const suggestedGrade = !custLvlRules.autoSuggest ? null : (fStatus === '意向' ? 'B' : 'C');
   // 跟进态
   const [way, setWay] = useState('上门拜访');
   const [photo, setPhoto] = useState(0);
@@ -148,8 +169,7 @@ export default function CustomerPage({ go, role, nav }: { go: (p: string) => voi
     if (status && c.status !== status) return false;
     if (source && c.source !== source) return false;
     if (owner && c.owner !== owner) return false;
-    if (recent === 'd30' && c.lastFollowDays <= 30) return false;
-    if (recent === 'd14' && c.lastFollowDays <= 14) return false;
+    if (recent === 'overdue' && c.lastFollowDays <= remindDays) return false;
     if (kw && !(c.name + c.id + c.contact + c.phone).includes(kw)) return false;
     return true;
   }), [tab, industry, region, grade, status, source, owner, recent, kw]);
@@ -189,19 +209,33 @@ export default function CustomerPage({ go, role, nav }: { go: (p: string) => voi
     setDelCt(null); toast(`联系人「${n}」已删除`);
   };
 
+  /* 统一导出：字段从客户表格列派生（排除操作列），联系人 / 电话为敏感字段强制脱敏 + 审计 */
+  const exportFields: ExportField[] = [
+    { key: 'id', label: '客户编号' },
+    { key: 'name', label: '客户名称' },
+    { key: 'industry', label: '行业' },
+    { key: 'contact', label: '联系人', sensitive: true },
+    { key: 'phone', label: '联系电话', sensitive: true },
+    { key: 'region', label: '区域' },
+    { key: 'grade', label: '客户分级' },
+    { key: 'source', label: '客户来源' },
+    { key: 'status', label: '跟进状态' },
+    { key: 'owner', label: '负责人' },
+    { key: 'dealAmt', label: '累计成交' },
+    { key: 'lastFollow', label: '最近跟进' },
+  ];
+  const exportApi = useExport({
+    pageKey: 'customer', pageName: '客户列表',
+    fields: exportFields, defaultFieldKeys: exportFields.map((f) => f.key),
+    totalCount: CUSTOMERS.length, filteredCount: rows.length, selectedCount: sel.length,
+    previewRows: rows.slice(0, 5),
+    userName: getUserName(role),
+    onExport: () => {},
+  });
+
   return (
     <>
-      <PageHead
-        title="客户档案"
-        actions={<>
-          <Btn kind="primary" onClick={() => openEdit(null)}>＋ 新增客户</Btn>
-          <Btn onClick={() => setQuickOpen(true)}><Ico n="receipt" size={16} /> 新增跟进（扫描留痕）</Btn>
-          {sel.length > 0 && <Btn onClick={() => setBatchOpen(true)}>批量操作（{sel.length}）</Btn>}
-          <Btn onClick={() => setTransferOpen(sel.length ? (CUSTOMERS.find((c) => c.id === sel[0]) || null) : null)}>归属转移</Btn>
-          <Btn onClick={() => setImportOpen(true)}>Excel 导入</Btn>
-          <Btn onClick={() => toast('客户列表已导出（CSV · 含 12 列 · 按当前筛选，手机号按角色脱敏）')}>导出</Btn>
-        </>}
-      />
+      <PageHead title="客户档案" />
 
       <Tabs
         value={tab}
@@ -226,12 +260,12 @@ export default function CustomerPage({ go, role, nav }: { go: (p: string) => voi
         </div>
         <div className="nc-tile">
           <div className="nc-tile-label">应收账款余额</div>
-          <div className="nc-tile-value nc-v-red">{money ? fmtWan(stat.recv) : '—'}</div>
+          <div className={`nc-tile-value${stat.recv > 0 ? ' nc-v-red' : ''}`}>{money ? fmtWan(stat.recv) : '—'}</div>
           <div className="nc-tile-sub">应收未收合计 · 催收与登记收款直达</div>
         </div>
         <div className="nc-tile is-clickable" onClick={() => go('opp')} {...pressProps(() => go('opp'))}>
-          <div className="nc-tile-label">活跃商机金额 <span className="nc-kpi-drill">穿透 ↗</span></div>
-          <div className="nc-tile-value nc-v-orange">{money ? fmtWan(stat.active) : '—'}</div>
+          <div className="nc-tile-label">活跃商机金额 <span className="nc-kpi-drill">查看明细 ↗</span></div>
+          <div className="nc-tile-value nc-v-blue">{money ? fmtWan(stat.active) : '—'}</div>
           <div className="nc-tile-sub">非终态商机合计 · 点击进入在谈管道 →</div>
         </div>
       </div>
@@ -253,63 +287,91 @@ export default function CustomerPage({ go, role, nav }: { go: (p: string) => voi
                 ...(['潜在', '意向', '成交'] as const).map((s) => ({ key: s, label: s, cnt: cntBy((c) => c.status === s) })),
               ],
             },
-            {
-              label: '跟进', value: recent, onChange: (k) => { setRecent(k); setPage(1); },
-              items: [
-                { key: 'all', label: '全部', cnt: base.length },
-                { key: 'd14', label: '超 14 天未跟进', cnt: cntBy((c) => c.lastFollowDays > 14) },
-                { key: 'd30', label: '超 30 天未跟进', cnt: cntBy((c) => c.lastFollowDays > 30) },
-              ],
-            },
           ]}
-          right={<>
-            <select className="nc-input" style={{ width: 130 }} value={industry} onChange={(e) => { setIndustry(e.target.value); setPage(1); }}>
-              <option value="">全部行业</option>
-              {[...new Set(CUSTOMERS.map((c) => c.industry))].map((i) => <option key={i}>{i}</option>)}
-            </select>
-            <select className="nc-input" style={{ width: 110 }} value={region} onChange={(e) => { setRegion(e.target.value); setPage(1); }}>
-              <option value="">全部地区</option>{['昆明', '楚雄', '文山', '曲靖', '大理', '普洱', '广西'].map((r) => <option key={r}>{r}</option>)}
-            </select>
-            <select className="nc-input" style={{ width: 130 }} value={owner} onChange={(e) => { setOwner(e.target.value); setPage(1); }}>
-              <option value="">全部归属人</option>{['蓝峰', '李思敏', '王志海', '赵薇', '刘宇', '李慧敏'].map((s) => <option key={s}>{s}</option>)}
-            </select>
-            <select className="nc-input" style={{ width: 140 }} value={source} onChange={(e) => { setSource(e.target.value); setPage(1); }}>
-              <option value="">全部来源</option>{[...new Set(CUSTOMERS.map((c) => c.source))].map((s) => <option key={s}>{s}</option>)}
-            </select>
-            <input className="nc-input nc-lt-search" value={kw} placeholder="搜索客户名称 / 联系人 / 编号"
-              onChange={(e) => { setKw(e.target.value); setPage(1); }} />
-            <Btn onClick={reset}>重置</Btn>
-          </>}
+          children={
+            <div className="nc-ltrow" style={{ gap: 6, alignItems: 'center' }}>
+              <Btn onClick={() => setMore((v) => !v)}>{more ? '收起筛选 ▴' : '更多筛选 ▾'}</Btn>
+              {more && (<>
+                <select className="nc-input" style={{ width: 130 }} value={industry} onChange={(e) => { setIndustry(e.target.value); setPage(1); }}>
+                  <option value="">全部行业</option>
+                  {[...new Set(CUSTOMERS.map((c) => c.industry))].map((i) => <option key={i}>{i}</option>)}
+                </select>
+                <select className="nc-input" style={{ width: 110 }} value={region} onChange={(e) => { setRegion(e.target.value); setPage(1); }}>
+                  <option value="">全部地区</option>{['昆明', '楚雄', '文山', '曲靖', '大理', '普洱', '广西'].map((r) => <option key={r}>{r}</option>)}
+                </select>
+                <select className="nc-input" style={{ width: 130 }} value={owner} onChange={(e) => { setOwner(e.target.value); setPage(1); }}>
+                  <option value="">全部归属人</option>{['蓝峰', '李思敏', '王志海', '赵薇', '刘宇', '李慧敏'].map((s) => <option key={s}>{s}</option>)}
+                </select>
+                <select className="nc-input" style={{ width: 140 }} value={source} onChange={(e) => { setSource(e.target.value); setPage(1); }}>
+                  <option value="">全部来源</option>{[...new Set(CUSTOMERS.map((c) => c.source))].map((s) => <option key={s}>{s}</option>)}
+                </select>
+                <select className="nc-input" style={{ width: 140 }} value={recent} onChange={(e) => { setRecent(e.target.value); setPage(1); }}>
+                  <option value="all">全部跟进</option>
+                  <option value="overdue">超 {remindDays} 天未跟进</option>
+                </select>
+              </>)}
+            </div>
+          }
+          search={{ value: kw, onChange: setKw, placeholder: '搜索客户名称 / 联系人 / 编号', width: 220 }}
+          onReset={reset}
+          echoItems={[
+            ...(grade ? [{ key: 'grade', label: `等级：${grade === '潜' ? '潜在' : `${grade} 级`}` }] : []),
+            ...(status ? [{ key: 'status', label: `状态：${status}` }] : []),
+            ...(industry ? [{ key: 'industry', label: `行业：${industry}` }] : []),
+            ...(region ? [{ key: 'region', label: `地区：${region}` }] : []),
+            ...(owner ? [{ key: 'owner', label: `归属人：${owner}` }] : []),
+            ...(source ? [{ key: 'source', label: `来源：${source}` }] : []),
+            ...(recent !== 'all' ? [{ key: 'recent', label: `跟进：超 ${remindDays} 天未跟进` }] : []),
+          ]}
+          onEchoRemove={(key) => {
+            if (key === 'grade') setGrade('');
+            else if (key === 'status') setStatus('');
+            else if (key === 'industry') setIndustry('');
+            else if (key === 'region') setRegion('');
+            else if (key === 'owner') setOwner('');
+            else if (key === 'source') setSource('');
+            else if (key === 'recent') setRecent('all');
+          }}
+          onEchoClear={reset}
+          moreMenu={[{ label: 'Excel 导入', onClick: () => setImportOpen(true) }, { label: '客户分级规则', onClick: () => setRuleOpen(true) }]}
+          actions={
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Btn onClick={() => setQuickOpen(true)}><Ico n="receipt" size={16} /> 新增跟进（扫描留痕）</Btn>
+              <ExportButton onClick={exportApi.trigger} selectedCount={sel.length} />
+              <Btn kind="primary" onClick={() => openEdit(null)}>＋ 新增客户</Btn>
+            </div>
+          }
         />
       </Card>
 
       <Card flush>
-        <div className="nc-listhint">
-          <span>客户列表<Tip text="默认按修改时间倒序；拜访跟进须现场拍照并叠加时间水印 + GPS 定位；空数据显示「 / 」。" /></span>
-          <span className="nc-listhint-sp" />
-          <span>等级规则<Tip text={GRADE_RULE.replace('等级规则：', '')} /></span>
-        </div>
+        <BatchActionBar
+          selectedCount={sel.length}
+          onClear={() => setSel([])}
+          actions={[
+            { label: '归属转移', onClick: () => setTransferOpen(sel.length ? (CUSTOMERS.find((c) => c.id === sel[0]) || null) : null) },
+            { label: '批量编辑', onClick: () => setBatchOpen(true) },
+          ]}
+        />
         <DataTable<C>
             selectable selected={sel}
             onSelectAll={setSel} onSelectRow={(id) => setSel((p) => p.includes(id) ? p.filter((x) => x !== id) : [...p, id])}
-            minWidth={1720}
+            minWidth={1570}
             cols={[
-              { key: '__idx', title: '序号', width: 56, render: (c) => <span className="num">{rows.indexOf(c) + 1}</span> },
-              { key: 'id', title: '客户编号', width: 150, render: (c) => <IdCell onClick={() => setDetail(c)} title="查看客户详情">{c.id}</IdCell> },
+              { key: 'id', title: '客户编号', width: 150, hide: true, render: (c) => <IdCell onClick={() => setDetail(c)} title="查看客户详情">{c.id}</IdCell> },
               {
-                key: 'name', title: '客户名称', width: 250, render: (c) => (
+                key: 'name', title: '客户名称', width: 250, sticky: 'left', render: (c) => (
                   <div>
-                    <div className="nc-td-main">{c.name}</div>
-                    <div className="nc-td-sub">{c.industry} · 建档 {c.since}</div>
+                    <div className="nc-td-main">{c.name} <Tag tone="gray">{c.industry}</Tag></div>
                   </div>
                 ),
               },
               { key: 'contact', title: '联系人', width: 100, render: (c) => c.contact },
               {
                 key: 'phone', title: '联系电话', width: 130, render: (c) => (
-                  money || ['蓝峰', '李思敏'].includes(c.owner)
+                  canSeePhone(role)
                     ? <span className="num" title="本人 / 本团队可见">{c.fullPhone}</span>
-                    : <span className="num" style={{ color: 'var(--ink-3)' }} title="跨团队脱敏，不可拨号">{c.phone}</span>
+                    : <span className="num" style={{ color: 'var(--ink-3)' }} title="跨团队脱敏，不可拨号">{maskPhone(c.fullPhone)}</span>
                 ),
               },
               { key: 'region', title: '区域', width: 82 },
@@ -321,7 +383,7 @@ export default function CustomerPage({ go, role, nav }: { go: (p: string) => voi
                 ),
               },
               {
-                key: 'pipe', title: '在谈商机', width: 130, render: (c) => {
+                key: 'pipe', title: '在谈商机', width: 130, align: 'right', render: (c) => {
                   const n = pipeOf(c).length;
                   return n
                     ? <span><b className="num">{n}</b> 个 <span className="nc-cell-sub">{money ? fmtWan(pipeAmtOf(c)) : '—'}</span></span>
@@ -330,9 +392,9 @@ export default function CustomerPage({ go, role, nav }: { go: (p: string) => voi
               },
               { key: 'deal', title: '累计成交', width: 120, align: 'right', render: (c) => <b className="num">{money ? (c.dealAmt ? fmtWan(c.dealAmt) : '尚无成交') : '—'}</b> },
               {
-                key: 'recv', title: '合同回款', width: 140, render: (c) => (c.dealAmt
-                  ? <div>
-                    <div className="nc-cell-sub">应收 {money ? fmtWan(c.recv) : '—'} · 回款率 <b className="num">{recvRate(c)}%</b></div>
+                key: 'recv', title: '合同回款', width: 140, align: 'right', render: (c) => (c.dealAmt
+                  ? <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end' }}>
+                    <b className="num">{recvRate(c)}%</b>
                     <Progress value={recvRate(c)} tone={recvRate(c) >= 80 ? 'green' : recvRate(c) >= 50 ? 'orange' : 'red'} />
                   </div>
                   : <span className="nc-muted">—</span>),
@@ -341,18 +403,20 @@ export default function CustomerPage({ go, role, nav }: { go: (p: string) => voi
               { key: 'owner', title: '归属人', width: 88 },
               { key: 'status', title: '状态', width: 78, render: (c) => <Tag tone={ST_TONE[c.status]}>{c.status}</Tag> },
               {
-                key: 'lastFollow', title: '最近跟进', width: 110, render: (c) => {
-                  const tone = c.lastFollowDays <= 14 ? undefined : c.lastFollowDays <= 30 ? 'var(--ink-3)' : 'var(--c-danger)';
-                  return <span className="num" style={{ color: tone }}>{c.lastFollow}{c.lastFollowDays > 30 ? <> <Ico n="warning" size={12} style={{ color: 'var(--c-warning-mid)' }} /></> : null}</span>;
+                key: 'lastFollow', title: '最近跟进', width: 110, align: 'right', render: (c) => {
+                  const tone = c.lastFollowDays <= remindWarn ? undefined : c.lastFollowDays <= remindDays ? 'var(--ink-3)' : 'var(--c-danger)';
+                  return <span className="num" style={{ color: tone }} title={c.lastFollowDays > remindDays ? `已超过${remindDays}天未跟进，需尽快拜访` : undefined}>{c.lastFollow}{c.lastFollowDays > remindDays ? <> <Ico n="warning" size={12} style={{ color: 'var(--c-warning-mid)' }} /></> : null}</span>;
                 },
               },
               {
                 key: 'ops', title: '操作', width: 200, render: (c) => (
                   <span className="nc-ops" onClick={(e) => e.stopPropagation()}>
                     <Op onClick={() => setDetail(c)}>详情</Op><OpSep />
-                    <Op gold onClick={() => { setFollowOpen(c); setWay('上门拜访'); setPhoto(0); setGps(''); setFollowText(''); }}>新增跟进</Op><OpSep />
-                    <Op onClick={() => setConvertOpen(c)}>转商机</Op><OpSep />
-                    <Op onClick={() => openEdit(c)}>编辑</Op>
+                    <Op onClick={() => { setFollowOpen(c); setWay('上门拜访'); setPhoto(0); setGps(''); setFollowText(''); }}>新增跟进</Op><OpSep />
+                    <OpMore items={[
+                      ...(hasBiz(c) ? [] : [{ label: '转商机', onClick: () => setConvertOpen(c) }]),
+                      { label: '编辑', onClick: () => openEdit(c) },
+                    ]} />
                   </span>
                 ),
               },
@@ -360,7 +424,7 @@ export default function CustomerPage({ go, role, nav }: { go: (p: string) => voi
             rows={paged}
             rowKey={(c) => c.id}
             onRowClick={(c) => setDetail(c)}
-            foot={<TableFoot total={CUSTOMERS.length} filtered={rows.length} page={page} pageSize={pageSize} onPage={setPage} onPageSize={(n) => { setPageSize(n); setPage(1); }} />}
+            foot={<TableFoot total={base.length} filtered={rows.length} page={page} pageSize={pageSize} onPage={setPage} onPageSize={(n) => { setPageSize(n); setPage(1); }} />}
           />
       </Card>
 
@@ -372,17 +436,13 @@ export default function CustomerPage({ go, role, nav }: { go: (p: string) => voi
         onClose={() => setDetail(null)}
         foot={<>
           <Btn onClick={() => { setTransferOpen(detail); setDetail(null); }}>归属转移</Btn>
-          <Btn onClick={() => { setConvertOpen(detail); setDetail(null); }}>转商机</Btn>
+          {detail && !hasBiz(detail) && <Btn onClick={() => { setConvertOpen(detail); setDetail(null); }}>转商机</Btn>}
           <Btn onClick={() => { openEdit(detail); setDetail(null); }}>编辑档案</Btn>
           <Btn kind="primary" onClick={() => { setFollowOpen(detail); setDetail(null); setWay('上门拜访'); setPhoto(0); setGps(''); setFollowText(''); }}>＋ 新增跟进</Btn>
         </>}
       >
         {detail && (
           <>
-            <Banner tone="gold">
-              客户资产唯一建档 · 客户等级按「累计成交」自动归档（当前 <b>{detail.grade} 级</b>，{GRADE_RULE.replace('等级规则：', '')}）
-            </Banner>
-
             <div className="nc-tiles nc-tiles-3" style={{ margin: '14px 0' }}>
               <div className="nc-tile">
                 <div className="nc-tile-label">累计成交</div>
@@ -395,7 +455,7 @@ export default function CustomerPage({ go, role, nav }: { go: (p: string) => voi
                 <div className="nc-tile-sub">{detail.recv ? `回款率 ${recvRate(detail)}% · 催收与登记收款直达` : '无应收'}</div>
               </div>
               <div className="nc-tile is-clickable" onClick={() => { setDetail(null); go('opp'); }} {...pressProps(() => { setDetail(null); go('opp'); })}>
-                <div className="nc-tile-label">在谈商机 <span className="nc-kpi-drill">穿透 ↗</span></div>
+                <div className="nc-tile-label">在谈商机 <span className="nc-kpi-drill">查看明细 ↗</span></div>
                 <div className="nc-tile-value">{pipeOf(detail).length}</div>
                 <div className="nc-tile-sub">{money ? `在谈 ${fmtWan(pipeAmtOf(detail))} · 点击进入管道` : '暂无在谈商机'}</div>
               </div>
@@ -406,7 +466,7 @@ export default function CustomerPage({ go, role, nav }: { go: (p: string) => voi
               { k: '客户状态', v: <Tag tone={ST_TONE[detail.status]}>{detail.status}</Tag> },
               { k: '客户分级', v: <><Tag tone={G_TONE[detail.grade]} pill>{detail.grade} 级</Tag> <span className="nc-hint">（可改 · 留痕）</span></> },
               { k: '联系人', v: detail.contact },
-              { k: '联系电话', v: <span className="num">{money || ['蓝峰', '李思敏'].includes(detail.owner) ? `${detail.fullPhone}（完整可拨号）` : `${detail.phone}（跨团队脱敏）`}</span> },
+              { k: '联系电话', v: <span className="num">{detail.fullPhone}（完整可拨号）</span> },
               { k: '区域', v: detail.region },
               { k: '行业标签', v: detail.industry },
               { k: '客户来源', v: detail.source },
@@ -486,7 +546,7 @@ export default function CustomerPage({ go, role, nav }: { go: (p: string) => voi
                     ? <span className="num" style={{ fontWeight: 600, color: 'var(--c-danger)' }}>应收 {money ? fmtWan(bal) : '—'}</span>
                     : <Tag tone="green">已结清</Tag>}
                   <Tag tone={CONTRACT_STATUS_TONE[normContractStatus(x.status)] ?? 'gray'}>{normContractStatus(x.status)}</Tag>
-                  <span className="nc-rops"><Op onClick={() => { setDetail(null); setFocus('contract', x.id); go('contract'); }}>合同 →</Op></span>
+                  <span className="nc-rops"><Op onClick={() => { setDetail(null); setFocus('contract-detail', x.id); go('contract-detail'); }}>合同 →</Op></span>
                 </div>
               );
             }) : <div className="nc-empty-mini">/ 暂无合同 · 商机赢单后可一键转合同</div>}
@@ -552,27 +612,32 @@ export default function CustomerPage({ go, role, nav }: { go: (p: string) => voi
           </Field>
           <Field label="区域" req err={errs.region} note="默认：昆明">
             <select className="nc-select" value={fRegion} onChange={(e) => setFRegion(e.target.value)}>
-              {['昆明', '曲靖', '楚雄', '丽江', '大理', '文山', '普洱', '广西', '其他'].map((r) => <option key={r}>{r}</option>)}
+              {CUST_REGIONS.map((r) => <option key={r}>{r}</option>)}
             </select>
           </Field>
-          <Field label="客户分级" req note="默认 C；可改（留痕）">
-            <select className="nc-select" value={fGrade} onChange={(e) => setFGrade(e.target.value)}>
-              {[['A', 'A 级 · 战略客户'], ['B', 'B 级 · 重点客户'], ['C', 'C 级 · 常规客户']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-            </select>
+          <Field label="客户分级" req
+            note={`自动建议规则（系统设置可改）：合同≥${custLvlRules.thresholds.B.contracts}单或商机额≥${custLvlRules.thresholds.B.oppAmount}万→B；达A阈值→A。可手动覆盖（留痕）`}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <select className="nc-select" value={fGrade} onChange={(e) => setFGrade(e.target.value)}>
+                {CUST_GRADES.map((g) => <option key={g} value={g}>{CUST_GRADE_LABEL[g]}</option>)}
+              </select>
+              {suggestedGrade && fGrade === suggestedGrade && <Tag tone="blue">自动建议 {suggestedGrade} 级</Tag>}
+              {suggestedGrade && fGrade !== suggestedGrade && <a className="nc-tiny" onClick={() => setFGrade(suggestedGrade)}>改回建议 {suggestedGrade} 级</a>}
+            </div>
           </Field>
           <Field label="客户来源" req note="默认：自主开发">
             <select className="nc-select" value={fSource} onChange={(e) => setFSource(e.target.value)}>
-              {['自主开发', '老客户转介绍', '政府平台招标', '招投标平台', '属地排查', '同行引荐', '行业展会'].map((s) => <option key={s}>{s}</option>)}
+              {CUST_SOURCES.map((s) => <option key={s}>{s}</option>)}
             </select>
           </Field>
           <Field label="客户状态" req note="新建仅可选潜在 / 意向">
             <select className="nc-select" value={fStatus} onChange={(e) => setFStatus(e.target.value)}>
-              <option value="潜在">潜在</option><option value="意向">意向</option>
+              {CUST_STATUS_NEW.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
           </Field>
           <Field label="行业标签" span={2} note="商业综合体 / 医疗 / 电力 / 文旅 / 地产 / 园区政府平台 / 其他（用于业绩与合同检索）">
             <select className="nc-select" value={fIndustry} onChange={(e) => setFIndustry(e.target.value)}>
-              {['商业综合体', '医疗', '电力/制造', '文旅', '地产', '园区/政府平台', '教育', '交通枢纽', '其他'].map((s) => <option key={s}>{s}</option>)}
+              {CUST_INDUSTRIES.map((s) => <option key={s}>{s}</option>)}
             </select>
           </Field>
           <Field label="备注" span={2} note="决策链 / 合作偏好">
@@ -580,7 +645,7 @@ export default function CustomerPage({ go, role, nav }: { go: (p: string) => voi
           </Field>
         </div>
         <Banner tone="info">
-          保存后可在详情中添加联系人；客户名称重复将提示（档案唯一）。手机号按角色脱敏：跨团队显示 <Code>138****1234</Code>，本人 / 本团队完整可拨号。
+          保存后可在详情中添加联系人；重名将提示，手机号按角色脱敏。
         </Banner>
       </Drawer>
 
@@ -621,7 +686,7 @@ export default function CustomerPage({ go, role, nav }: { go: (p: string) => voi
             </div>
           </>
         )}
-        {way !== '上门拜访' && <Banner tone="info">非拜访类跟进无需照片；提交后进入客户跟进时间线并刷新「最近跟进」。</Banner>}
+        {way !== '上门拜访' && <Banner tone="info">非拜访类跟进无需照片。</Banner>}
       </Modal>
 
       {/* ============ 归属转移 ============ */}
@@ -670,7 +735,6 @@ export default function CustomerPage({ go, role, nav }: { go: (p: string) => voi
             ['批量设置归属人', '将所选客户的归属人统一调整（留痕）'],
             ['批量调整分级', '按累计成交重算或手工指定 A / B / C'],
             ['批量打标签', '追加行业标签，用于业绩与合同检索'],
-            ['批量导出', '导出所选客户为 CSV（手机号按角色脱敏）'],
           ].map(([t, d]) => (
             <button key={t} className="nc-todo is-blue" onClick={() => { setBatchOpen(false); toast(`${t}（演示态）· 已处理 ${sel.length} 条`); }}>
               <span className="nc-todo-main"><span className="nc-todo-t">{t}</span><span className="nc-todo-s">{d}</span></span>
@@ -686,7 +750,7 @@ export default function CustomerPage({ go, role, nav }: { go: (p: string) => voi
           <Btn kind="primary" onClick={() => { setImportOpen(false); toast('导入完成 · 成功 0 条 / 跳过重复 0 条（演示态）'); }}>开始导入</Btn>
         </>}>
         <Banner tone="gold">
-          导入前校验：客户名称唯一性 + 相似度 ≥80% 提示；电话重复触发撞单；区域 / 分级 / 来源须在字典内，否则整行跳过并输出错误清单。
+          导入前校验名称重复 / 电话撞单 / 字典字段，不通过整行跳过并输出错误清单。
         </Banner>
         <div className="nc-empty-mini" style={{ marginTop: 12 }}><Ico n="file" size={16} /> 拖拽 .xlsx 到此处，或点击「下载模板」按格式填写</div>
       </Modal>
@@ -698,16 +762,36 @@ export default function CustomerPage({ go, role, nav }: { go: (p: string) => voi
           <Btn kind="primary" onClick={() => { setQuickOpen(false); toast('快捷登记已提交 · 已登记至客户跟进时间线（水印 + GPS）'); }}>提交</Btn>
         </>}>
         <Banner tone="info">
-          快捷登记用于一线在客户现场快速留痕：选择客户 → 拍现场照片（自动叠加时间水印 + GPS）→ 一句话结论。<b>提交后不可改</b>，错误走「更正跟进」。
+          现场快速留痕：选客户 → 拍照（水印 + GPS）→ 一句话结论；<b>提交后不可改</b>。
         </Banner>
         <div className="nc-form-grid" style={{ gridTemplateColumns: 'repeat(2,1fr)', marginTop: 12 }}>
           <Field label="客户" req span={2}>
-            <select className="nc-select">{CUSTOMERS.map((c) => <option key={c.id}>{c.name}（{c.id}）</option>)}</select>
+            <CustomerPicker value={quickCust} onChange={setQuickCust} />
           </Field>
           <Field label="登记方式" req><select className="nc-select"><option>现场拍照</option><option>电话</option><option>微信/邮件</option></select></Field>
           <Field label="跟进日期" req><input className="nc-input" type="date" defaultValue={TODAY} /></Field>
         </div>
       </Modal>
+
+      {/* ============ 客户分级规则说明（项1：只读，阈值在系统设置维护） ============ */}
+      <Modal open={ruleOpen} width={520} onClose={() => setRuleOpen(false)} title="客户分级规则"
+        foot={<><Btn onClick={() => setRuleOpen(false)}>关闭</Btn><Btn kind="primary" onClick={() => { setRuleOpen(false); go('settings'); }}>去系统设置维护</Btn></>}>
+        <div className="nc-dnote" style={{ marginBottom: 12 }}>
+          分级用于客户分层运营与资源投放建议；系统按累计合同数 / 在谈商机额自动建议等级，建档人仍可手动覆盖（留痕）。规则阈值在「系统设置 → 业务字典」统一维护。
+        </div>
+        <table className="nc-tbl">
+          <thead><tr><th>等级</th><th>累计合同数 ≥</th><th>在谈商机额 ≥</th><th>定位</th></tr></thead>
+          <tbody>
+            <tr><td><Tag tone="orange" pill>A 级</Tag></td><td className="num">{custLvlRules.thresholds.A.contracts} 单</td><td className="num">{custLvlRules.thresholds.A.oppAmount} 万</td><td>战略客户，重点资源倾斜</td></tr>
+            <tr><td><Tag tone="blue" pill>B 级</Tag></td><td className="num">{custLvlRules.thresholds.B.contracts} 单</td><td className="num">{custLvlRules.thresholds.B.oppAmount} 万</td><td>重点客户，定期跟进</td></tr>
+            <tr><td><Tag tone="gray" pill>C 级</Tag></td><td className="num">—</td><td className="num">—</td><td>常规客户，默认建档</td></tr>
+          </tbody>
+        </table>
+        <div className="nc-cell-sub" style={{ marginTop: 8 }}>当前自动建议：<b>{custLvlRules.autoSuggest ? '已开启' : '已关闭'}</b>。满足任一档位即建议该档；未达 B 按 C 级建档。</div>
+      </Modal>
+
+      {/* ============ 统一导出弹窗 ============ */}
+      <ExportDialog {...exportApi.dialogProps} />
     </>
   );
 }

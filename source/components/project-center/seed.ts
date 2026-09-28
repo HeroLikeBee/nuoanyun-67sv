@@ -11,14 +11,18 @@
 //   2. 算不出来的（现场记录类），用项目 id 做确定性伪随机，保证同一项目每次渲染一致、
 //      不同项目之间可区分，且不需要往 data.ts 里塞十几张演示表；
 //   3. 所有「已发生」的日期一律由 TODAY 反向派生 —— 结构上杜绝「未来日期标已完成」。
-import { TODAY, MILESTONE_LEGAL, arrivalReqOf, attCost, attDays, itemByCode, laborRate, ATT_WORKERS, SUPPLIERS, CUSTOMERS } from '../data';
+import { TODAY, ATT_BASE_YM, MILESTONE_LEGAL, arrivalReqOf, attCost, attDays, itemByCode, laborRate, SUPPLIERS, CUSTOMERS } from '../data';
 import type { Contract, Installment } from '../data';
+/* 考勤人员读 store（而非 data.ts 常量）：在「考勤管理 · 人员档案」新增 / 派工后，
+   项目详情的现场投入能跟着变；buildPjDemo 在 useMemo 里按 tick 重算，取到的是最新切片。 */
+import { attTeamNameOf, getAttWorkers } from '../store';
 import type { PjAttachGroup, PjCostRow, PjDepositRow, PjLaborRow, PjMachRow, PjMatRow, PjMileRow, PjPayRow, PjSaleContract, Project } from './ctx';
 
 /* ==================================================================
- * 一、里程碑模板：一套名单，按业务线取用
+ * 一、里程碑模板：按业务线取用，工程施工线（GC）内再按项目类型分叉为新建 / 改造
  * 说明：MILESTONE_LEGAL（法定节点）按「去掉 M 序号后的名字」匹配，故节点名必须与
  *      data.ts 的 MILESTONE_LEGAL 对齐（隐蔽工程验收 / 第三方消防检测 / 消防验收备案）。
+ *      ⚠️ data.ts 另有一套 MILESTONE_TPL（按项目类型划分）全站未被调用，改它不影响任何页面。
  * ================================================================== */
 type MileTpl = { name: string; req: string[]; pct: number };
 
@@ -74,8 +78,33 @@ const MILE_TPL: Record<string, MileTpl[]> = {
   ],
 };
 
-/** 按业务线取里程碑模板（未知业务线回落工程施工） */
-export function mileTplOf(biz: string): MileTpl[] {
+/**
+ * 改造工程模板（GC 的变体）：施工主链 + 「现状勘察与交底」。
+ * 改造与新建的分野在这两步——
+ *   · M2 现状勘察与交底：既有设施摸底，产出既有设施清单与隐患台账（新建没有这一步，图纸就是全部依据）；
+ *   · M7 系统调试多一项「既有系统兼容确认」：新设备要接入原有报警主机，涉及型号兼容与原厂协议。
+ * 法定节点（隐蔽 / 第三方检测 / 验收备案）与 GC 一致，仍在 MILESTONE_LEGAL 内受删除保护。
+ */
+const MILE_TPL_REBUILD: MileTpl[] = [
+  { name: 'M1 进场准备', req: ['施工方案报审', '开工令'], pct: 5 },
+  { name: 'M2 现状勘察与交底', req: ['现状勘察记录', '既有设施清单', '隐患台账'], pct: 12 },
+  { name: 'M3 材料进场报验', req: ['进场报审表', '材料合格证'], pct: 20 },
+  { name: 'M4 隐蔽工程验收', req: ['隐蔽工程验收记录', '影像资料'], pct: 34 },
+  { name: 'M5 管线安装', req: ['管线安装记录', '影像资料'], pct: 48 },
+  { name: 'M6 设备安装', req: ['设备安装记录', '开箱验收单'], pct: 62 },
+  { name: 'M7 系统调试', req: ['联调报告', '影像资料', '既有系统兼容确认'], pct: 74 },
+  { name: 'M8 第三方消防检测', req: ['检测委托单', '检测报告'], pct: 85 },
+  { name: 'M9 消防验收备案', req: ['验收查验记录', '备案受理凭证', '产品身份标识（B 签）清单'], pct: 93 },
+  { name: 'M10 竣工资料', req: ['竣工图', '签字件'], pct: 97 },
+  { name: 'M11 结算', req: [], pct: 100 },
+];
+
+/**
+ * 取里程碑模板。**业务线 biz 决定主链，项目类型 type 只在工程施工线内再分叉（新建 / 改造）**。
+ * 未知业务线回落工程施工；改造未落到 GC（如智慧平台类改造）时按业务线原样返回，不强行插入勘察节点。
+ */
+export function mileTplOf(biz: string, type?: string): MileTpl[] {
+  if (biz === 'GC' && type === '改造') return MILE_TPL_REBUILD;
   return MILE_TPL[biz] ?? MILE_TPL.GC;
 }
 
@@ -314,7 +343,7 @@ export function buildPjDemo(P: Project, contracts: Contract[]): PjDemo {
     : addDays(TODAY, Math.round((seg2 * (pct - progPlan)) / Math.max(1, 100 - progPlan))));
 
   /* ---------- 4.2 里程碑 + 准入资料 ---------- */
-  const tpl = mileTplOf(P.biz);
+  const tpl = mileTplOf(P.biz, P.type);
   const owners = ['张工', '陈工', '何监理', '王工', '杨工', '李工', '陈静', '王会计'];
   /** 实际完成日：计划日已到则取计划日；计划日未到说明提前完成，落到 TODAY */
   const actualOf = (plan: string) => (daysBetween(plan, TODAY) >= 0 ? plan : TODAY);
@@ -508,11 +537,13 @@ export function buildPjDemo(P: Project, contracts: Contract[]): PjDemo {
 
   /* ---------- 4.6 现场投入：人工取项目真实考勤，机械 / 材料按项目规模派生 ---------- */
   const laborRows: PjLaborRow[] = (() => {
-    const hit = ATT_WORKERS.filter((w) => w.proj === proj);
-    const list = hit.length ? hit : ATT_WORKERS.slice(0, 4);
+    /* 只取「在册」人员：已离场的人不该再出现在现场投入里 */
+    const onDuty = getAttWorkers().filter((w) => w.status === '在册');
+    const hit = onDuty.filter((w) => w.proj === proj);
+    const list = hit.length ? hit : onDuty.slice(0, 4);
     return list.map((w) => ({
-      id: w.id, name: w.name, trade: w.trade, team: w.team,
-      days: attDays(w, 21), rate: laborRate(w.trade), cost: attCost(w, 21),
+      id: w.id, name: w.name, trade: w.trade, team: attTeamNameOf(w.teamId),
+      days: attDays(w, ATT_BASE_YM, 21), rate: laborRate(w.trade), cost: attCost(w, ATT_BASE_YM, 21),
     }));
   })();
   const laborSum = laborRows.reduce((s, r) => s + r.cost, 0);
@@ -529,7 +560,7 @@ export function buildPjDemo(P: Project, contracts: Contract[]): PjDemo {
   const matRows: PjMatRow[] = costRows.filter((r) => r.type === '材料费').map((r, i) => ({
     code: `CL${String(100 + i).padStart(6, '0')}`, date: r.date,
     qty: Math.max(1, Math.round(r.amt / 260)), name: `${P.name.slice(0, 6)}用主材 ${i + 1}`,
-    spec: '见技术协议', unit: '批', ty: '材料', price: 260, stock: pick(`${proj}m${i}`, 0, 40), amt: r.amt,
+    spec: '见技术协议', unit: '批', ty: '物料', price: 260, stock: pick(`${proj}m${i}`, 0, 40), amt: r.amt,
   }));
   const matSum = matRows.reduce((s, r) => s + r.amt, 0);
 

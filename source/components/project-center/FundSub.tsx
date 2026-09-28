@@ -42,12 +42,17 @@ function ReceiptKpi({ C }: { C: PjCtx }) {
           { k: '已回款（银行到账）', v: C.CASH_IN, n: `回款率 ${C.PAY_PROGRESS.toFixed(1)}%` },
           { k: '已开票未到账', v: C.overdueAmt, n: inv.map((r) => r.id).join(' / ') || '—' },
           { k: '未回款', v: C.UNRECV, n: '执行额 − 已回款 − 坏账' },
-        ].map((x) => (
-          <div key={x.k} className="nc-stat4-cell">
-            {x.k}<b className="num">{x.v.toLocaleString()}</b>
-            <span className="nc-cell-sub">{x.n}</span>
-          </div>
-        ))}
+        ].map((x) => {
+          const isOverdue = x.k === '已开票未到账';
+          const weak = x.v === 0;
+          const toneCls = weak ? ' nc-muted' : (isOverdue && x.v > 0) ? ' nc-v-orange' : '';
+          return (
+            <div key={x.k} className="nc-stat4-cell">
+              {x.k}<b className={'num' + toneCls}>{x.v.toLocaleString()}</b>
+              <span className="nc-cell-sub">{x.n}</span>
+            </div>
+          );
+        })}
       </div>
       <div className="nc-cell-sub" style={{ marginTop: 8 }}>
         已开票未到账最长账龄 {C.overdueDays} 天 —— 逾期可在「待办」中发起催收。
@@ -82,7 +87,7 @@ function PayFlow({ C }: { C: PjCtx }) {
               <th style={{ width: 130 }}>关联单据</th>
               <th style={{ width: 120 }} className="is-num">金额（元）</th>
               <th>用途 / 说明</th>
-              <th style={{ width: 110 }}>日期</th>
+              <th style={{ width: 110 }} className="is-num">日期</th>
               <th style={{ width: 130 }}>状态</th>
             </tr></thead>
             <tbody>
@@ -94,10 +99,10 @@ function PayFlow({ C }: { C: PjCtx }) {
                   <td className={`is-num num${r.amt < 0 ? ' nc-v-red' : ''}`}>{r.amt.toLocaleString()}</td>
                   <td>
                     {r.use}
-                    {r.hc && <div className="nc-cell-sub">已冲销 → {r.hc}</div>}
-                    {r.mergedTo && <div className="nc-cell-sub">已归并 → {r.mergedTo}（原行保留，不重复计入）</div>}
+                    {r.hc && <> <Tag tone="gray">已冲销 → {r.hc}</Tag></>}
+                    {r.mergedTo && <> <Tag tone="gray">已归并 → {r.mergedTo}</Tag></>}
                   </td>
-                  <td className="num">{r.date}</td>
+                  <td className="is-num num">{r.date}</td>
                   <td><Tag tone={paySt(r).t}>{paySt(r).n}</Tag></td>
                 </tr>
               ))}
@@ -122,7 +127,7 @@ function Deposits({ C }: { C: PjCtx }) {
             <thead><tr>
               <th style={{ width: 130 }}>单据号</th><th style={{ width: 180 }}>类型</th>
               <th>往来单位</th><th style={{ width: 120 }} className="is-num">金额（元）</th>
-              <th style={{ width: 110 }}>缴纳 / 扣留日</th><th style={{ width: 120 }}>到期 / 退还</th><th style={{ width: 100 }}>状态</th>
+              <th style={{ width: 110 }} className="is-num">缴纳 / 扣留日</th><th style={{ width: 120 }} className="is-num">到期 / 退还</th><th style={{ width: 100 }}>状态</th>
             </tr></thead>
             <tbody>
               {C.depositRows.map((d) => (
@@ -131,8 +136,8 @@ function Deposits({ C }: { C: PjCtx }) {
                   <td>{d.type}</td>
                   <td className="nc-cell-sub">{d.party}</td>
                   <td className="is-num num">{d.amt.toLocaleString()}</td>
-                  <td className="num">{d.pay}</td>
-                  <td className="num">{d.due}</td>
+                  <td className="is-num num">{d.pay}</td>
+                  <td className="is-num num">{d.due}</td>
                   <td><Tag tone={d.st === '未退' || d.st === '待扣留' ? 'orange' : d.st === '已退还' ? 'green' : 'gray'}>{d.st}</Tag></td>
                 </tr>
               ))}
@@ -149,6 +154,10 @@ function Deposits({ C }: { C: PjCtx }) {
 export default function FundSub({ C }: { C: PjCtx }) {
   return (
     <>
+      <div className="nc-gate-block" style={{ marginBottom: 12 }}>
+        <Ico n="help" size={14} />
+        收款 / 付款的登记入口在合同侧（收款计划 · 付款与请款），此处为项目视角的<strong>只读投影</strong>，数据随合同台账实时同步，不会在本页发生变更。
+      </div>
       <ReceiptKpi C={C} />
       <PayFlow C={C} />
       <Deposits C={C} />

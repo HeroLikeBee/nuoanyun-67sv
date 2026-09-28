@@ -128,10 +128,10 @@ function ContractTree({ C }: { C: PjCtx }) {
               <th style={{ width: 150 }}>收款期次</th>
               <th style={{ width: 110 }} className="is-num">约定应收</th>
               <th style={{ width: 160 }}>实收情况</th>
-              <th style={{ width: 110 }}>实收日期</th>
+              <th style={{ width: 110 }} className="is-num">实收日期</th>
               <th style={{ width: 100 }}>开票状态</th>
               <th style={{ width: 100 }}>状态</th>
-              <th style={{ width: 110 }}>计划日期</th>
+              <th style={{ width: 110 }} className="is-num">计划日期</th>
               <th>备注</th>
             </tr></thead>
             <tbody>
@@ -139,11 +139,11 @@ function ContractTree({ C }: { C: PjCtx }) {
                 <tr key={p.n} className={p.st === '已开票·待到账' || p.st === '逾期未收' ? 'is-warn-row' : ''}>
                   <td>{p.n}</td>
                   <td className="is-num num">{p.amt.toLocaleString()}</td>
-                  <td className="num">{p.got > 0 ? p.got.toLocaleString() : '—'} <span className="nc-cell-sub">/ {p.amt.toLocaleString()}</span></td>
-                  <td className="num">{p.gotDate}</td>
+                  <td className="num" title={`应收 ${p.amt.toLocaleString()} 元`}>{p.got > 0 ? p.got.toLocaleString() : '—'}</td>
+                  <td className="is-num num">{p.gotDate}</td>
                   <td><Tag tone={p.inv === '已开票' ? 'blue' : 'gray'}>{p.inv}</Tag></td>
                   <td><Tag tone={INST_TONE[p.st] ?? 'gray'}>{p.st}</Tag></td>
-                  <td className="num">{p.plan}</td>
+                  <td className="is-num num">{p.plan}</td>
                   <td className="nc-cell-sub">{p.note}</td>
                 </tr>
               ))}
@@ -196,7 +196,7 @@ function ChangeVisa({ C }: { C: PjCtx }) {
         : (
           <table className="nc-tbl" style={{ minWidth: 900 }}>
             <thead><tr>
-              <th style={{ width: 110 }}>签证号</th><th style={{ width: 110 }}>日期</th>
+              <th style={{ width: 110 }}>签证号</th><th style={{ width: 110 }} className="is-num">日期</th>
               <th>事由</th><th style={{ width: 110 }} className="is-num">金额（元）</th>
               <th style={{ width: 90 }}>照片</th><th style={{ width: 100 }}>签认</th>
               <th style={{ width: 120 }}>变更单</th><th style={{ width: 130 }}>变更状态</th>
@@ -205,7 +205,7 @@ function ChangeVisa({ C }: { C: PjCtx }) {
               {C.visas.map((v) => (
                 <tr key={v.no} className={v.chg === '—' ? 'is-warn-row' : ''}>
                   <td><IdCell>{v.no}</IdCell></td>
-                  <td className="num">{v.date}</td>
+                  <td className="is-num num">{v.date}</td>
                   <td>{v.reason}</td>
                   <td className="is-num num">{v.amt.toLocaleString()}</td>
                   <td className="num">{v.photos} 张</td>
@@ -322,7 +322,7 @@ function FacilityLedger({ C }: { C: PjCtx }) {
                   </td>
                   <td className="is-num num"><b>{q && q.total > 0 ? fmt(q.total) : '—'}</b></td>
                 </tr>
-              ))}
+        ))}
             </tbody>
           </table>
           <div className="nc-cell-sub" style={{ marginTop: 8 }}>

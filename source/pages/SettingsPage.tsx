@@ -11,13 +11,15 @@
 //   · 全局：组织与人员（部门 · 角色）、审批分级路由阈值
 import React, { useMemo, useState, useSyncExternalStore } from 'react';
 import {
-  Banner, Btn, Check, Field, Modal, Op, OpSep, PageHead, Tag, useToast, type TagTone,
+  Banner, Btn, Check, Field, Modal, Op, OpSep, PageHead, TableFoot, Tag, useToast, type TagTone,
 } from '../components/ui';
 import CategoryTree from '../components/CategoryTree';
 import {
   CHANGE_LOGS, CAT_TREE, CUST_SOURCES, DEPTS, FOLLOW_WAYS, ITEMS, MARK_TYPES, QUOTE_SCOPES,
   SUP_CATS, UNITS, UNIT_DESC, UNIT_GROUPS, catPath, catPathsOfScope, catSubtreeIds, catVersion,
-  quoteScopeOf, subscribeCats, type QuoteScopeKey,
+  quoteScopeOf, subscribeCats, getOppFollowDays, getProjectRiskRules, setBusinessConfig,
+  getCustomerLevelRules, getTodoConfig,
+  type ProjectRiskRuleKey, type ProjectRiskRules, type QuoteScopeKey, type CustomerLevelRules, type TodoConfig,
 } from '../components/data';
 import {
   addOppStage, countOppsInStage, getOppStages, moveOppStage, removeOppStage,
@@ -90,6 +92,14 @@ const APPROVE_RULES = [
   { k: '维护保养', a: 100, b: null, note: '＜100 万 部门负责人 · ≥100 万 总经理' },
 ];
 
+/** 项目风险规则配置行（项20）：label / 说明 / 阈值类型（cost=成本超支倍数, days=逾期天数, 空=无阈值） */
+const RISK_RULE_ROWS: Record<ProjectRiskRuleKey, { label: string; note: string; threshold: 'cost' | 'days' | null }> = {
+  noContract: { label: '无合同施工', note: '已进入执行中但无销售合同，红色硬提醒（需补签并关联）', threshold: null },
+  costOverrun: { label: '成本超支', note: '实际成本超过目标成本 × 阈值倍即计入风险', threshold: 'cost' },
+  milestoneOverdue: { label: '里程碑逾期', note: '里程碑计划日超期未完成的天数口径', threshold: 'days' },
+  paymentOverdue: { label: '收款逾期', note: '收款期次超过计划日期未到账的天数口径', threshold: 'days' },
+};
+
 const SET_META: Record<string, { t: string; d: string; icon: IconName }> = {
   cat: { t: '多级分类目录', d: '产品目录 / 材料目录两棵树，支持任意层级嵌套；可新增子级、重命名、删除（有子级或被引用时禁删）。材料与产品的分类目录均取自本处。', icon: 'folder' },
   unit: { t: '单位字典', d: '消防行业标准计量单位。单位变更会影响已有报价与被引用的历史单据，系统将标记「历史单位」并在报表中保留原口径。', icon: 'swap' },
@@ -114,10 +124,18 @@ const SET_META: Record<string, { t: string; d: string; icon: IconName }> = {
  */
 function Table({ head, children }: { head: [string, number | undefined][]; children: React.ReactNode }) {
   return (
-    <table className="nc-tbl">
-      <thead><tr>{head.map(([t, w]) => <th key={t} style={w ? { width: w } : undefined}>{t}</th>)}</tr></thead>
-      <tbody>{children}</tbody>
-    </table>
+    /* 外层包一层横向滚动容器：.nc-tbl 有 min-width:720px，落在「多级分类目录」这类
+       左树右表布局的窄右栏里会撑破容器，而 .nc-page 是 overflow-x:hidden
+       → 右侧「维护」列会被直接裁掉且无法滚动。装得下时无滚动条、布局不变。 */
+    <div className="nc-tblscroll">
+      {/* minWidth:0 —— 覆盖 .nc-tbl 的 min-width:720px。本页表格都在「左树右表」的窄右栏里，
+          沿用 720 地板会撑破容器（.nc-page 是 overflow-x:hidden）把右侧列裁掉；
+          去掉地板后表格按容器宽度自适应、长文本换行，全部列一眼可见。 */}
+      <table className="nc-tbl" style={{ minWidth: 0 }}>
+        <thead><tr>{head.map(([t, w]) => <th key={t} style={w ? { width: w } : undefined}>{t}</th>)}</tr></thead>
+        <tbody>{children}</tbody>
+      </table>
+    </div>
   );
 }
 
@@ -143,6 +161,13 @@ export default function SettingsPage({ go, role, nav }: { go: (p: string) => voi
   const [dictW, setDictW] = useState(30);
   /* 商机阶段模板同源订阅：本页增删 / 排序 / 改权重后，商机页与驾驶舱漏斗即时跟随（BG-02） */
   const oppStageList = useSyncExternalStore(subscribeStore, getOppStages, getOppStages);
+
+  /* 业务运行配置（项2 商机跟进超期天数 / 项20 项目风险规则）：读 getter 初始化 → 本地编辑 → setBusinessConfig 写回 */
+  const [oppDays, setOppDays] = useState<number>(() => getOppFollowDays());
+  const [riskRules, setRiskRules] = useState<ProjectRiskRules>(() => JSON.parse(JSON.stringify(getProjectRiskRules())));
+  /* 项1：客户分级自动建议规则；项2：跟进超期自动进待办（读 getter 初始化 → 本地编辑 → setBusinessConfig 写回） */
+  const [custLvl, setCustLvl] = useState<CustomerLevelRules>(() => JSON.parse(JSON.stringify(getCustomerLevelRules())));
+  const [todoCfg, setTodoCfg] = useState<TodoConfig>(() => ({ ...getTodoConfig() }));
 
   const meta = SET_META[grp];
 
@@ -175,6 +200,7 @@ export default function SettingsPage({ go, role, nav }: { go: (p: string) => voi
           { key: 'prod' as const, n: '产品目录', tone: 'blue' as TagTone },
           { key: 'mat' as const, n: '材料目录', tone: 'gray' as TagTone },
         ];
+        const rootRows = roots.flatMap((rt) => CAT_TREE[rt.key].ch!.map((c) => ({ rt, c })));
         return (
           <div className="nc-doc-layout">
             <aside className="nc-doc-side">
@@ -182,7 +208,7 @@ export default function SettingsPage({ go, role, nav }: { go: (p: string) => voi
             </aside>
             <div className="nc-doc-main">
               <Table head={[['分类树', 120], ['一级分类', 200], ['负责人', 110], ['含下级引用条目', 140], ['维护', 260]]}>
-                {roots.flatMap((rt) => CAT_TREE[rt.key].ch!.map((c) => (
+                {rootRows.map(({ rt, c }) => (
                   <tr key={c.id}>
                     <td><Tag tone={rt.tone}>{rt.n}</Tag></td>
                     <td><b>{c.n}</b>{c.ch?.length ? <span className="nc-tiny nc-muted"> ·{c.ch.length} 个二级</span> : null}</td>
@@ -190,8 +216,9 @@ export default function SettingsPage({ go, role, nav }: { go: (p: string) => voi
                     <td className="is-num num">{catCount(c.id) || '—'}</td>
                     <td className="nc-tiny nc-muted">在左栏树中 <Ico n="plus" size={12} /> 加子级 · <Ico n="edit" size={12} /> 改名 · <Ico n="close" size={12} /> 删除（二次确认）</td>
                   </tr>
-                )))}
+                ))}
               </Table>
+              <TableFoot total={rootRows.length} page={1} pageSize={rootRows.length} unit="个一级分类" />
             </div>
           </div>
         );
@@ -307,7 +334,7 @@ export default function SettingsPage({ go, role, nav }: { go: (p: string) => voi
             </div>
             <Btn size="sm" onClick={() => { setDictVal(''); setDictNew({ kind: 'src' }); }}>＋ 新增来源</Btn>
 
-            <div className="nc-sec-title" style={{ marginTop: 18 }}>跟进方式（客户管理）</div>
+            <div className="nc-sec-title nc-sec-block">跟进方式（客户管理）</div>
             <div className="nc-pick-inline" style={{ marginBottom: 8 }}>
               {ways.map((w) => (
                 <span key={w} className="nc-pick-chip is-on">
@@ -321,7 +348,7 @@ export default function SettingsPage({ go, role, nav }: { go: (p: string) => voi
             </div>
             <Btn size="sm" onClick={() => { setDictVal(''); setDictNew({ kind: 'way' }); }}>＋ 新增方式</Btn>
 
-            <div className="nc-sec-title" style={{ marginTop: 18 }}>供应商供货范围（供应商管理）</div>
+            <div className="nc-sec-title nc-sec-block">供应商供货范围（供应商管理）</div>
             <div className="nc-pick-inline" style={{ marginBottom: 8 }}>
               {supCats.map((s) => (
                 <span key={s} className="nc-pick-chip is-on">
@@ -333,7 +360,7 @@ export default function SettingsPage({ go, role, nav }: { go: (p: string) => voi
             <Btn size="sm" onClick={() => { setDictVal(''); setDictNew({ kind: 'sup' }); }}>＋ 新增范围</Btn>
 
 
-            <div className="nc-sec-title" style={{ marginTop: 18 }}>商机阶段（商机管理）</div>
+            <div className="nc-sec-title nc-sec-block">商机阶段（商机管理）</div>
             <table className="nc-tbl" style={{ minWidth: 620 }}>
               <thead><tr>
                 <th style={{ width: 46 }} className="is-num">顺序</th>
@@ -366,11 +393,138 @@ export default function SettingsPage({ go, role, nav }: { go: (p: string) => voi
                 ))}
               </tbody>
             </table>
+            <TableFoot total={oppStageList.length} page={1} pageSize={oppStageList.length} unit="个阶段" />
             <div style={{ marginTop: 8 }}>
               <Btn size="sm" onClick={() => { setDictVal(''); setDictW(30); setDictNew({ kind: 'stage' }); }}>＋ 新增阶段</Btn>
               <span className="nc-tiny nc-muted" style={{ marginLeft: 10 }}>
                 共 {oppStageList.length} 档 · 默认 4 档 · 分界线阶段起预计金额必填
               </span>
+            </div>
+
+            {/* 项2：商机跟进超期天数（原硬编码 14，改为可配置） */}
+            <div className="nc-sec-title nc-sec-block">商机跟进超期提醒（商机管理）</div>
+            <div className="nc-warnbox is-info">
+              <div>商机超过
+                <input className="nc-cell-in" style={{ width: 56, textAlign: 'right', margin: '0 4px' }} type="number" min={1}
+                  value={oppDays}
+                  onChange={(e) => {
+                    const v = Math.max(1, Number(e.target.value) || 14);
+                    setOppDays(v);
+                    setBusinessConfig({ oppFollowOverdueDays: v });
+                  }} />
+                天未跟进即标红，并计入「超 {oppDays} 天未跟进」统计卡、列表「最近跟进」列、看板红标与商机详情。
+              </div>
+            </div>
+
+            {/* 项20：项目风险判定规则（开关 + 阈值，禁用口径不计入风险） */}
+            <div className="nc-sec-title nc-sec-block">项目风险判定规则（项目管理）</div>
+            <Table head={[['风险口径', 150], ['启用', 90], ['阈值', 150], ['说明', undefined]]}>
+              {(Object.keys(RISK_RULE_ROWS) as ProjectRiskRuleKey[]).map((k) => {
+                const row = RISK_RULE_ROWS[k];
+                const cur = riskRules[k];
+                return (
+                  <tr key={k} className={cur.enabled ? '' : 'is-muted-row'}>
+                    <td><b>{row.label}</b></td>
+                    <td style={{ textAlign: 'center' }}>
+                      <Check checked={cur.enabled} label={cur.enabled ? '启用' : '停用'}
+                        onChange={(v) => {
+                          const next = { ...riskRules, [k]: { ...cur, enabled: v } };
+                          setRiskRules(next); setBusinessConfig({ projectRiskRules: next });
+                          toast(v ? `已启用「${row.label}」风险口径` : `已停用「${row.label}」口径（不计入项目风险）`);
+                        }} />
+                    </td>
+                    <td>
+                      {row.threshold === 'cost' && (
+                        <>成本超目标
+                          <input className="nc-cell-in" style={{ width: 56, textAlign: 'right', margin: '0 4px' }} type="number" step={0.1} min={1}
+                            value={cur.threshold ?? 1.0}
+                            onChange={(e) => {
+                              const next = { ...riskRules, [k]: { ...cur, threshold: Math.max(1, Number(e.target.value) || 1) } };
+                              setRiskRules(next); setBusinessConfig({ projectRiskRules: next });
+                            }} /> 倍
+                        </>
+                      )}
+                      {row.threshold === 'days' && (
+                        <>逾期
+                          <input className="nc-cell-in" style={{ width: 56, textAlign: 'right', margin: '0 4px' }} type="number" min={1}
+                            value={cur.days ?? 7}
+                            onChange={(e) => {
+                              const next = { ...riskRules, [k]: { ...cur, days: Math.max(1, Number(e.target.value) || 7) } };
+                              setRiskRules(next); setBusinessConfig({ projectRiskRules: next });
+                            }} /> 天
+                        </>
+                      )}
+                      {!row.threshold && <span className="nc-muted">—</span>}
+                    </td>
+                    <td className="nc-tiny nc-muted">{row.note}</td>
+                  </tr>
+                );
+              })}
+            </Table>
+            <div className="nc-cell-sub" style={{ marginTop: 8 }}>
+              停用某口径后，对应风险标记不再计入项目风险统计与「只看风险项目」；阈值调整即时影响后续判定（原型演示，配置随浏览器保留）。
+            </div>
+
+            {/* 项1：客户分级自动建议规则（新增客户表单按阈值建议等级，可手动覆盖） */}
+            <div className="nc-sec-title nc-sec-block">客户分级自动建议规则（客户管理）</div>
+            <div className="nc-warnbox is-info">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <Check checked={custLvl.autoSuggest} label={custLvl.autoSuggest ? '开启自动建议' : '关闭自动建议'}
+                  onChange={(v) => {
+                    const next = { ...custLvl, autoSuggest: v };
+                    setCustLvl(next); setBusinessConfig({ customerLevelRules: next });
+                    toast(v ? '已开启新增客户分级自动建议' : '已关闭自动建议，分级恢复为手动选择');
+                  }} />
+                <span className="nc-tiny nc-muted">新增客户时按下列阈值自动建议 A / B / C 级，建档人仍可手动覆盖</span>
+              </div>
+            </div>
+            <Table head={[['建议等级', 110], ['累计合同数 ≥', 150], ['在谈商机额 ≥', 160], ['说明', undefined]]}>
+              {(['A', 'B'] as const).map((lv) => (
+                <tr key={lv}>
+                  <td><b>{lv} 级</b></td>
+                  <td>
+                    <input className="nc-cell-in" style={{ width: 64, textAlign: 'right', marginRight: 4 }} type="number" min={0}
+                      value={custLvl.thresholds[lv].contracts}
+                      onChange={(e) => {
+                        const next = { ...custLvl, thresholds: { ...custLvl.thresholds, [lv]: { ...custLvl.thresholds[lv], contracts: Math.max(0, Number(e.target.value) || 0) } } };
+                        setCustLvl(next); setBusinessConfig({ customerLevelRules: next });
+                      }} /> 单
+                  </td>
+                  <td>
+                    <input className="nc-cell-in" style={{ width: 64, textAlign: 'right', marginRight: 4 }} type="number" min={0}
+                      value={custLvl.thresholds[lv].oppAmount}
+                      onChange={(e) => {
+                        const next = { ...custLvl, thresholds: { ...custLvl.thresholds, [lv]: { ...custLvl.thresholds[lv], oppAmount: Math.max(0, Number(e.target.value) || 0) } } };
+                        setCustLvl(next); setBusinessConfig({ customerLevelRules: next });
+                      }} /> 万
+                  </td>
+                  <td className="nc-tiny nc-muted">
+                    {lv === 'A' ? '战略客户：合同与商机额均达阈值自动建议 A 级' : '重点客户：达到任一项即建议 B 级；未达 B 按 C 级建档'}
+                  </td>
+                </tr>
+              ))}
+            </Table>
+
+            {/* 项2：跟进超期自动进待办（开关 + 提醒天数，替代驾驶舱硬编码 30 天） */}
+            <div className="nc-sec-title nc-sec-block">跟进超期自动进待办（客户管理）</div>
+            <div className="nc-warnbox is-info">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <Check checked={todoCfg.followOverdueAutoTodo} label={todoCfg.followOverdueAutoTodo ? '自动生成待办' : '不自动生成'}
+                  onChange={(v) => {
+                    const next = { ...todoCfg, followOverdueAutoTodo: v };
+                    setTodoCfg(next); setBusinessConfig({ todoConfig: next });
+                    toast(v ? `已开启：客户超 ${todoCfg.remindDays} 天未跟进自动进待办` : '已关闭：驾驶舱不再自动生成「待我跟进客户」待办');
+                  }} />
+                <span className="nc-tiny nc-muted">客户超过</span>
+                <input className="nc-cell-in" style={{ width: 56, textAlign: 'right' }} type="number" min={1}
+                  value={todoCfg.remindDays}
+                  onChange={(e) => {
+                    const v = Math.max(1, Number(e.target.value) || 30);
+                    const next = { ...todoCfg, remindDays: v };
+                    setTodoCfg(next); setBusinessConfig({ todoConfig: next });
+                  }} />
+                <span className="nc-tiny nc-muted">天未跟进即自动进驾驶舱「我的待办」</span>
+              </div>
             </div>
           </>
         );
@@ -395,7 +549,7 @@ export default function SettingsPage({ go, role, nav }: { go: (p: string) => voi
                 </tr>
               ))}
             </Table>
-            <div className="nc-warnbox is-orange" style={{ marginTop: 12 }}>
+            <div className="nc-warnbox is-warn" style={{ marginTop: 12 }}>
               <b>准入流程</b>
               <div>待准入（资质审核中，不可参与询比价与下单）→ 已准入（可参与询比价、下单与结算）／已拒绝（永久不可下单，可申诉一次）；已冻结（暂停全部业务往来）。</div>
             </div>

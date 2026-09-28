@@ -1,7 +1,7 @@
 /**
  * @name 诺安云 6.0
  */
-// 诺安云 6.0 · 经营管理原型（20 个路由页面 · 侧栏 7 组 14 项）
+// 诺安云 6.0 · 经营管理原型（20 个路由页面 · 侧栏 7 组 18 项）
 // 依据：src/resources/prd/prd-08-nuoan-cloud-5.md（十要素规格）+ 用户截图（主框架与菜单）
 //       + 20 个历史设计 HTML + 规范.md + 驾驶舱.html（驾驶舱版式参照）
 //       设计基底 src/themes/nuoan-cloud/DESIGN.md
@@ -14,6 +14,7 @@ import { ToastProvider } from './components/ui';
 import { EntityPreviewHost } from './components/entityPreview';
 import { APPROVALS, BIDS, PAGE_META, RECEIVABLES } from './components/data';
 import './style.css';
+import './components/export.css';
 
 import DashboardPage from './pages/DashboardPage';
 import CustomerPage from './pages/CustomerPage';
@@ -22,6 +23,7 @@ import QuotePage from './pages/QuotePage';
 import QuoteEditPage from './pages/QuoteEditPage';
 import QuoteDetailPage from './pages/QuoteDetailPage';
 import BidPage from './pages/BidPage';
+import BidDetailPage from './pages/BidDetailPage';
 import CertPage from './pages/CertPage';
 import DocPage from './pages/DocPage';
 import ContractPage from './pages/ContractPage';
@@ -58,7 +60,9 @@ const ROUTE = defineHashPageRoute(
 const FIXED_PAGES = new Set([
   'customer', 'opp', 'quote', 'bid', 'cert', 'doc',
   'approval', 'supplier',
-  /* 物料域的 5 个二级页：都是列表型视口锁定（一级页 'material' 已随菜单压平移除） */
+  /* 物料域 5 个路由都是列表型视口锁定：物料主数据（含旧链接 material-kit）已把「套件与配置」
+     并进「物料与服务」成为**一张列表**，行数不变（套件与配置本就是它的子集），
+     仍是「表体吃满剩余高度 + 卡内局部滚动 + 分页脚常驻卡底」的列表页。 */
   'material-list', 'material-kit', 'material-stock', 'material-src', 'material-cert',
 ]);
 
@@ -86,8 +90,9 @@ export default function NuoanCloud6() {
   );
 
   /**
-   * 物料域 5 个二级页共用同一页面组件，由 page 决定展示哪一域（见 MaterialPage 的 ROUTE_VIEW）。
-   * 它们各自就是左侧「供应链管理」组下的二级菜单项，点即到，没有三级折叠。
+   * 物料域 5 个路由共用同一页面组件，由 page 决定展示哪一域（见 MaterialPage 的 ROUTE_VIEW）。
+   * 它们各自就是左侧「供应链与物料」组下的二级菜单项，点即到，没有三级折叠。
+   * 其中 material-kit 已并入 material-list（同一页两段），仅作旧链接兜底，不在菜单中。
    */
   const MATERIAL_PAGES = new Set([
     'material-list', 'material-kit', 'material-stock', 'material-src', 'material-cert',
@@ -103,6 +108,7 @@ export default function NuoanCloud6() {
       case 'quote-edit': return <QuoteEditPage go={go} role={role} nav={nav} />;
       case 'quote-detail': return <QuoteDetailPage go={go} role={role} nav={nav} />;
       case 'bid': return <BidPage go={go} role={role} nav={nav} />;
+      case 'bid-detail': return <BidDetailPage go={go} role={role} nav={nav} />;
       case 'cert': return <CertPage go={go} role={role} nav={nav} />;
       case 'doc': return <DocPage go={go} role={role} nav={nav} />;
       case 'contract': return <ContractPage go={go} role={role} nav={nav} />;

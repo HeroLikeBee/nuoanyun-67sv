@@ -1,16 +1,14 @@
 // 项目详情 · 概览（默认子页）
 //
 // 职责：回答「这个项目现在怎么样、卡在哪、下一步做什么」，不重复摊开各业务域台账。
-// 版式：KPI 带 → 基本信息 → 风险与待办 → 全链路血缘。
+// 版式：KPI 带 → 基本信息 → 风险与待办。（上游溯源见页头溯源链，不再铺全链路血缘卡）
 // 去重（2026-09-23 评审）：删除与各 tab 重复的三列摘要卡（合同回款 / 成本利润）、
 //   删除业务域入口卡（二级导航本身就是入口）；绝对值只在 KPI 带出现一次。
-// 血缘：商机 / 报价 / 合同按真实外键定位，点击走穿透弹窗，不整页打断。
+// 血缘：页头溯源链承担；下游节点 / 验收 / 结算状态已由风险与待办覆盖。
 import React from 'react';
-import { Btn, Card, EntityLink, KvGrid, Tag, Tip } from '../ui';
+import { Btn, Card, EntityLink, KvGrid, Tag } from '../ui';
 import { Ico } from '../icons';
 import { PROJECT_STATUS_TONE, TODAY, isServiceProject, fmtAmt } from '../data';
-import { getOpps, relOfProject } from '../store';
-import { openPreview } from '../entityPreviewState';
 import type { PjCtx } from './ctx';
 
 /** 业务线中文（数据层存缩写） */
@@ -89,21 +87,23 @@ function CardProfile({ C }: { C: PjCtx }) {
  */
 function KpiStrip({ C }: { C: PjCtx }) {
   const skPaid = C.payRowsAll.filter((r) => r.kind === '收入' && r.st === 'paid').length;
+  /* 0 值弱化：金额为 0 时不渲染 ¥0.0 万，统一用灰色破折号占位 */
+  const amt = (n: number) => n > 0 ? fmtAmt(n) : <span className="nc-muted">—</span>;
   const cells: { k: string; v: React.ReactNode; sub: string; tone?: string; jump?: string }[] = [
     {
-      k: '合同额', v: fmtAmt(C.CONTRACT_NOW),
+      k: '合同额', v: amt(C.CONTRACT_NOW),
       sub: `执行额 ${(C.EXEC_AMT / 10000).toFixed(1)} 万（含已生效变更）`, jump: 'contract',
     },
     {
-      k: '已回款', v: fmtAmt(C.CASH_IN),
+      k: '已回款', v: amt(C.CASH_IN),
       sub: `${skPaid} 笔银行到账`, jump: 'fund',
     },
     {
-      k: '已发生成本', v: fmtAmt(C.COST_SUM),
+      k: '已发生成本', v: amt(C.COST_SUM),
       sub: `${C.costRows.length} 笔已入账`, jump: 'cost',
     },
     {
-      k: '净现金流', v: `${C.NET_IN >= 0 ? '+' : '−'}${fmtAmt(Math.abs(C.NET_IN))}`,
+      k: '净现金流', v: C.NET_IN === 0 ? <span className="nc-muted">—</span> : `${C.NET_IN >= 0 ? '+' : '−'}${fmtAmt(Math.abs(C.NET_IN))}`,
       sub: '已到账 − 已付出 · 审批中不计', jump: 'fund',
     },
     {
@@ -125,7 +125,7 @@ function KpiStrip({ C }: { C: PjCtx }) {
             key={c.k} className="nc-ovcell" onClick={() => c.jump && C.pj(c.jump)}
             title={c.jump ? '查看对应业务域' : undefined}
           >
-            <span className="nc-ovcell-k">{c.k} {c.jump && <span className="nc-drill">穿透↗</span>}</span>
+            <span className="nc-ovcell-k">{c.k} {c.jump && <span className="nc-drill">查看明细↗</span>}</span>
             <span
               className="nc-ovcell-v num"
               style={c.tone === 'green' ? { color: 'var(--c-success)' }
@@ -197,88 +197,12 @@ function CardRisk({ C }: { C: PjCtx }) {
   );
 }
 
-/** 全链路血缘：商机 → 报价 → 合同 → 项目 → 节点 → 验收 → 结算 → 质保 / 维保，真实定位、点击弹窗穿透 */
-function Lineage({ C }: { C: PjCtx }) {
-  const { P } = C;
-  const svc = isServiceProject(P);
-  const tr = React.useMemo(() => {
-    const r = relOfProject(P.id);
-    const oppId = r.quotes.map((q) => q.opp).find(Boolean) || '';
-    return {
-      opp: oppId ? getOpps().find((o) => o.id === oppId) : undefined,
-      quote: r.quotes[0],
-      contract: r.contracts[0],
-    };
-  }, [P.id]);
-
-  const nodes: { k: string; v: React.ReactNode; st: string; cur?: boolean; void?: boolean; onClick?: () => void }[] = [
-    {
-      k: '商机', v: tr.opp?.id ?? '无关联', st: tr.opp ? '商机直签 / 投标中标' : '未登记溯源',
-      void: !tr.opp, onClick: tr.opp ? () => openPreview('opp', tr.opp!.id) : undefined,
-    },
-    {
-      k: '报价', v: tr.quote?.id ?? '无关联', st: tr.quote ? '报价单转合同草稿' : '无报价记录',
-      void: !tr.quote, onClick: tr.quote ? () => openPreview('quote', tr.quote!.id) : undefined,
-    },
-    {
-      k: '合同', v: tr.contract ? tr.contract.name : '无销售合同',
-      st: tr.contract ? `${tr.contract.status} · ${(tr.contract.amt / 10000).toFixed(0)} 万` : '待关联',
-      void: !tr.contract, onClick: tr.contract ? () => openPreview('contract', tr.contract!.id) : undefined,
-    },
-    { k: '项目', v: P.name, st: `${P.status} · ${P.milestoneName}`, cur: true },
-    {
-      k: '当前节点', v: C.curMile?.name ?? '全部完成', st: C.curMile?.date ?? '—',
-      onClick: () => C.pj('track'),
-    },
-    {
-      k: '质量验收', v: P.acceptStatus ?? '未申报', st: P.acceptStatus ? '已进入验收流程' : '完工后申报',
-      onClick: () => C.pj('quality'),
-    },
-    { k: '结算', v: P.status === '已结项' ? '已结算' : '未结算', st: P.status === '已结项' ? '结算额已确认' : '验收通过后结算', void: P.status !== '已结项' },
-    {
-      k: svc ? '维保服务' : '质保期', v: svc ? '服务中' : '待进入',
-      st: svc ? `${P.serviceStart ?? ''} ~ ${P.serviceEnd ?? ''}` : `质保金 ${(C.WARRANTY / 10000).toFixed(2)} 万待扣留`,
-      void: !svc,
-    },
-  ];
-  return (
-    <Card hd={<span><Ico n="swap" size={16} /> 全链路血缘</span>}
-      extra={<Btn size="sm" onClick={C.openPanorama}><Ico n="search" size={14} /> 项目全景</Btn>}>
-      <div className="nc-lineage">
-        {nodes.map((n, i) => (
-          <React.Fragment key={n.k}>
-            {i > 0 && <span className="nc-lineage-arrow">→</span>}
-            {n.onClick ? (
-              <button className={`nc-lineage-node${n.cur ? ' is-cur' : ''}${n.void ? ' is-void' : ''}`} onClick={n.onClick} title={`穿透到${n.k}`}>
-                <span className="nc-lineage-k">{n.k}</span>
-                <span className="nc-lineage-v">{n.v}</span>
-                <span className="nc-lineage-st">{n.st}</span>
-              </button>
-            ) : (
-              <span className={`nc-lineage-node${n.cur ? ' is-cur' : ''}${n.void ? ' is-void' : ''}`}>
-                <span className="nc-lineage-k">{n.k}</span>
-                <span className="nc-lineage-v">{n.v}</span>
-                <span className="nc-lineage-st">{n.st}</span>
-              </span>
-            )}
-          </React.Fragment>
-        ))}
-      </div>
-      <div className="nc-cell-sub" style={{ marginTop: 8 }}>
-        当前所处位置：<Tag tone={(PROJECT_STATUS_TONE[P.status] || 'blue') as 'blue'}>{P.status}</Tag>
-        　上游缺单据的环节以虚线标出 —— 未签合同的执行中项目会进驾驶舱「无合同施工」风险榜。
-      </div>
-    </Card>
-  );
-}
-
 export default function OverviewSub({ C }: { C: PjCtx }) {
   return (
     <div className="nc-pjsection">
       <KpiStrip C={C} />
       <CardProfile C={C} />
       <div style={{ marginTop: 16 }}><CardRisk C={C} /></div>
-      <div style={{ marginTop: 16 }}><Lineage C={C} /></div>
     </div>
   );
 }

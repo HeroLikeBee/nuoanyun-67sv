@@ -2,9 +2,14 @@
 import React, { useMemo, useState } from 'react';
 import {
   Alert, Btn, Card, DataTable, Drawer, Field, KvGrid, ListToolbar, Modal, Money,
-  EntityLink, Op, OpSep, PageHead, TableFoot, Tag, Tabs, Tile, Timeline, useToast, type Col, pressProps,} from '../components/ui';
+  EntityLink, Op, OpSep, PageHead, Progress, TableFoot, Tag, Tabs, Tile, Timeline, Tip, usePaged, useToast, type Col, pressProps,
+  ContractPicker,} from '../components/ui';
 import { CONTRACTS, CUSTOMERS, INVOICES, TODAY, calcTax, canSeeMoney, fmt, fmtWan } from '../components/data';
 import { Ico } from '../components/icons';
+import { ExportButton, useExport, getUserName, ExportDialog, type ExportField } from '../components/export';
+
+/** 可开票合同 = 非框架协议（模块级常量，选择器把它当 useMemo 依赖） */
+const INV_CONTRACTS = CONTRACTS.filter((c) => c.type !== '框架协议');
 
 const TAX_RATES = [6, 9, 13];
 /** 按购方名称反查客户档案 ID（用于「购方名称」穿透到客户详情） */
@@ -27,6 +32,8 @@ export default function InvoicePage({ go, role, nav }: { go: (p: string) => void
   const [voidTxt, setVoidTxt] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  /** 导出勾选（与列表勾选列同源） */
+  const [invSel, setInvSel] = useState<string[]>([]);
 
   // 开票表单
   /* G3：原 useState(CONTRACTS[0].id) 硬编码索引 0。改为取首个「非框架且可开票」的合同。 */
@@ -59,7 +66,34 @@ export default function InvoicePage({ go, role, nav }: { go: (p: string) => void
     && (rate === 'all' || String(i.taxRate) === rate)
     && (st === 'all' || i.type === st)
     && (!kw || i.id.includes(kw) || i.no.includes(kw) || i.buyer.includes(kw) || i.contract.includes(kw)));
+  /* TableFoot total 以当前页签视图为基数（再叠加税率/类型/关键词过滤出 filtered） */
+  const tabBase = rows.filter((i) => tab === 'all' || i.status === tab);
   const paged = filtered.slice((page - 1) * pageSize, page * pageSize);
+
+  /* ============ 统一导出（金额 / 税率 / 税额为敏感字段，财务高敏） ============ */
+  const exportFields: ExportField[] = [
+    { key: 'id', label: '发票编号' },
+    { key: 'contract', label: '合同号' },
+    { key: 'buyer', label: '客户' },
+    { key: 'date', label: '开票日期' },
+    { key: 'amt', label: '金额', sensitive: true },
+    { key: 'taxRate', label: '税率', sensitive: true },
+    { key: 'tax', label: '税额', sensitive: true },
+    { key: 'total', label: '价税合计' },
+    { key: 'status', label: '状态' },
+  ];
+  const exportApi = useExport({
+    pageKey: 'invoice',
+    pageName: '开票台账',
+    fields: exportFields,
+    defaultFieldKeys: exportFields.map((f) => f.key),
+    totalCount: rows.length,
+    filteredCount: filtered.length,
+    selectedCount: invSel.length,
+    previewRows: filtered.slice(0, 5),
+    userName: getUserName(role),
+    onExport: () => { /* 原型：导出动作与审计上报由 useExport 内置完成 */ },
+  });
 
   /* 税率口径一致性硬校验：合同税率 vs 发票税率
      M35：原实现将合同税率写死为 9%，导致维护保养（6%）/ 采购（13%）业务被无差别硬拦截。
@@ -85,25 +119,27 @@ export default function InvoicePage({ go, role, nav }: { go: (p: string) => void
   const previewTotal = fMode === '含税' ? fAmt : fAmt + previewTax;
 
   const cols: Col<Inv>[] = [
-    { key: 'id', title: '发票流水号', width: 150, render: (i) => <span className="num nc-link" onClick={() => setDetail(i)} {...pressProps(() => setDetail(i))}>{i.id}</span> },
+    { key: 'id', title: '发票流水号', width: 150, hide: true, render: (i) => <span className="num nc-link" onClick={() => setDetail(i)} {...pressProps(() => setDetail(i))}>{i.id}</span> },
     {
-      key: 'no', title: '发票号码 / 类型', render: (i) => (
-        <div><div className="num">{i.no}</div><div className="nc-tiny nc-muted">{i.type}</div></div>
+      key: 'no', title: '发票号码 / 类型', sticky: 'left', render: (i) => (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <span className="num">{i.no}</span><Tag tone="gray">{i.type}</Tag>
+        </span>
       ),
     },
-    { key: 'date', title: '开票日期', width: 110, render: (i) => <span className="num">{i.date}</span> },
+    { key: 'date', title: '开票日期', width: 110, align: 'right', render: (i) => <span className="num">{i.date}</span> },
     { key: 'buyer', title: '购方名称', render: (i) => <span>{i.buyer}</span> },
     { key: 'contract', title: '关联合同', width: 150, render: (i) => <EntityLink target="contract" id={i.contract} go={go} title="下钻到合同详情">{i.contract}</EntityLink> },
     {
-      key: 'mode', title: '税率口径', width: 130, render: (i) => (
+      key: 'mode', title: '税率口径', width: 140, align: 'right', render: (i) => (
         <span className="nc-valid-pill" title="含税：税额 = 总额 × 税率 ÷ (100+税率)；不含税：税额 = 总额 × 税率 ÷ 100">
           <b>{i.taxRate}%</b> · {i.mode}
         </span>
       ),
     },
-    { key: 'amt', title: '不含税金额', width: 120, align: 'right', render: (i) => <Money v={i.mode === '含税' ? i.total - i.tax : i.amt} role={role} /> },
-    { key: 'tax', title: '税额', width: 110, align: 'right', render: (i) => <Money v={i.tax} role={role} /> },
-    { key: 'total', title: '价税合计', width: 120, align: 'right', render: (i) => <b className="num"><Money v={i.total} role={role} /></b> },
+    { key: 'amt', title: '不含税金额', width: 120, align: 'right', render: (i) => <Money v={i.mode === '含税' ? i.total - i.tax : i.amt} role={role} wan /> },
+    { key: 'tax', title: '税额', width: 110, align: 'right', render: (i) => <Money v={i.tax} role={role} wan /> },
+    { key: 'total', title: '价税合计', width: 120, align: 'right', render: (i) => <b className="num"><Money v={i.total} role={role} wan /></b> },
     { key: 'status', title: '状态', width: 92, render: (i) => <Tag tone={ST_TONE[i.status] as 'green'}>{i.status}</Tag> },
     {
       key: 'op', title: '操作', width: 175, render: (i) => (
@@ -111,7 +147,7 @@ export default function InvoicePage({ go, role, nav }: { go: (p: string) => void
           <Op onClick={() => setDetail(i)}>详情</Op>
           {i.status === '正常' && <>
             <OpSep />
-            <Op danger gold onClick={() => { setRed(i); setRedTxt(''); }}>红字冲销</Op>
+            <Op danger onClick={() => { setRed(i); setRedTxt(''); }}>红字冲销</Op>
             <OpSep />
             <Op danger onClick={() => { setVoidInv(i); setVoidTxt(''); }}>作废</Op>
           </>}
@@ -128,28 +164,24 @@ export default function InvoicePage({ go, role, nav }: { go: (p: string) => void
     voidc: rows.filter((r) => r.status === '作废').length,
   };
 
+  /* 未开票重算：合同级台账，按列表页布局规范带分页 + 总计数 */
+  const unbilledPaged = usePaged(CONTRACTS.filter((c) => c.type !== '框架协议'));
+
   return (
     <>
       <PageHead
         crumbs={['财务', '发票管理']}
         title="发票管理"
         badges={<><Tag tone="green">正常 {rows.filter((r) => r.status === '正常').length}</Tag><Tag tone="gray">已红字冲销 {STAT.red}</Tag><Tag tone="gray">作废 {STAT.voidc}</Tag></>}
-        actions={<><Btn onClick={() => go('settings')} title="税率口径与开票规则见系统设置"><Ico n="gear" size={16} /> 税率口径</Btn><Btn onClick={() => toast('已导出开票台账')}>导出台账</Btn><Btn kind="primary" onClick={() => setNewOpen(true)}>+ 开具发票</Btn></>}
+        sub="工程 9% · 服务 6% · 货物 13%；不一致硬拦截"
+        actions={<><Btn onClick={() => go('settings')} title="税率口径与开票规则见系统设置"><Ico n="gear" size={16} /> 税率口径</Btn></>}
       />
 
-      <div className="nc-tiles nc-tiles-6">
+      <div className="nc-tiles nc-tiles-5">
         <Tile label="已开票（价税合计）" value={canSeeMoney(role) ? fmtWan(STAT.total) : '—'} tone="green" sub={canSeeMoney(role) ? `其中税额 ${fmtWan(STAT.tax)}` : '无金额权限（A-02）'} />
         <Tile label="税额合计" value={canSeeMoney(role) ? fmtWan(STAT.tax) : '—'} sub="增值税销项税额" />
         <Tile label="已红字冲销" value={STAT.red} sub="一笔仅一次 · 不回退合同状态" />
         <Tile label="作废" value={STAT.voidc} sub="未交付购方时可用" />
-        {/* 税率口径由 TAX_RATES 派生（自动跟随，不会再漏 13%）；sub 为各税率实际票数，口径与实绩同屏可核对 */}
-        <Tile
-          label="税率口径"
-          value={TAX_RATES.map((r) => `${r}%`).join(' / ')}
-          sub={TAX_RATES.map((r) => `${r}% ${rows.filter((i) => i.taxRate === r).length} 张`).join(' · ')}
-          tip="工程 / 建筑服务 9% · 现代服务（维护保养）6% · 货物销售 13%；开票税率须与合同税率一致，不一致为硬拦截"
-          tipW={320}
-        />
         <Tile label="待开票金额" value={canSeeMoney(role) ? fmtWan(rows.reduce((a, b) => a + (b.invAmt || 0), 0)) : '—'} tone="orange" sub="合同额 − 已开票" />
       </div>
 
@@ -181,25 +213,27 @@ export default function InvoicePage({ go, role, nav }: { go: (p: string) => void
                 ],
               },
             ]}
-            right={<>
-              <input className="nc-input nc-lt-search" value={kw} placeholder="搜索流水号 / 发票号码 / 购方 / 合同号"
-                onChange={(e) => { setKw(e.target.value); setPage(1); }} />
-              <Btn onClick={() => { setKw(''); setRate('all'); setSt('all'); setPage(1); }}>重置</Btn>
+            search={{ value: kw, onChange: (v) => { setKw(v); setPage(1); }, placeholder: '搜索流水号 / 发票号码 / 购方 / 合同号' }}
+            onReset={() => { setKw(''); setRate('all'); setSt('all'); setPage(1); }}
+            actions={<>
+              <ExportButton onClick={exportApi.trigger} selectedCount={invSel.length} />
+              <Btn kind="primary" onClick={() => setNewOpen(true)}>+ 开具发票</Btn>
             </>}
           />
         </div>
-        <DataTable cols={cols} rows={paged} rowKey={(i) => i.id} minWidth={1400}
+        <DataTable cols={cols} rows={paged} rowKey={(i) => i.id} minWidth={1250} onRowClick={(i) => setDetail(i)}
+        selectable selected={invSel} onSelectAll={setInvSel} onSelectRow={(id) => setInvSel((p) => p.includes(id) ? p.filter((x) => x !== id) : [...p, id])}
         empty="没有符合筛选条件的发票；开票须与合同税率一致（不一致为硬拦截）"
-        emptyCta={<Btn size="sm" kind="primary" onClick={() => setNewOpen(true)}>＋ 开具发票</Btn>}
+        emptyCta={<Btn kind="primary" onClick={() => setNewOpen(true)}>＋ 开具发票</Btn>}
           rowClass={(i) => i.status === '已红字冲销' || i.status === '作废' ? 'is-muted-row' : ''}
-          foot={<TableFoot total={rows.length} filtered={filtered.length} page={page} pageSize={pageSize} onPage={setPage} onPageSize={(n) => { setPageSize(n); setPage(1); }} />} />
+          foot={<TableFoot total={tabBase.length} filtered={filtered.length} page={page} pageSize={pageSize} onPage={setPage} onPageSize={(n) => { setPageSize(n); setPage(1); }} />} />
       </Card>
 
-      <Card hd="未开票重算（按合同口径）" extra={<span className="nc-muted">红字冲销 / 作废后自动重算，不需人工调整</span>}>
+      <Card hd={<>未开票重算（按合同口径） <Tip w={360} text="开票进度 = 已开票金额（正常票 · 价税合计）÷ 合同额；部分开票按金额占比累计，红字冲销 / 作废不计入。" /></>}>
         <table className="nc-tbl" style={{ minWidth: 900 }}>
-          <thead><tr><th style={{ width: 150 }}>合同编号</th><th>合同名称</th><th style={{ width: 120, textAlign: 'right' }}>合同金额</th><th style={{ width: 120, textAlign: 'right' }}>已开票</th><th style={{ width: 120, textAlign: 'right' }}>未开票</th><th style={{ width: 100, textAlign: 'right' }}>开票进度</th><th style={{ width: 90 }}>状态</th></tr></thead>
+          <thead><tr><th style={{ width: 150 }}>合同编号</th><th>合同名称</th><th style={{ width: 120, textAlign: 'right' }}>合同金额</th><th style={{ width: 120, textAlign: 'right' }}>已开票</th><th style={{ width: 120, textAlign: 'right' }}>未开票</th><th style={{ width: 132, textAlign: 'right' }}>开票进度 <Tip w={360} text="已开票金额（正常票 · 价税合计）÷ 合同额；部分开票按金额占比累计。" /></th><th style={{ width: 90 }}>状态</th></tr></thead>
           <tbody>
-            {CONTRACTS.filter((c) => c.type !== '框架协议').map((c) => {
+            {unbilledPaged.paged.map((c) => {
               const invoiced = rows.filter((r) => r.contract === c.id && r.status === '正常').reduce((a, b) => a + b.total, 0);
               const remain = Math.max(0, c.amt - invoiced);
               const pct = c.amt ? (invoiced / c.amt) * 100 : 0;
@@ -207,16 +241,22 @@ export default function InvoicePage({ go, role, nav }: { go: (p: string) => void
                 <tr key={c.id}>
                   <td><EntityLink target="contract" id={c.id} go={go} title="下钻到合同详情">{c.id}</EntityLink></td>
                   <td>{c.name}</td>
-                  <td className="is-num"><Money v={c.amt} role={role} /></td>
-                  <td className="is-num"><Money v={invoiced} role={role} className="nc-v-green" /></td>
-                  <td className="is-num">{remain > 0 ? <b className="nc-v-red"><Money v={remain} role={role} /></b> : '—'}</td>
-                  <td className="is-num num">{pct.toFixed(1)}%</td>
+                  <td className="is-num"><Money v={c.amt} role={role} wan /></td>
+                  <td className="is-num"><Money v={invoiced} role={role} className="nc-v-green" wan /></td>
+                  <td className="is-num">{remain > 0 ? <b className="nc-v-red"><Money v={remain} role={role} wan /></b> : '—'}</td>
+                  <td className="is-num num">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end' }}>
+                      <Progress value={pct} tone={remain <= 0 ? 'green' : pct > 0 ? 'orange' : undefined} />
+                      <span>{pct.toFixed(1)}%</span>
+                    </div>
+                  </td>
                   <td>{remain <= 0 ? <Tag tone="green">已开齐</Tag> : pct > 0 ? <Tag tone="orange">部分开票</Tag> : <Tag tone="gray">未开票</Tag>}</td>
                 </tr>
               );
             })}
           </tbody>
         </table>
+        {unbilledPaged.foot}
       </Card>
 
       {/* ============ 详情抽屉 ============ */}
@@ -257,15 +297,6 @@ export default function InvoicePage({ go, role, nav }: { go: (p: string) => void
               { k: '税率口径', v: `${detail.taxRate}% · ${detail.mode}` },
               { k: '当前状态', v: <Tag tone={ST_TONE[detail.status] as 'green'}>{detail.status}</Tag> },
             ]} />
-          </Field>
-
-          <Field label="税额计算口径（系统自动 · 不可人工修改）" span={4}>
-            <div className="nc-warnbox is-info">
-              <b>含税口径：税额 = 总额 × 税率 ÷ (100 + 税率)</b>
-              <div className="num">{fmt(detail.total)} × {detail.taxRate} ÷ {100 + detail.taxRate} = {fmt(calcTax(detail.total, detail.taxRate, '含税'))}（票面税额 {fmt(detail.tax)}）</div>
-              <b style={{ display: 'block', marginTop: 8 }}>不含税口径：税额 = 总额 × 税率 ÷ 100</b>
-              <div className="num">{fmt(detail.total)} × {detail.taxRate} ÷ 100 = {fmt(calcTax(detail.total, detail.taxRate, '不含税'))}</div>
-            </div>
           </Field>
 
           <Field label="关联收款记录" span={4}>
@@ -317,9 +348,8 @@ export default function InvoicePage({ go, role, nav }: { go: (p: string) => void
             }}>确认开具</Btn></>}>
         <div className="nc-form-grid">
           <Field label="关联合同" req span={2}>
-            <select className="nc-input" value={fContract} onChange={(e) => setFContract(e.target.value)}>
-              {CONTRACTS.filter((c) => c.type !== '框架协议').map((c) => <option key={c.id} value={c.id}>{c.id} · {c.name}（合同额 {fmtWan(c.amt)}）</option>)}
-            </select>
+            <ContractPicker value={fContract} onChange={setFContract} options={INV_CONTRACTS} scope="all"
+              placeholder="请选择可开票合同（非框架协议）" />
           </Field>
           <Field label="发票类型" req>
             <select className="nc-input" value={fType} onChange={(e) => setFType(e.target.value)}>
@@ -406,6 +436,9 @@ export default function InvoicePage({ go, role, nav }: { go: (p: string) => void
           <textarea className="nc-input" rows={4} maxLength={200} value={voidTxt} onChange={(e) => setVoidTxt(e.target.value)} placeholder="如：抬头信息填写有误，未交付购方" />
         </Field>
       </Modal>
+
+      {/* ============ 统一导出弹窗 ============ */}
+      <ExportDialog {...exportApi.dialogProps} />
     </>
   );
 }

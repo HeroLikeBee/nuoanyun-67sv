@@ -4,7 +4,7 @@
  *   只读展示核心完整信息，操作型跳转（编辑 / 新建 / 转合同等）仍走整页。
  */
 import React from 'react';
-import { CUSTOMERS, OPPS, SUPPLIERS, catPath, catScopeName } from './data';
+import { CUSTOMERS, OPPS, SUPPLIERS, catPath, catScopeName, contractOverdue, contractOverpay } from './data';
 import { getBids, getContracts, getOpps, getProjects, getQuotes } from './store';
 import { Banner, Btn, Card, Code, KvGrid, Modal, Money, Tag } from './ui';
 import { closePreview, usePreview } from './entityPreviewState';
@@ -18,7 +18,7 @@ function SupplierDetail({ id, role }: { id: string; role: string }) {
   const score = (s.q + s.d + s.p + s.s) / 4;
   return (
     <>
-      <Banner tone="info">只读穿透预览 · 准入状态 {s.status}，完整操作请进入供应商管理页</Banner>
+      <Banner tone="info">只读预览 · 准入状态 {s.status}，完整操作请进入供应商管理页</Banner>
       <Card hd="准入信息">
         <KvGrid rows={[
           { k: '供应商', v: <b>{s.name}</b> },
@@ -56,7 +56,7 @@ function OppDetail({ id, role }: { id: string; role: string }) {
   const oppBids = getBids().filter((b) => b.opp === id);
   return (
     <>
-      <Banner tone="info">只读穿透预览 · 完整跟进 / 推进操作请进入商机管理页</Banner>
+      <Banner tone="info">只读预览 · 完整跟进 / 推进操作请进入商机管理页</Banner>
       <Card hd="商机信息">
         <KvGrid rows={[
           { k: '商机名称', v: <b>{o.name}</b> },
@@ -93,7 +93,7 @@ function QuoteDetail({ id, role }: { id: string; role: string }) {
   const lines = q.lines ?? [];
   return (
     <>
-      <Banner tone="info">只读穿透预览 · 编辑 / 升版 / 提交审批请进入报价编辑页</Banner>
+      <Banner tone="info">只读预览 · 编辑 / 升版 / 提交审批请进入报价编辑页</Banner>
       <Card hd="报价信息">
         <KvGrid rows={[
           { k: '报价单', v: <b>{q.id}</b> },
@@ -150,7 +150,7 @@ function CustomerDetail({ id, role }: { id: string; role: string }) {
   const contracts = getContracts().filter((ct) => ct.party === c.name);
   return (
     <>
-      <Banner tone="info">只读穿透预览 · 完整跟进与业务台账请进入客户管理页</Banner>
+      <Banner tone="info">只读预览 · 完整跟进与业务台账请进入客户管理页</Banner>
       <Card hd="客户档案">
         <KvGrid rows={[
           { k: '客户名称', v: <b>{c.name}</b> },
@@ -184,7 +184,7 @@ function BidDetail({ id, role }: { id: string; role: string }) {
   if (!b) return <div className="nc-empty-mini">未找到投标单 {id}</div>;
   return (
     <>
-      <Banner tone="info">只读穿透预览 · 完整阶段推进 / 登记操作请进入投标管理页</Banner>
+      <Banner tone="info">只读预览 · 完整阶段推进 / 登记操作请进入投标管理页</Banner>
       <Card hd="投标信息">
         <KvGrid rows={[
           { k: '投标单', v: <b>{b.id}</b> },
@@ -211,7 +211,7 @@ function ContractDetail({ id, role }: { id: string; role: string }) {
   if (!ct) return <div className="nc-empty-mini">未找到合同 {id}</div>;
   return (
     <>
-      <Banner tone="info">只读穿透预览 · 完整条款 / 收付 / 变更操作请进入合同详情页</Banner>
+      <Banner tone="info">只读预览 · 完整条款 / 收付 / 变更操作请进入合同详情页</Banner>
       <Card hd="合同信息">
         <KvGrid rows={[
           { k: '合同编号', v: <b>{ct.id}</b> },
@@ -226,8 +226,8 @@ function ContractDetail({ id, role }: { id: string; role: string }) {
           { k: '签署 / 起始', v: `${ct.sign} · ${ct.start}` },
           { k: '结束', v: ct.end },
           { k: '节点', v: ct.nodes },
-          ...(ct.overdue ? [{ k: '标记', v: <Tag tone="red">收款逾期</Tag> }] : []),
-          ...(ct.overpay ? [{ k: '标记', v: <Tag tone="red">超付风险</Tag> }] : []),
+          ...(contractOverdue(ct) ? [{ k: '标记', v: <Tag tone="red">收款逾期</Tag> }] : []),
+          ...(contractOverpay(ct) ? [{ k: '标记', v: <Tag tone="red">超付风险</Tag> }] : []),
           ...(ct.signStatus && ct.signStatus !== '未发起' ? [{ k: '电子签', v: <Tag tone={ct.signStatus === '已签' ? 'green' : 'orange'}>{ct.signStatus}</Tag> }] : []),
           { k: '合同角色', v: <Tag tone="gray">{ct.contractRole === 'supplement_price' ? '价格调整补充' : ct.contractRole === 'supplement_service' ? (ct.parentId ? '框架执行单' : '新增服务补充') : ct.contractRole === 'maintenance' ? '维保合同' : '主合同'}</Tag> },
           ...(ct.parentId ? [{ k: '挂载父合同', v: <span className="num">{ct.parentId}</span> }] : []),
@@ -243,7 +243,7 @@ function ProjectDetail({ id, role }: { id: string; role: string }) {
   if (!p) return <div className="nc-empty-mini">未找到项目 {id}</div>;
   return (
     <>
-      <Banner tone="info">只读穿透预览 · 完整经营指标与进度操作请进入项目经营中心</Banner>
+      <Banner tone="info">只读预览 · 完整经营指标与进度操作请进入项目经营中心</Banner>
       <Card hd="项目信息">
         <KvGrid rows={[
           { k: '项目', v: <b>{p.id}</b> },
@@ -288,7 +288,7 @@ export function EntityPreviewHost({ role }: { role: string }) {
       case 'bid': return <BidDetail id={id} role={role} />;
       case 'contract': return <ContractDetail id={id} role={role} />;
       case 'project-center': return <ProjectDetail id={id} role={role} />;
-      default: return <div className="nc-empty-mini">暂不支持该实体的穿透预览（{target}）</div>;
+      default: return <div className="nc-empty-mini">暂不支持该实体的预览（{target}）</div>;
     }
   })();
   const foot = <Btn kind="primary" onClick={close}>关闭</Btn>;

@@ -5,15 +5,16 @@
 //   已选条件统一回显为可删除标签，避免多层筛选后用户不知道当前筛了什么
 import React, { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import {
-  Banner, Btn, Card, Code, DataTable, Drawer, Field, KvGrid, Modal, Money, Op, OpSep,
-  PageHead, TableFoot, Tabs, Tag, Timeline, Tip, useToast, Check, Progress, EntityLink, WatermarkModal, type TagTone, ConfirmModal, pressProps,
+  Banner, Btn, Card, Code, DataTable, Drawer, Field, KvGrid, Modal, Money, Op, OpMore, OpSep,
+  PageHead, ProjectPicker, TableFoot, Tabs, Tag, Timeline, Tip, useToast, Check, ContractPicker, Progress, EntityLink, WatermarkModal, type TagTone, ConfirmModal, pressProps, Tile,
 } from '../components/ui';
 import {
   DOCS, DOC_CATS, DOC_STATUS, DOC_STAGES, DOC_VERSIONS, DOC_LOGS, PROJECTS, CUSTOMERS, TODAY,
   idMarkFlowsOfProj, idMarkVersion, subscribeIdMark,
 } from '../components/data';
-import { setFocus } from '../components/store';
+import { consumePageAction, setFocus } from '../components/store';
 import { Ico, StatusIco, type IconName } from '../components/icons';
+import { getUserName } from '../components/export';
 
 type D = (typeof DOCS)[number];
 
@@ -24,17 +25,17 @@ type D = (typeof DOCS)[number];
  */
 /** 一级分类 → 徽标色（中性色板） */
 const CAT_TONE: Record<string, TagTone> = {
-  资质证照: 'gray', 招投标: 'blue', 合同协议: 'link', 施工过程: 'blue',
-  检测报告: 'purple', 验收交付: 'link', 维护保养记录: 'purple', 财务票据: 'gray', 体系文件: 'gray',
+  资质证照: 'gray', 招投标: 'blue', 合同协议: 'gray', 施工过程: 'blue',
+  检测报告: 'blue', 验收交付: 'gray', 维护保养记录: 'gray', 财务票据: 'gray', 体系文件: 'gray',
 };
 /** 二级类型 → 徽标色（中性色板） */
 const SUB_TONE: Record<string, TagTone> = {
   招标文件: 'blue', 投标文件: 'blue', 中标通知书: 'blue', 答疑澄清: 'blue',
-  主合同: 'link', 补充协议: 'link', 安全协议: 'link', 技术协议: 'link',
-  隐蔽验收记录: 'blue', 材料合格证: 'blue', 影像资料: 'blue', 施工组织设计: 'blue', 技术交底: 'link',
-  联动测试: 'purple', 第三方检测: 'purple', 材料送检: 'purple',
-  竣工图: 'link', 验收查验记录: 'link', 竣工验收报告: 'link', 移交清单: 'link',
-  巡检记录: 'purple', 维修工单: 'purple', 年度检测: 'purple',
+  主合同: 'gray', 补充协议: 'gray', 安全协议: 'gray', 技术协议: 'gray',
+  隐蔽验收记录: 'blue', 材料合格证: 'gray', 影像资料: 'blue', 施工组织设计: 'blue', 技术交底: 'gray',
+  联动测试: 'blue', 第三方检测: 'blue', 材料送检: 'blue',
+  竣工图: 'gray', 验收查验记录: 'gray', 竣工验收报告: 'gray', 移交清单: 'gray',
+  巡检记录: 'gray', 维修工单: 'gray', 年度检测: 'blue',
   结算单: 'gray', 发票: 'gray', 付款凭证: 'gray',
   资质证书: 'gray', 营业执照: 'gray', 人员证书: 'gray', 安全生产许可证: 'gray',
   管理制度: 'gray', 作业指导书: 'gray', 表单模板: 'gray',
@@ -139,6 +140,7 @@ export default function DocPage({ go, role, nav }: { go: (p: string) => void; ro
   const [dateF, setDateF] = useState('');
   const [needOnly, setNeedOnly] = useState(false);
   const [sort, setSort] = useState('最近更新');
+  const [moreOpen, setMoreOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [sel, setSel] = useState<string[]>([]);
@@ -161,12 +163,23 @@ export default function DocPage({ go, role, nav }: { go: (p: string) => void; ro
   /** 水印设置：'pack' 打包导出 / 'share' 分享链接；wmCfg 为当前生效的水印文本 */
   const [wmOpen, setWmOpen] = useState(false);
   const [wmFor, setWmFor] = useState<'pack' | 'share' | null>(null);
+  /** 水印弹窗「作用范围」文案：打包导出 / 竣工资料包 / 分享链接 三个入口各自传入 */
+  const [wmScopeLabel, setWmScopeLabel] = useState('');
   const [wmCfg, setWmCfg] = useState('仅限本项目使用');
   const [upType, setUpType] = useState('检测报告');
   const [upCat, setUpCat] = useState('检测报告');
   const [upStage, setUpStage] = useState<string>('施工');
   const [upProj, setUpProj] = useState(PROJECTS[0]?.id || '');
+  const [upContract, setUpContract] = useState('');
+  /** 项9：是否清单必备项 —— 默认勾选但可取消（原为硬编码 checked=true 不可改），口径=投标文件资料清单要求项 */
+  const [upNeed, setUpNeed] = useState(true);
   const [missList, setMissList] = useState<string[]>([]);
+  /* 项11：文档预览抽屉 */
+  const [previewDoc, setPreviewDoc] = useState<D | null>(null);
+  /* 项12：左侧分类树搜索 */
+  const [catKw, setCatKw] = useState('');
+  /* 项14：批量上传已选文件 */
+  const [upFiles, setUpFiles] = useState<string[]>([]);
 
   /* Ctrl + K 唤起全局检索 */
   useEffect(() => {
@@ -176,6 +189,13 @@ export default function DocPage({ go, role, nav }: { go: (p: string) => void; ro
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
+
+  /* AI 助手快捷操作：助手在本页点「上传文档」→ 跳本页并直接打开上传窗口。
+     以 nav（路由脉冲）为依赖，已在文档中心时再点一次也能重新打开。 */
+  useEffect(() => {
+    if (consumePageAction('doc') === 'upload') setUpOpen(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nav]);
 
   /* ---------- 筛选项来源（带命中计数） ---------- */
   /** 行业列表：按文档数降序（文档 → 项目 → 客户行业） */
@@ -250,6 +270,10 @@ export default function DocPage({ go, role, nav }: { go: (p: string) => void; ro
     if (!bizOn || incCompany) return 0;
     return DOCS.filter((d) => !d.proj).length;
   }, [inds, ptypeF, amtF, projF, incCompany]);
+  /* 统计瓦片基数 */
+  const needMiss = DOCS.filter((d) => d.need && d.status !== '已归档').length;
+  const thisMonth = DOCS.filter((d) => d.date.startsWith(TODAY.slice(0, 7))).length;
+  const pendingReview = DOCS.filter((d) => d.status === '待审核').length;
 
   const pushHist = (v: string) => {
     const t = v.trim();
@@ -288,7 +312,9 @@ export default function DocPage({ go, role, nav }: { go: (p: string) => void; ro
     const newMiss = upType === '检测报告' ? miss.filter((m) => !DOCS.some((d) => d.type === m)) : [];
     setMissList(newMiss);
     if (newMiss.length) { toast(`资料清单校验未通过：缺少「${newMiss.join('、')}」，请补齐后上传`); return; }
-    toast(`已上传「${upType}」至 ${upProj} · ${upStage} 阶段 · 分类【${upCat}】· 完整度已刷新`);
+    const n = upFiles.length || 1;
+    toast(`已上传 ${n} 份文档「${upType}」至 ${upProj} · ${upStage} 阶段 · 分类【${upCat}】${upNeed ? ' · 标记为清单必备项' : ''} · 完整度已刷新`);
+    setUpFiles([]);
     setUpOpen(false);
   };
 
@@ -296,7 +322,7 @@ export default function DocPage({ go, role, nav }: { go: (p: string) => void; ro
      用户会重复点击。改为 loading 态（禁用 + spinner）并在完成后恢复。 */
   const doPack = () => {
     if (!sel.length || packing) { toast('请先勾选文件'); return; }
-    setWmFor('pack'); setWmOpen(true);
+    setWmFor('pack'); setWmScopeLabel(`打包导出 ${sel.length} 个文档`); setWmOpen(true);
   };
   /** 水印确认后真正执行打包（后台异步任务 + loading 态，防重复点击） */
   const runPack = (wm: string) => {
@@ -326,6 +352,20 @@ export default function DocPage({ go, role, nav }: { go: (p: string) => void; ro
     })),
     [],
   );
+  /* 项12：分类树搜索过滤 —— 匹配分类名→整类；匹配文档名→所属分类+该子类 */
+  const filteredCatTree = useMemo(() => {
+    const k = catKw.trim().toLowerCase();
+    if (!k) return catTree;
+    return catTree
+      .map((c) => {
+        if (c.key.toLowerCase().includes(k)) return c;
+        const matchingSubs = c.subs.filter((s) =>
+          s.key.toLowerCase().includes(k)
+          || DOCS.some((d) => d.cat === c.key && d.sub === s.key && d.name.toLowerCase().includes(k)));
+        return matchingSubs.length ? { ...c, subs: matchingSubs } : null;
+      })
+      .filter(Boolean) as typeof catTree;
+  }, [catTree, catKw]);
 
   const dirs = dirMode === 'proj'
     ? PROJECTS.map((p) => ({ key: p.id, label: p.name, sub: p.id, n: DOCS.filter((d) => d.proj === p.id).length }))
@@ -354,7 +394,7 @@ export default function DocPage({ go, role, nav }: { go: (p: string) => void; ro
   /* ---------- 列表列 ---------- */
   const cols = [
     {
-      key: 'name', title: '文件名 / 编号', width: 320,
+      key: 'name', title: '文件名 / 编号', width: 320, sticky: 'left' as const,
       render: (d: D) => (
         <div className="nc-cell-main">
           <div>
@@ -363,15 +403,14 @@ export default function DocPage({ go, role, nav }: { go: (p: string) => void; ro
             </span>
             {' '}<Ico n="file" size={13} /> {d.name}
           </div>
-          <div className="nc-cell-sub"><Code>{d.id}</Code> · {d.size} · {d.tags.slice(0, 2).map((t) => `#${t}`).join(' ')}</div>
+          <div className="nc-cell-sub"><Code>{d.id}</Code></div>
         </div>
       ),
     },
     {
-      key: 'belong', title: '归属项目（行业 · 金额）', width: 250,
+      key: 'belong', title: '归属项目（行业）', width: 250,
       render: (d: D) => {
         const ind = industryOf(d.proj);
-        const amt = amtOf(d.proj);
         return (
           <div className="nc-cell-main">
             <div>
@@ -379,33 +418,31 @@ export default function DocPage({ go, role, nav }: { go: (p: string) => void; ro
                 ? <EntityLink target="project-center" id={d.proj} go={go} title="下钻到项目详情">{projOf(d.proj)?.name ?? d.proj}</EntityLink>
                 : <span className="nc-cell-sub">公司级</span>}
               {!!ind && <Tag tone="gray">{ind}</Tag>}
-              {amt > 0 && <span className="nc-cell-sub num"><Money v={amt} role={role} wan /></span>}
             </div>
             <div className="nc-cell-sub">
               {d.contract
                 ? <EntityLink target="contract" id={d.contract} go={go} title="下钻到合同详情"><Code>{d.contract}</Code></EntityLink>
                 : d.stage + ' 阶段'}
-              {!!ptypeOf(d.proj) && ` · ${ptypeOf(d.proj)}`}
             </div>
           </div>
         );
       },
     },
-    { key: 'cat', title: '分类', width: 140, render: (d: D) => <div className="nc-cell-main"><div><Tag tone={CAT_TONE[d.cat] || 'gray'}>{d.cat}</Tag></div><div className="nc-cell-sub">{d.sub}</div></div> },
-    { key: 'stage', title: '阶段', width: 78, render: (d: D) => <Tag tone="blue">{d.stage}</Tag> },
+    { key: 'cat', title: '分类 / 阶段', width: 160, render: (d: D) => <div className="nc-cell-main"><div><Tag tone={CAT_TONE[d.cat] || 'gray'}>{d.cat}</Tag></div><div className="nc-cell-sub">{d.sub} · {d.stage} 阶段</div></div> },
     { key: 'ver', title: '版本', width: 66, align: 'center' as const, render: (d: D) => <span className="num">{d.ver}</span> },
     { key: 'by', title: '上传人', width: 84 },
-    { key: 'date', title: '上传时间', width: 100 },
-    { key: 'dl', title: '下载', width: 60, align: 'right' as const, render: (d: D) => <span className="num">{d.dl}</span> },
+    { key: 'date', title: '上传时间 ↕', width: 100 },
+    { key: 'dl', title: '下载 ↕', width: 60, align: 'right' as const, render: (d: D) => <span className="num">{d.dl}</span> },
     { key: 'status', title: '状态', width: 80, render: (d: D) => <Tag tone={STATUS_TONE[d.status] || 'gray'}>{d.status}</Tag> },
-    { key: 'need', title: '必备', width: 60, align: 'center' as const, render: (d: D) => (d.need ? <Tag tone="red">必备</Tag> : <span className="nc-cell-sub">—</span>) },
+    { key: 'need', title: '必备', width: 56, align: 'center' as const, render: (d: D) => (d.need ? <Tag tone="gray" pill>必</Tag> : <span className="nc-cell-sub">—</span>) },
     {
       key: 'op', title: '操作', width: 150, align: 'right' as const,
       render: (d: D) => (
         <div className="nc-ops" onClick={(e) => e.stopPropagation()}>
-          <Op onClick={() => toast('已打开预览（水印：预览人 + 时间 + 租户）')}>预览</Op><OpSep />
+          <Op onClick={() => setPreviewDoc(d)}>预览</Op><OpSep />
           <Op onClick={() => toast(`已开始下载「${d.name}」· 下载行为留痕`)}>下载</Op><OpSep />
-          <Op onClick={() => { setDetail(d); setDTab('base'); }}>详情</Op>
+          <Op onClick={() => { setDetail(d); setDTab('base'); }}>详情</Op><OpSep />
+          <OpMore items={[{ label: '删除', danger: true, onClick: () => { setDetail(d); setDTab('base'); setDelOpen(true); } }]} />
         </div>
       ),
     },
@@ -434,7 +471,7 @@ export default function DocPage({ go, role, nav }: { go: (p: string) => void; ro
               <div className="nc-doc-preview-name">{detail.name}</div>
               <div className="nc-cell-sub">{detail.ver} · {detail.size} · 更新于 {detail.date} · {detail.by}</div>
             </div>
-            <Btn size="sm" onClick={() => toast('已打开在线预览（水印：预览人 + 时间 + 租户）')}>在线预览</Btn>
+            <Btn size="sm" onClick={() => setPreviewDoc(detail)}>在线预览</Btn>
           </div>
           <KvGrid cols={2} rows={[
             { k: '文档编号', v: <Code>{detail.id}</Code> },
@@ -447,18 +484,16 @@ export default function DocPage({ go, role, nav }: { go: (p: string) => void; ro
             { k: '项目合同额', v: amtOf(detail.proj) > 0 ? <Money v={amtOf(detail.proj)} role={role} wan /> : '—' },
             { k: '关联合同', v: detail.contract ? <EntityLink target="contract" id={detail.contract} go={go} title="下钻到合同详情">{detail.contract}</EntityLink> : '/' },
             { k: '所属阶段', v: <Tag tone="blue">{detail.stage}</Tag> },
-            { k: '是否必备', v: detail.need ? <Tag tone="red">必备（清单校验项）</Tag> : '非必备' },
+            { k: '是否必备', v: <>{detail.need ? <Tag tone="gray" pill>必</Tag> : <span className="nc-cell-sub">非必</span>}<div className="nc-cell-sub">口径：投标文件资料清单要求项；勾选后纳入竣工资料完整度校验，删除须管理员审批</div></> },
             { k: '文件状态', v: <Tag tone={STATUS_TONE[detail.status] || 'gray'}>{detail.status}</Tag> },
-            { k: '下载次数', v: <span className="num">{detail.dl}</span> },
+            { k: '下载次数', v: <span className="nc-num">{detail.dl}</span> },
             { k: '上传人 · 时间', v: `${detail.by} · ${detail.date}` },
-            { k: '可见范围', v: detail.vis },
+            { k: '可见范围', v: <>{detail.vis}<div className="nc-cell-sub">与项目详情·项目档案、合同详情·附件分类双向同源，任一入口上传 / 删除均实时同步</div></> },
           ]} />
           <div className="nc-sec-title">标签</div>
           <div className="nc-doc-tags">{detail.tags.map((t) => <span key={t} className="nc-doc-tag">#{t}</span>)}</div>
           <div className="nc-sec-title">摘要</div>
           <div className="nc-warnbox is-info">{detail.summary}</div>
-          <div className="nc-sec-title">同源链接</div>
-          <div className="nc-warnbox">与<b>项目详情 → 项目档案</b>、<b>合同详情 → 附件分类</b>双向同源：任一入口上传 / 删除均实时同步。</div>
         </>
       )}
       {dTab === 'ver' && (
@@ -481,7 +516,7 @@ export default function DocPage({ go, role, nav }: { go: (p: string) => void; ro
               </tbody>
             </table>
           ) : <div className="nc-empty"><div className="nc-empty-ico"><Ico n="folder" size={16} /></div><div>该文档暂无历史版本</div></div>}
-          <div className="nc-warnbox is-green"><Ico n="check" size={16} /> 上传新版本将自动归档旧版本，引用该文档的审批单 / 交付物同步提示「有更新版本」。</div>
+          <div className="nc-warnbox is-success"><Ico n="check" size={16} /> 上传新版本将自动归档旧版本，引用该文档的审批单 / 交付物同步提示「有更新版本」。</div>
         </>
       )}
       {dTab === 'rel' && (
@@ -498,7 +533,7 @@ export default function DocPage({ go, role, nav }: { go: (p: string) => void; ro
               <tr>
                 <td>合同</td>
                 <td>{detail.contract ? <EntityLink target="contract" id={detail.contract} go={go} title="下钻到合同详情">{detail.contract}</EntityLink> : <span className="nc-cell-sub">未关联合同</span>}</td>
-                <td>{detail.contract && <Op onClick={() => { setDetail(null); setFocus('contract', detail.contract!); go('contract'); }}>打开</Op>}</td>
+                <td>{detail.contract && <Op onClick={() => { setDetail(null); setFocus('contract-detail', detail.contract!); go('contract-detail'); }}>打开</Op>}</td>
               </tr>
               <tr>
                 <td>阶段</td>
@@ -543,49 +578,26 @@ export default function DocPage({ go, role, nav }: { go: (p: string) => void; ro
         title="文档中心"
         badges={<Tag tone="gray">{DOCS.length} 份文档</Tag>}
         actions={<>
-          <Btn disabled={!sel.length} title={sel.length ? `打包导出 ${sel.length} 个文件（可设置水印）` : '请先勾选至少一个文档'} loading={packing} onClick={doPack}><Ico n="package" size={16} /> {packing ? '打包中…' : `打包导出 ZIP${sel.length ? ` (${sel.length})` : ''}`}</Btn>
           <Btn onClick={() => setBorrowOpen(true)}>借阅记录</Btn>
-          <Btn onClick={() => setGOpen(true)}><Ico n="search" size={16} /> 检索 Ctrl+K</Btn>
-          <Btn kind="primary" onClick={() => setUpOpen(true)}>＋ 上传文档</Btn>
         </>}
       />
 
-      {/* ============ 搜索区 ============ */}
-      <Card>
-        <div className="nc-doc-searchbar">
-          <div className="nc-doc-search">
-            <span className="nc-doc-search-ico"><Ico n="search" size={16} /></span>
-            <input
-              className="nc-input"
-              value={kw}
-              placeholder="搜索文件名 / 编号 / 标签 / 摘要 / 项目 / 合同"
-              onChange={(e) => { setKw(e.target.value); setPage(1); }}
-              onKeyDown={(e) => { if (e.key === 'Enter') pushHist(kw); }}
-            />
-            <select className="nc-input nc-doc-scope" value={scope} onChange={(e) => { setScope(e.target.value); setPage(1); }}>
-              {SCOPES.map((s) => <option key={s}>{s}</option>)}
-            </select>
-            <Btn kind="primary" onClick={() => doSearch(kw)}>搜索</Btn>
-            {!!kw && <Btn onClick={() => { setKw(''); setPage(1); }}>清空</Btn>}
-          </div>
-          <div className="nc-doc-hot">
-            <span className="nc-ltlbl">热搜</span>
-            {HOT_KW.map((h) => (
-              <button key={h} className="nc-doc-hotbtn" onClick={() => doSearch(h)}>{h}</button>
-            ))}
-            {!!hist.length && <>
-              <span className="nc-ltlbl" style={{ marginLeft: 8 }}>最近</span>
-              {hist.map((h) => (
-                <button key={h} className="nc-doc-hotbtn is-hist" onClick={() => doSearch(h)}>{h} <Ico n="close" size={11} /></button>
-              ))}
-            </>}
-          </div>
-        </div>
-      </Card>
+      {/* 统计瓦片：与列表筛选同源 */}
+      <div className="nc-tiles nc-tiles-4">
+        <Tile label="文档总数" value={DOCS.length} sub="全部资料" onClick={() => clearAll()} active={!activeFilters.length} />
+        <Tile label="必备缺项" value={needMiss} tone={needMiss ? 'orange' : undefined} sub="未归档的验收必备项" onClick={() => { setNeedOnly(true); setPage(1); }} active={needOnly} />
+        <Tile label="本月上传" value={thisMonth} sub="本月新增资料" />
+        <Tile label="待归档" value={pendingReview} tone={pendingReview ? 'orange' : undefined} sub="待审核未归档" onClick={() => { setStatusF('待审核'); setPage(1); }} active={statusF === '待审核'} />
+      </div>
 
       <div className="nc-doc-layout">
         {/* ==================== 左侧分类导航 ==================== */}
         <div className="nc-doc-side">
+          <input
+            className="nc-input" style={{ marginBottom: 12 }}
+            value={catKw} onChange={(e) => setCatKw(e.target.value)}
+            placeholder="搜索分类/文档"
+          />
           <div className="nc-seg" style={{ width: '100%', marginBottom: 12 }}>
             <button className={`nc-seg-btn${dirMode === 'cat' ? ' is-on' : ''}`} onClick={() => { setDirMode('cat'); setActiveDir(''); setActiveStage(''); }}>按分类</button>
             <button className={`nc-seg-btn${dirMode === 'proj' ? ' is-on' : ''}`} onClick={() => { setDirMode('proj'); setActiveCat(''); setActiveSub(''); setActiveStage(''); }}>按项目</button>
@@ -600,8 +612,8 @@ export default function DocPage({ go, role, nav }: { go: (p: string) => void; ro
             <span>全部文档</span><span className="nc-dir-n num">{DOCS.length}</span>
           </button>
 
-          {dirMode === 'cat' && catTree.map((c) => {
-            const open = expanded.includes(c.key);
+          {dirMode === 'cat' && filteredCatTree.map((c) => {
+            const open = catKw.trim() ? true : expanded.includes(c.key);
             return (
               <div key={c.key} className="nc-cat-node">
                 <div className="nc-cat-head">
@@ -657,7 +669,7 @@ export default function DocPage({ go, role, nav }: { go: (p: string) => void; ro
             return (
               <Card
                 hd={<span>竣工资料完整度 · {projOf(activeDir)?.name}</span>}
-                extra={<Btn size="sm" onClick={() => toast('已导出竣工资料包（含封面页 + 目录索引）')}>一键导出资料包</Btn>}
+                extra={<Btn size="sm" onClick={() => { setWmFor('pack'); setWmScopeLabel('竣工资料包'); setWmOpen(true); }}>一键导出资料包</Btn>}
               >
                 <div className="nc-completeness">
                   <Progress value={pct} tone={pct >= 90 ? 'green' : pct >= 60 ? 'orange' : 'red'} />
@@ -693,84 +705,81 @@ export default function DocPage({ go, role, nav }: { go: (p: string) => void; ro
           <Card flush>
             {/* ============ 多维筛选面板 ============ */}
             <div className="nc-doc-filters">
-              {/* 业务维度：行业（多选） */}
+              {/* 主行：搜索 + 更多筛选 + 高频 chips（状态 / 必备） */}
               <div className="nc-doc-frow">
-                <span className="nc-doc-flbl">行业</span>
+                <input
+                  className="nc-input" style={{ width: 260 }} value={kw} placeholder="搜索文件名 / 编号 / 标签 / 摘要"
+                  onChange={(e) => { setKw(e.target.value); setPage(1); }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') pushHist(kw); }}
+                />
+                <Tip w={320} text="搜索范围：文件名 + 文档编号 + 标签 + 内容摘要；图片 / ZIP 内文不参与检索" />
+                <Btn onClick={() => setMoreOpen((v) => !v)}>{moreOpen ? '收起筛选 ▴' : '更多筛选 ▾'}</Btn>
                 <div className="nc-doc-fchips">
-                  <button className={`nc-chipbtn${inds.length === 0 ? ' is-on' : ''}`} onClick={() => setInds([])}>全部</button>
-                  {INDUSTRIES.map((i) => (
-                    <button
-                      key={i.key} className={`nc-chipbtn${inds.includes(i.key) ? ' is-on' : ''}`}
-                      onClick={() => { toggleInd(i.key); setPage(1); }}
-                      title={`只看${i.key}行业项目的文档`}
-                    >
-                      {i.key}<span className="nc-chip-cnt">{i.n}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* 业务维度：项目类型 / 金额 / 指定项目 */}
-              <div className="nc-doc-frow">
-                <span className="nc-doc-flbl">项目</span>
-                <div className="nc-doc-fchips">
-                  <button className={`nc-chipbtn${!ptypeF ? ' is-on' : ''}`} onClick={() => { setPtypeF(''); setPage(1); }}>全部类型</button>
-                  {PTYPES.map((t) => (
-                    <button key={t} className={`nc-chipbtn${ptypeF === t ? ' is-on' : ''}`} onClick={() => { setPtypeF(ptypeF === t ? '' : t); setPage(1); }}>{t}</button>
-                  ))}
-                </div>
-                <span className="nc-doc-fsep" />
-                <select className="nc-input nc-doc-fsel" value={amtF} onChange={(e) => { setAmtF(e.target.value); if (e.target.value !== 'custom') setAmtMin(''); setPage(1); }} title="按项目合同额筛选">
-                  {AMT_BUCKETS.map((b) => <option key={b.key} value={b.key}>{b.label}</option>)}
-                </select>
-                {amtF === 'custom' && (
-                  <span className="nc-doc-fmin">
-                    <input
-                      className="nc-input" style={{ width: 76 }} type="number" min={0} value={amtMin} placeholder="110"
-                      onChange={(e) => { setAmtMin(e.target.value); setPage(1); }}
-                    />
-                    <span className="nc-cell-sub">万元以上</span>
-                  </span>
-                )}
-                <select className="nc-input nc-doc-fsel is-wide" value={projF} onChange={(e) => { setProjF(e.target.value); setPage(1); }} title="指定项目">
-                  <option value="">全部项目</option>
-                  {PROJECTS.map((p) => <option key={p.id} value={p.id}>{p.id} · {p.name}</option>)}
-                </select>
-                <Check checked={incCompany} onChange={(v) => { setIncCompany(v); setPage(1); }} label="含公司级" />
-              </div>
-
-              {/* 文档维度 */}
-              <div className="nc-doc-frow">
-                <span className="nc-doc-flbl">文档</span>
-                <div className="nc-doc-fchips">
-                  <button className={`nc-chipbtn${!stageF ? ' is-on' : ''}`} onClick={() => { setStageF(''); setPage(1); }}>全部阶段</button>
-                  {DOC_STAGES.map((s) => (
-                    <button key={s} className={`nc-chipbtn${stageF === s ? ' is-on' : ''}`} onClick={() => { setStageF(stageF === s ? '' : s); setPage(1); }}>
-                      {s}<span className="nc-chip-cnt">{DOCS.filter((d) => d.stage === s).length}</span>
-                    </button>
-                  ))}
-                </div>
-                <span className="nc-doc-fsep" />
-                <div className="nc-doc-fchips">
-                  <button className={`nc-chipbtn${!statusF ? ' is-on' : ''}`} onClick={() => { setStatusF(''); setPage(1); }}>全部状态</button>
                   {DOC_STATUS.map((s) => (
-                    <button key={s} className={`nc-chipbtn${statusF === s ? ' is-on' : ''}`} onClick={() => { setStatusF(statusF === s ? '' : s); setPage(1); }}>{s}</button>
+                    <button key={s} className={`nc-chipbtn${statusF === s ? ' is-on' : ''}`} onClick={() => { setStatusF(statusF === s ? '' : s); setPage(1); }}>
+                      {s}<span className="nc-chip-cnt">{DOCS.filter((d) => d.status === s).length}</span>
+                    </button>
                   ))}
                 </div>
-                <span className="nc-doc-fsep" />
-                <select className="nc-input nc-doc-fsel is-wide" value={typeF} onChange={(e) => { setTypeF(e.target.value); setPage(1); }} title="文档类型">
-                  <option value="">全部类型</option>
-                  {[...new Set(DOCS.map((d) => d.type))].sort().map((t) => <option key={t}>{t}</option>)}
-                </select>
-                <select className="nc-input nc-doc-fsel" value={byF} onChange={(e) => { setByF(e.target.value); setPage(1); }} title="上传人">
-                  <option value="">全部上传人</option>
-                  {[...new Set(DOCS.map((d) => d.by))].sort().map((b) => <option key={b}>{b}</option>)}
-                </select>
-                <select className="nc-input nc-doc-fsel" value={dateF} onChange={(e) => { setDateF(e.target.value); setPage(1); }} title="上传时间">
-                  {DATE_RANGES.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
-                </select>
-                <Check checked={needOnly} onChange={(v) => { setNeedOnly(v); setPage(1); }} label="只看验收清单必备项" />
+                <Check checked={needOnly} onChange={(v) => { setNeedOnly(v); setPage(1); }} label="只看必备项" />
               </div>
+
+              {/* 低频筛选展开区：行业 / 项目 / 金额 / 阶段 / 类型 / 上传人 / 时间 */}
+              {moreOpen && (<>
+                <div className="nc-doc-frow">
+                  <span className="nc-doc-flbl">行业</span>
+                  <div className="nc-doc-fchips">
+                    <button className={`nc-chipbtn${inds.length === 0 ? ' is-on' : ''}`} onClick={() => setInds([])}>全部</button>
+                    {INDUSTRIES.map((i) => (
+                      <button key={i.key} className={`nc-chipbtn${inds.includes(i.key) ? ' is-on' : ''}`} onClick={() => { toggleInd(i.key); setPage(1); }} title={`只看${i.key}行业项目的文档`}>
+                        {i.key}<span className="nc-chip-cnt">{i.n}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="nc-doc-frow">
+                  <span className="nc-doc-flbl">项目</span>
+                  <div className="nc-doc-fchips">
+                    <button className={`nc-chipbtn${!ptypeF ? ' is-on' : ''}`} onClick={() => { setPtypeF(''); setPage(1); }}>全部类型</button>
+                    {PTYPES.map((t) => (
+                      <button key={t} className={`nc-chipbtn${ptypeF === t ? ' is-on' : ''}`} onClick={() => { setPtypeF(ptypeF === t ? '' : t); setPage(1); }}>{t}</button>
+                    ))}
+                  </div>
+                  <span className="nc-doc-fsep" />
+                  <select className="nc-input nc-doc-fsel" value={amtF} onChange={(e) => { setAmtF(e.target.value); if (e.target.value !== 'custom') setAmtMin(''); setPage(1); }} title="按项目合同额筛选">
+                    {AMT_BUCKETS.map((b) => <option key={b.key} value={b.key}>{b.label}</option>)}
+                  </select>
+                  {amtF === 'custom' && (
+                    <span className="nc-doc-fmin">
+                      <input className="nc-input" style={{ width: 76 }} type="number" min={0} value={amtMin} placeholder="110" onChange={(e) => { setAmtMin(e.target.value); setPage(1); }} />
+                      <span className="nc-cell-sub">万元以上</span>
+                    </span>
+                  )}
+                  <ProjectPicker value={projF} onChange={(id) => { setProjF(id); setPage(1); }} scope="all" clearLabel="全部项目" placeholder="全部项目" width={168} />
+                  <Check checked={incCompany} onChange={(v) => { setIncCompany(v); setPage(1); }} label="含公司级" />
+                </div>
+                <div className="nc-doc-frow">
+                  <span className="nc-doc-flbl">阶段 / 类型</span>
+                  <div className="nc-doc-fchips">
+                    {DOC_STAGES.map((s) => (
+                      <button key={s} className={`nc-chipbtn${stageF === s ? ' is-on' : ''}`} onClick={() => { setStageF(stageF === s ? '' : s); setPage(1); }}>
+                        {s}<span className="nc-chip-cnt">{DOCS.filter((d) => d.stage === s).length}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <select className="nc-input nc-doc-fsel is-wide" value={typeF} onChange={(e) => { setTypeF(e.target.value); setPage(1); }} title="文档类型">
+                    <option value="">全部类型</option>
+                    {[...new Set(DOCS.map((d) => d.type))].sort().map((t) => <option key={t}>{t}</option>)}
+                  </select>
+                  <select className="nc-input nc-doc-fsel" value={byF} onChange={(e) => { setByF(e.target.value); setPage(1); }} title="上传人">
+                    <option value="">全部上传人</option>
+                    {[...new Set(DOCS.map((d) => d.by))].sort().map((b) => <option key={b}>{b}</option>)}
+                  </select>
+                  <select className="nc-input nc-doc-fsel" value={dateF} onChange={(e) => { setDateF(e.target.value); setPage(1); }} title="上传时间">
+                    {DATE_RANGES.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
+                  </select>
+                </div>
+              </>)}
 
               {/* 已选条件回显 */}
               {!!activeFilters.length && (
@@ -789,26 +798,25 @@ export default function DocPage({ go, role, nav }: { go: (p: string) => void; ro
               )}
             </div>
 
-            {/* 结果条 */}
+            {/* 结果条：左侧命中统计；弹性分隔后最右「打包导出 ZIP / ＋上传文档」。
+                排序下拉移除（改列头点击排序，暂未支持 sortable，保留默认「最近更新」）；
+                重置已收进上方已选条件回显行的「清空全部」（link 样式）。 */}
             <div className="nc-doc-fresult">
               <span className="nc-doc-fcount">
                 命中 <b className="num">{rows.length}</b> 份
                 {rows.length !== DOCS.length && <span className="nc-cell-sub"> / 共 {DOCS.length} 份</span>}
                 {' · 已选 '}<b className="num">{sel.length}</b> 份
               </span>
-              {!!hiddenCompany && <span className="nc-cell-sub">（已排除 {hiddenCompany} 份公司级文档，勾选「含公司级」可纳入）</span>}
-              <span className="nc-doc-fsort">
-                <select className="nc-input" value={sort} onChange={(e) => { setSort(e.target.value); setPage(1); }} title="排序">
-                  {SORTS.map((s) => <option key={s}>{s}</option>)}
-                </select>
-                {!!activeFilters.length && <Btn size="sm" onClick={clearAll}>重置</Btn>}
-              </span>
+              {!!hiddenCompany && <span className="nc-cell-sub">（已排除 {hiddenCompany} 份公司级文档）</span>}
+              <span style={{ flex: 1 }} />
+              <Btn disabled={!sel.length} title={sel.length ? `打包导出 ${sel.length} 个文件（可设置水印）` : '请先勾选至少一个文档'} loading={packing} onClick={doPack}><Ico n="package" size={16} /> {packing ? '打包中…' : `打包导出 ZIP${sel.length ? ` (${sel.length})` : ''}`}</Btn>
+              <Btn kind="primary" onClick={() => setUpOpen(true)}>＋ 上传文档</Btn>
             </div>
 
             <DataTable
               cols={cols} rows={paged} rowKey={(d) => d.id} minWidth={1420}
               empty="没有符合筛选条件的文档；可放宽行业 / 金额 / 项目类型任一条件，或勾选「含公司级」把公司级文档纳入"
-              emptyCta={<Btn size="sm" kind="primary" onClick={() => setUpOpen(true)}>＋ 上传文档</Btn>}
+              emptyCta={<Btn kind="primary" onClick={() => setUpOpen(true)}>＋ 上传文档</Btn>}
               selectable selected={sel}
               onSelectAll={() => setSel(allOn ? [] : rows.map((r) => r.id))}
               onSelectRow={(id) => setSel((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]))}
@@ -825,12 +833,11 @@ export default function DocPage({ go, role, nav }: { go: (p: string) => void; ro
         title={<span>文档详情 {detail && <Code>{detail.id}</Code>}</span>}
         sub={detail?.name}
         foot={<>
-          <Btn size="sm" onClick={() => toast('已打开预览（水印：预览人 + 时间 + 租户）')}>预览</Btn>
+          <Btn size="sm" onClick={() => setPreviewDoc(detail)}>预览</Btn>
           <Btn size="sm" onClick={() => toast('已开始下载 · 下载行为留痕')}>下载</Btn>
           <Btn size="sm" onClick={() => setShareOpen(true)}>在线发送</Btn>
           <Btn size="sm" onClick={() => setUpVerOpen(true)}>上传新版本</Btn>
           <Btn size="sm" onClick={() => toast('已提交借阅申请 · 待审批后开放下载')}>借阅</Btn>
-          <Btn size="sm" danger onClick={() => setDelOpen(true)}>删除</Btn>
         </>}
       >
         {detailBody}
@@ -839,10 +846,33 @@ export default function DocPage({ go, role, nav }: { go: (p: string) => void; ro
       {/* ============ 上传文档 ============ */}
       <Drawer
         open={upOpen} onClose={() => setUpOpen(false)} width={640} title="上传文档"
-        foot={<><Btn onClick={() => setUpOpen(false)}>取消</Btn><Btn kind="primary" onClick={doUpload}>上传并归集</Btn></>}
+        foot={<><Btn onClick={() => setUpOpen(false)}>取消</Btn><Btn kind="primary" onClick={doUpload}>上传 {upFiles.length ? `${upFiles.length} 份` : '并归集'}</Btn></>}
       >
         <Banner tone="warn"><Ico n="ban" size={16} /> 资料清单校验（硬拦截）：按消防验收资料清单校验（检测报告 / 合格证 / 图纸 / 隐蔽验收记录），缺失项将拦截并定位。</Banner>
-        <div className="nc-dropzone"><Ico n="paperclip" size={16} /> 拖入文件或 <Btn size="sm">选择文件</Btn><div className="nc-cell-sub">支持 PDF / DWG / JPG / PNG / ZIP / XLSX，单文件 ≤ 200MB</div></div>
+        <div
+          className="nc-dropzone"
+          onClick={() => {
+            const input = document.createElement('input');
+            input.type = 'file'; input.multiple = true;
+            input.onchange = () => {
+              const names = Array.from(input.files ?? []).map((f) => f.name);
+              if (names.length) setUpFiles((prev) => [...prev, ...names]);
+            };
+            input.click();
+          }}
+        ><Ico n="paperclip" size={16} /> 拖入文件或 <Btn size="sm">选择文件（可多选）</Btn><div className="nc-cell-sub">支持 PDF / DWG / JPG / PNG / ZIP / XLSX，单文件 ≤ 200MB</div></div>
+        {upFiles.length > 0 && (
+          <div style={{ margin: '8px 0' }}>
+            <div className="nc-cell-sub" style={{ marginBottom: 4 }}>已选 {upFiles.length} 个文件：</div>
+            {upFiles.map((f, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0' }}>
+                <Ico n="paperclip" size={14} />
+                <span style={{ flex: 1, fontSize: 13 }}>{f}</span>
+                <Btn size="sm" danger onClick={() => setUpFiles((prev) => prev.filter((_, j) => j !== i))}>移除</Btn>
+              </div>
+            ))}
+          </div>
+        )}
         <div className="nc-form-grid">
           <Field label="一级分类" req>
             <select className="nc-input" value={upCat} onChange={(e) => setUpCat(e.target.value)}>
@@ -860,20 +890,16 @@ export default function DocPage({ go, role, nav }: { go: (p: string) => void; ro
             </select>
           </Field>
           <Field label="归属项目">
-            <select className="nc-input" value={upProj} onChange={(e) => setUpProj(e.target.value)}>
-              <option value="">公司级（不归属项目）</option>
-              {PROJECTS.map((p) => <option key={p.id} value={p.id}>{p.id} · {p.name}</option>)}
-            </select>
+            <ProjectPicker value={upProj} onChange={setUpProj} scope="all" clearLabel="公司级（不归属项目）" />
           </Field>
           <Field label="关联合同">
-            <select className="nc-input"><option value="">暂不关联</option>{[...new Set(DOCS.filter((d) => d.contract).map((d) => d.contract))].map((c) => <option key={c}>{c}</option>)}</select>
+            <ContractPicker value={upContract} onChange={setUpContract} scope="all" clearLabel="暂不关联" />
           </Field>
-          <Field label="是否必备"><div className="nc-inline-checks"><Check checked={true} onChange={() => {}} label="清单必备项" /></div></Field>
+          <Field label="是否必备" note="口径：投标文件资料清单要求项；勾选后纳入竣工资料完整度校验"><div className="nc-inline-checks"><Check checked={upNeed} onChange={setUpNeed} label="清单必备项" /></div></Field>
           <Field label="标签" span={2} note="逗号分隔，用于检索"><input className="nc-input" placeholder="如：万达,强制性认证,验收" /></Field>
         </div>
-        {!!missList.length && <div className="nc-warnbox is-red"><div className="nc-warnbox-hd"><Ico n="ban" size={16} /> 校验未通过：缺少 {missList.join('、')}</div>请先补齐缺失的清单资料，或联系资料管理员。</div>}
+        {!!missList.length && <div className="nc-warnbox is-danger"><div className="nc-warnbox-hd"><Ico n="ban" size={16} /> 校验未通过：缺少 {missList.join('、')}</div>请先补齐缺失的清单资料，或联系资料管理员。</div>}
         <div className="nc-sec-title">已自动归集（同源）</div>
-        <div className="nc-warnbox is-green"><Ico n="check" size={16} /> 上传后将自动出现在「项目详情 → 项目档案」与「合同详情 → 附件分类」，无需重复上传。</div>
       </Drawer>
 
       {/* ============ 上传新版本 ============ */}
@@ -893,9 +919,9 @@ export default function DocPage({ go, role, nav }: { go: (p: string) => void; ro
       {/* ============ 在线发送 ============ */}
       <Modal
         open={shareOpen} onClose={() => setShareOpen(false)} width={480} title="在线发送（分享链接）"
-        foot={<><Btn onClick={() => setShareOpen(false)}>取消</Btn><Btn kind="primary" onClick={() => { setWmFor('share'); setWmOpen(true); }}>生成分享链接</Btn></>}
+        foot={<><Btn onClick={() => setShareOpen(false)}>取消</Btn><Btn kind="primary" onClick={() => { setWmFor('share'); setWmScopeLabel('分享链接'); setWmOpen(true); }}>生成分享链接</Btn></>}
       >
-        <Banner tone="info">在线发送：生成分享链接 → 带<b>水印</b> + <b>有效期</b>，到期自动失效。</Banner>
+        <Banner tone="info">分享链接带<b>水印</b> + <b>有效期</b>，到期自动失效。</Banner>
         <div className="nc-form-grid">
           <Field label="有效期（天）" req note="默认 7 天">
             <select className="nc-input" value={shareDays} onChange={(e) => setShareDays(Number(e.target.value))}>
@@ -906,7 +932,7 @@ export default function DocPage({ go, role, nav }: { go: (p: string) => void; ro
           <Field label="水印" span={2} note="可自定义水印文字（如「仅限××项目使用」）">
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span className="nc-cell-sub" style={{ flex: 1 }}>{wmCfg}</span>
-              <Btn size="sm" onClick={() => { setWmFor('share'); setWmOpen(true); }}>设置水印</Btn>
+              <Btn size="sm" onClick={() => { setWmFor('share'); setWmScopeLabel('分享链接'); setWmOpen(true); }}>设置水印</Btn>
             </div>
           </Field>
           <Field label="是否允许下载"><div className="nc-inline-checks"><Check checked={true} onChange={() => {}} label="允许" /></div></Field>
@@ -920,7 +946,8 @@ export default function DocPage({ go, role, nav }: { go: (p: string) => void; ro
       {/* ============ 水印设置（导出 / 分享共用） ============ */}
       <WatermarkModal
         open={wmOpen}
-        scope={wmFor === 'pack' ? `打包导出 ${sel.length} 个文档` : '分享链接'}
+        scope={wmScopeLabel}
+        userName={getUserName(role)}
         onClose={() => setWmOpen(false)}
         onConfirm={(cfg) => {
           setWmCfg(cfg.text);
@@ -932,7 +959,7 @@ export default function DocPage({ go, role, nav }: { go: (p: string) => void; ro
 
       {/* ============ 借阅记录 ============ */}
       <Modal open={borrowOpen} onClose={() => setBorrowOpen(false)} width={640} title="借阅记录" foot={<Btn kind="primary" onClick={() => setBorrowOpen(false)}>关闭</Btn>}>
-        <table className="nc-tbl" style={{ minWidth: 620 }}>
+        <table className="nc-tbl" style={{ minWidth: 560 }}>
           <thead><tr><th>借阅单号</th><th>文档</th><th style={{ width: 90 }}>借阅人</th><th style={{ width: 110 }}>申请时间</th><th style={{ width: 90 }}>状态</th><th style={{ width: 80 }}>操作</th></tr></thead>
           <tbody>
             <tr><td><Code>JY000017</Code></td><td>昆明万达广场合同扫描件</td><td>行政</td><td>2026-09-17</td><td><Tag tone="green">已通过</Tag></td><td><Op onClick={() => toast('已查看')}>查看</Op></td></tr>
@@ -975,6 +1002,74 @@ export default function DocPage({ go, role, nav }: { go: (p: string) => void; ro
           : '删除后版本链与借阅记录一并归档（软删除，可追溯）。'}<br />必备资料不可直接删除，须管理员审批。</>}
         onOk={(r) => { toast(`已提交删除申请（${detail?.name}），原因：${r} · 待管理员审批`); setDelOpen(false); }}
       />
+
+      {/* ============ 文档预览（项11：按文件类型渲染 mock 内容） ============ */}
+      <Drawer open={!!previewDoc} onClose={() => setPreviewDoc(null)} width={720}
+        title={<span>文档预览 {previewDoc && <Code>{previewDoc.id}</Code>}</span>}
+        sub={previewDoc?.name}
+        foot={<><Btn onClick={() => setPreviewDoc(null)}>关闭</Btn>
+          <Btn kind="primary" onClick={() => toast(`已开始下载「${previewDoc?.name}」· 下载行为留痕`)}>下载</Btn></>}>
+        {previewDoc && (() => {
+          const ext = (/\.(\w+)$/.exec(previewDoc.name)?.[1] || '').toLowerCase();
+          return (
+            <>
+              <div className="nc-doc-preview">
+                <div className="nc-doc-preview-ico"><Ico n="file" size={16} /></div>
+                <div className="nc-doc-preview-meta">
+                  <div className="nc-doc-preview-name">{previewDoc.name}</div>
+                  <div className="nc-cell-sub">{previewDoc.ver} · {previewDoc.size} · 更新于 {previewDoc.date} · {previewDoc.by} · 水印：预览人 + 时间 + 租户</div>
+                </div>
+              </div>
+              <div style={{ background: '#fafafa', border: '1px solid #e5e5e5', borderRadius: 6, padding: 24, minHeight: 320 }}>
+                {(ext === 'pdf' || ext === 'dwg') && (
+                  <div style={{ maxWidth: 560, margin: '0 auto', lineHeight: 2 }}>
+                    <h3 style={{ margin: '0 0 16px' }}>{previewDoc.name.replace(/\.\w+$/, '')}</h3>
+                    <p style={{ textIndent: '2em' }}>{previewDoc.summary}</p>
+                    <p style={{ textIndent: '2em' }}>本文件为{previewDoc.cat}类文档，由{previewDoc.by}于{previewDoc.date}上传归档，当前版本{previewDoc.ver}，文件大小{previewDoc.size}。</p>
+                    <p style={{ textIndent: '2em' }}>文档内容依据现场实际情况编制，经项目团队审核确认。如需下载原件，请点击底部「下载」按钮。</p>
+                  </div>
+                )}
+                {ext === 'xlsx' && (
+                  <table className="nc-tbl" style={{ minWidth: 520 }}>
+                    <thead><tr><th>序号</th><th>项目</th><th>内容</th><th style={{ textAlign: 'right' }}>数值</th></tr></thead>
+                    <tbody>
+                      <tr><td>1</td><td>文档名称</td><td>{previewDoc.name}</td><td className="num">{previewDoc.size}</td></tr>
+                      <tr><td>2</td><td>分类</td><td>{previewDoc.cat} / {previewDoc.sub}</td><td className="num">{previewDoc.ver}</td></tr>
+                      <tr><td>3</td><td>阶段</td><td>{previewDoc.stage}</td><td className="num">{previewDoc.dl} 次下载</td></tr>
+                      <tr><td>4</td><td>上传人</td><td>{previewDoc.by}</td><td className="num">{previewDoc.date}</td></tr>
+                    </tbody>
+                  </table>
+                )}
+                {(ext === 'jpg' || ext === 'jpeg' || ext === 'png' || ext === 'zip') && (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 280, background: '#f0f0f0', borderRadius: 4 }}>
+                    <div style={{ textAlign: 'center', color: '#999' }}>
+                      <Ico n="file" size={48} />
+                      <div style={{ marginTop: 8 }}>{ext === 'zip' ? '压缩包内容预览（共 18 个文件）' : '图片预览（缩略图）'}</div>
+                    </div>
+                  </div>
+                )}
+                {(ext === 'docx' || ext === 'doc') && (
+                  <div style={{ maxWidth: 560, margin: '0 auto', lineHeight: 2 }}>
+                    <h2 style={{ textAlign: 'center', margin: '0 0 20px' }}>{previewDoc.name.replace(/\.\w+$/, '')}</h2>
+                    <p style={{ textIndent: '2em' }}>{previewDoc.summary}</p>
+                    <p style={{ textIndent: '2em' }}>一、文档概述：本文件属于{previewDoc.cat}类别，子类型为{previewDoc.sub}，归属阶段为{previewDoc.stage}。</p>
+                    <p style={{ textIndent: '2em' }}>二、编制说明：文件由{previewDoc.by}编制并上传，经审核后归档管理。</p>
+                    <p style={{ textIndent: '2em' }}>三、附件清单：详见文件附件页。</p>
+                  </div>
+                )}
+                {!['pdf','dwg','xlsx','jpg','jpeg','png','zip','docx','doc'].includes(ext) && (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 280, color: '#999' }}>
+                    <div style={{ textAlign: 'center' }}>
+                      <Ico n="file" size={48} />
+                      <div style={{ marginTop: 8 }}>「{previewDoc.name}」预览（{previewDoc.size}）</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </>
+          );
+        })()}
+      </Drawer>
     </>
   );
 }

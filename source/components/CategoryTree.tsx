@@ -1,6 +1,6 @@
 // 诺安云 6.0 · 多级分类树维护组件（主数据共用）
 // 依据参考「主数据管理.html」TREE 模型 + 规范.md §5.4：
-//   · 两棵根树（物料目录「材料 / 设备」· 服务与套件目录），支持任意层级嵌套，覆盖全部四种物料类型
+//   · 两棵根树（物料目录 · 服务与套件目录），支持任意层级嵌套，覆盖全部四类物料类型
 //   · ＋新增子分类 / 重命名 / 删除（有子级或被引用禁删，留痕）
 //   · 维护动作直接写回 data.ts 的 CAT_TREE（同源可变存储 + 版本订阅），
 //     面包屑「当前分类」、分类目录列、详情路径与表单下拉即时同步，不再出现「树上改名、别处仍旧名」。
@@ -101,7 +101,7 @@ export default function CategoryTree({ value, onChange, countOf, usedIds, editab
       return p ? (p.ch || []) : CAT_TREE[modal.root].ch || [];
     })());
     if (siblings.some((x) => x.n === nm && x.id !== modal.edit?.id)) { setErr(`同级已存在分类「${nm}」，请改名`); return; }
-    /* 全局重名校验（跨树提示，避免"消防水"在产品与材料下重名混淆） */
+    /* 全局重名校验（跨树提示，避免"消防水"在产品与物料下重名混淆） */
     if (modal.mode === 'add' && allNodes().some((x) => x.n === nm && x.id !== modal.parent?.id)) {
       const dup = flat.find((f) => f.n.n === nm);
       if (dup) toast(`提示：其它层级已存在「${nm}」，原型允许重名但建议区分`, 'err');
@@ -140,7 +140,7 @@ export default function CategoryTree({ value, onChange, countOf, usedIds, editab
     }
     if ((node.ch || []).length) { toast(`「${node.n}」有子分类，禁止删除`, 'err'); return; }
     const ids = subIds(node);
-    if (usedIds.some((u) => ids.includes(u))) { toast(`「${node.n}」下存在材料 / 产品，被引用禁删`, 'err'); return; }
+    if (usedIds.some((u) => ids.includes(u))) { toast(`「${node.n}」下存在物料 / 产品，被引用禁删`, 'err'); return; }
     /* 危险操作二次确认（规范 §6.2） */
     setDelTarget({ root, node });
   };
@@ -207,7 +207,7 @@ export default function CategoryTree({ value, onChange, countOf, usedIds, editab
         </>}
       >
         <div className="nc-dnote" style={{ marginBottom: 12 }}>
-          支持任意层级；同级重名校验；被引用分类禁删。分类保存后自动同步到材料 / 产品表单下拉。
+          支持任意层级；同级重名校验；被引用分类禁删。分类保存后自动同步到物料 / 产品表单下拉。
           {modal?.mode === 'edit' && catSrcOf(modal.edit?.id) === 'platform' && (
             <> <b>本节点属{CAT_SRC_CN.platform}</b>，名称与层级不可改；计价 / 合规属性可在租户层覆盖。</>
           )}
@@ -254,7 +254,7 @@ export default function CategoryTree({ value, onChange, countOf, usedIds, editab
           }}>确认删除</Btn>
         </>}
       >
-        <div className="nc-warnbox is-red" style={{ marginBottom: 10 }}>
+        <div className="nc-warnbox is-danger" style={{ marginBottom: 10 }}>
           <Ico n="ban" size={16} /> 「{delTarget?.node.n}」删除后不可恢复，历史引用单据不受影响。
         </div>
         <div className="nc-cell-sub">该操作将写入变更日志（操作人 / 时间 / 内容）。</div>

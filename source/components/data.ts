@@ -1,11 +1,11 @@
 // 诺安云 6.0 · 演示数据（消防行业口径）
 // 编号体系：KH 客户 / SJ 商机 / BJ 报价 / TB 投标 / ZS 证书 / HT 合同 / CG 采购 / WB 维护保养
-//           FK 框架协议 / XM 项目 / MP 模板 / GYS 供应商 / CL 材料 / CP 产品 / SB 设备 / FP 发票
+//           JC 检测合同 / FK 框架协议 / XM 项目 / MP 模板 / GYS 供应商 / CL 物料 / SV 服务 / CP 套件 / SW 软件 / FP 发票（EQ 为历史设备编码）
 // 全部为虚构示例，手机号按规范脱敏（跨团队 138****1234），金额为演示值且可口算校验
 
 import type { IconName } from './icons';
 
-/* ============================ 角色（7 个，顶栏下拉唯一入口） ============================ */
+/* ============================ 角色（11 个，顶栏下拉唯一入口） ============================ */
 export const ROLES = [
   { id: 'boss', name: '总经理', icon: 'chart', desc: '大额审批 · 经营全局' },
   { id: 'deputy', name: '分管副总', icon: 'user', desc: '分管业务 · 投标与商机' },
@@ -20,6 +20,8 @@ export const ROLES = [
   { id: 'bidlead', name: '投标负责人', icon: 'mail', desc: '投标登记 · 材料包 · 证书引用' },
   { id: 'docadmin', name: '资料管理员', icon: 'folder', desc: '文档归集 · 竣工资料 · 合格证报告' },
   { id: 'sysadmin', name: '超级管理员', icon: 'gear', desc: '口径维护 · 异常处置' },
+  /* 仓管：库存作业（入库/领用/退料/盘点/调拨）可写，主数据只读 */
+  { id: 'warehouse', name: '仓管', icon: 'swap', desc: '入库领用退料盘点调拨 · 主数据只读' },
 ];
 
 /* ============================ 顶栏 13 模块 Tab（仅「经营管理」可点） ============================ */
@@ -29,7 +31,7 @@ export const MODULE_TABS = [
   { id: 'iot-monitor', name: '联网监测', disabled: true, note: '物联模块' },
   { id: 'workbench-mod', name: '工作台', disabled: true, note: '已合并入本模块「驾驶舱」（角色视角在页内切换）' },
   { id: 'engineering', name: '工程管理', disabled: true, note: '物联模块' },
-  { id: 'goods', name: '物品管理', disabled: true, note: '材料 / 产品 / 套件 BOM 已归入经营管理 · 供应链管理' },
+  { id: 'goods', name: '物品管理', disabled: true, note: '物料 / 服务 / 套件已归入经营管理 · 供应链管理' },
   { id: 'biz', name: '经营管理', disabled: false, note: '唯一业务模块，承载 6 组侧栏菜单' },
   { id: 'reports', name: '数据报表', disabled: true, note: '第二批' },
   { id: 'knowledge', name: '知识中心', disabled: true, note: '第二批' },
@@ -39,22 +41,22 @@ export const MODULE_TABS = [
   { id: 'system', name: '系统管理', disabled: true, note: '第二批' },
 ];
 
-/* ============================ 侧栏 6 组 13 项（严格按用户截图，工作台已合并入驾驶舱） ============================ */
+/* ============================ 侧栏 7 组 18 项（工作台已合并入驾驶舱；供应链组 5 项：供应商 / 物料主数据 / 库存 / 寻源 / 认证与报告） ============================ */
 // roles：菜单可见角色白名单（缺省 = 全角色可见）。总经理默认包含在所有菜单 → 与截图全量菜单一致；
 // 切换角色后无权限菜单自动隐藏（A-01 权限裁剪），徽标数值由业务数据派生（见 AppShell）。
 const ALL_ROLES = ['boss', 'deputy', 'sales', 'pm', 'finance', 'admin', 'contractadmin', 'bidlead', 'docadmin', 'sysadmin'];
 /** 物料域可见角色：5 个二级菜单共用同一份白名单，避免逐个抄漏导致「有的进得来有的进不来」 */
-const MATERIAL_ROLES = ['boss', 'deputy', 'pm', 'finance', 'contractadmin', 'docadmin', 'sysadmin'];
+const MATERIAL_ROLES = ['boss', 'deputy', 'pm', 'finance', 'contractadmin', 'docadmin', 'sysadmin', 'warehouse'];
 export const MENU: {
   group: string;
   items: {
     id: string; label: string; icon: IconName;
-    badgeKey?: 'bid' | 'cert';
+    badgeKey?: 'bid' | 'cert' | 'approval';
     roles?: string[];
   }[];
 }[] = [
   {
-    group: '综合',
+    group: '工作台',
     items: [
       { id: 'dashboard', label: '驾驶舱', icon: 'chart', roles: ALL_ROLES },
     ],
@@ -69,18 +71,21 @@ export const MENU: {
     ],
   },
   {
-    group: '资源管理',
+    group: '资质与档案',
     items: [
       { id: 'cert', label: '证书管理', icon: 'scroll', badgeKey: 'cert', roles: ['boss', 'deputy', 'pm', 'admin', 'bidlead', 'sysadmin'] },
       { id: 'doc', label: '文档中心', icon: 'folder', roles: ALL_ROLES },
     ],
   },
   {
-    group: '交付管理',
+    group: '履约交付',
     items: [
       { id: 'contract', label: '合同管理', icon: 'receipt', roles: ['boss', 'deputy', 'sales', 'pm', 'finance', 'contractadmin', 'sysadmin'] },
       { id: 'project', label: '项目管理', icon: 'building', roles: ['boss', 'deputy', 'pm', 'finance', 'sysadmin'] },
       { id: 'attendance', label: '考勤管理', icon: 'clipboard', roles: ['boss', 'deputy', 'pm', 'finance', 'sysadmin'] },
+      /* 审批中心：各业务页提交的审批统一收口到这里（四 Tab：待我审批 / 我已审批 / 我发起的 / 抄送我的）。
+         全角色可见 —— 每个人都会有「我发起的」与「抄送我的」。 */
+      { id: 'approval', label: '审批中心', icon: 'checkCircle', badgeKey: 'approval', roles: ALL_ROLES },
     ],
   },
   {
@@ -89,14 +94,15 @@ export const MENU: {
      * 改造前全站只有这一项带 children，点父级还得再展开一层才能选子页，
      * 与「文档中心 / 合同管理」等页面的「点即到」手感不一致。
      */
-    group: '供应链管理',
+    group: '供应链与物料',
     items: [
       { id: 'supplier', label: '供应商管理', icon: 'package', roles: ['boss', 'deputy', 'pm', 'finance', 'contractadmin', 'sysadmin'] },
       { id: 'material-list', label: '物料主数据', icon: 'module', roles: MATERIAL_ROLES },
-      { id: 'material-kit', label: '套件与配置', icon: 'link', roles: MATERIAL_ROLES },
+
       { id: 'material-stock', label: '库存管理', icon: 'swap', roles: MATERIAL_ROLES },
       { id: 'material-src', label: '采购寻源', icon: 'card', roles: MATERIAL_ROLES },
-      { id: 'material-cert', label: '认证与报告', icon: 'checkCircle', roles: MATERIAL_ROLES },
+      /* 认证与报告：CCCF / 国标 / 型式检验 / 强制标记台账，独立二级菜单页（物料主数据页不再挂认证瓦片） */
+      { id: 'material-cert', label: '认证与报告', icon: 'scroll', roles: MATERIAL_ROLES },
     ],
   },
   {
@@ -113,47 +119,51 @@ export const MENU: {
 
 /* ============================ 页面注册表（路由 + 页签标题） ============================ */
 export const PAGE_META: Record<string, { title: string; group: string }> = {
-  dashboard: { title: '驾驶舱', group: '综合' },
+  dashboard: { title: '驾驶舱', group: '工作台' },
   customer: { title: '客户管理', group: '销售管理' },
   opp: { title: '商机管理', group: '销售管理' },
   quote: { title: '报价台账', group: '销售管理' },
   'quote-edit': { title: '报价编辑', group: '销售管理' },
   'quote-detail': { title: '报价详情', group: '销售管理' },
   bid: { title: '投标管理', group: '销售管理' },
-  cert: { title: '证书管理', group: '资源管理' },
-  doc: { title: '文档中心', group: '资源管理' },
-  contract: { title: '合同管理', group: '交付管理' },
-  'contract-new': { title: '新建合同', group: '交付管理' },
-  'contract-detail': { title: '合同详情', group: '交付管理' },
-  project: { title: '项目管理', group: '交付管理' },
-  'project-center': { title: '项目经营中心', group: '交付管理' },
-  'project-new': { title: '新增项目', group: '交付管理' },
-  attendance: { title: '考勤管理', group: '交付管理' },
-  approval: { title: '审批中心', group: '交付管理' },
-  supplier: { title: '供应商管理', group: '供应链管理' },
+  'bid-detail': { title: '投标详情', group: '销售管理' },
+  cert: { title: '证书管理', group: '资质与档案' },
+  doc: { title: '文档中心', group: '资质与档案' },
+  contract: { title: '合同管理', group: '履约交付' },
+  'contract-new': { title: '新建合同', group: '履约交付' },
+  'contract-detail': { title: '合同详情', group: '履约交付' },
+  project: { title: '项目管理', group: '履约交付' },
+  'project-center': { title: '项目经营中心', group: '履约交付' },
+  'project-new': { title: '新增项目', group: '履约交付' },
+  attendance: { title: '考勤管理', group: '履约交付' },
+  approval: { title: '审批中心', group: '履约交付' },
+  supplier: { title: '供应商管理', group: '供应链与物料' },
   /* 'material' 只作为下钻兜底路由（驾驶舱「低于安全库存」卡片按 page:'material' 跳转），
      已在二级菜单中移除，因此不进 PAGE_META / SIDEBAR_PAGES —— 避免它再与 material-list 争高亮。 */
-  'material-list': { title: '物料主数据', group: '供应链管理' },
-  'material-kit': { title: '套件与配置', group: '供应链管理' },
-  'material-stock': { title: '库存管理', group: '供应链管理' },
-  'material-src': { title: '采购寻源', group: '供应链管理' },
-  'material-cert': { title: '认证与报告', group: '供应链管理' },
+  'material-list': { title: '物料主数据', group: '供应链与物料' },
+
+  'material-stock': { title: '库存管理', group: '供应链与物料' },
+  'material-src': { title: '采购寻源', group: '供应链与物料' },
+  'material-cert': { title: '认证与报告', group: '供应链与物料' },
   invoice: { title: '发票管理', group: '财务管理' },
   settings: { title: '系统设置', group: '系统设置' },
 };
 
 // 侧栏主菜单页（用于判断侧栏高亮）
 export const SIDEBAR_PAGES = Object.keys(PAGE_META).filter(
-  (k) => !k.includes('-edit') && !k.includes('-detail') && !k.includes('-new') && !k.includes('-center') && k !== 'approval',
+  (k) => !k.includes('-edit') && !k.includes('-detail') && !k.includes('-new') && !k.includes('-center'),
 );
 // 把子页归属到主菜单，用于侧栏高亮
 export const PAGE_PARENT: Record<string, string> = {
   'quote-edit': 'quote', 'quote-detail': 'quote',
+  'bid-detail': 'bid',
   'contract-new': 'contract', 'contract-detail': 'contract',
   'project-center': 'project', 'project-new': 'project',
-  approval: 'project',
-  /* 物料域已压平为二级菜单，各自就是主菜单项；仅兜底路由 'material' 指回物料主数据 */
+  /* 物料域已压平为二级菜单，各自就是主菜单项；仅兜底路由 'material' 指回物料主数据。
+     'material-kit' 已收敛并入物料主数据（套件=组合单元，配置入口在主数据行内「配置」按钮），
+     旧链接路由保留、高亮回挂物料主数据；material-cert 为独立二级菜单页（见 MENU），独立高亮。 */
   material: 'material-list',
+  'material-kit': 'material-list',
 };
 
 /* ============================ 客户（KH + 6 位流水） ============================ */
@@ -267,8 +277,8 @@ export type QuoteLine = {
   /** 报价单价（不含税），= cost × (1 + markup/100)；写入时由 cost / markup 重算 */
   price: number;
   /**
-   * 配方版本快照（M8）：本行由套件配方展开时记下当时的配方版本号。
-   * 配方「已被引用则升版」，不记版本则配方升版后历史报价无法还原当时成本。
+   * 配置版本快照（M8）：本行由套件配置展开时记下当时的配置版本号。
+   * 配置「已被引用则升版」，不记版本则配置升版后历史报价无法还原当时成本。
    */
   recipeVer?: string;
   note?: string;
@@ -413,7 +423,10 @@ export const QUOTES: Quote[] = [
         ],
       },
     ] },
-  { id: 'BJ000017', ver: 'V1', customer: '文山三七产业园管委会', customerId: 'KH20260506005', opp: 'SJ000475', name: '文山三七产业园智慧消防平台报价', total: 0, taxRate: 9, taxMode: '含税', status: '草稿', owner: '刘宇', date: '2026-09-19', update: '2026-09-19', approveLevel: '—', markup: 0, region: '文山', uplift: 0, items: 8, base: '园区', costSqm: 0 },
+  /* ⚠️ 本单是「草稿刚建、明细尚未编制」的样本：total 0 且**没有 lines**，
+     items 必须同步为 0（= lines?.length ?? 0，与 store.patchQuote 的落库口径一致）。
+     此前写死 items: 8，导致台账抽屉显示「明细行数 8」而台账总额 ¥0 —— 对不上。 */
+  { id: 'BJ000017', ver: 'V1', customer: '文山三七产业园管委会', customerId: 'KH20260506005', opp: 'SJ000475', name: '文山三七产业园智慧消防平台报价', total: 0, taxRate: 9, taxMode: '含税', status: '草稿', owner: '刘宇', date: '2026-09-19', update: '2026-09-19', approveLevel: '—', markup: 0, region: '文山', uplift: 0, items: 0, base: '园区', costSqm: 0 },
   { id: 'BJ000007', ver: 'V3', customer: '昆明万达广场商业管理有限公司', customerId: 'KH20260312001', opp: 'SJ000456', name: '昆明万达广场消防设施改造报价', total: 3200000, taxRate: 9, taxMode: '含税', status: '已转化', owner: '蓝峰', date: '2026-09-08', update: '2026-09-16', approveLevel: '分管副总', markup: 20, region: '昆明', uplift: 0, items: 6, base: '商业综合体', costSqm: 132, area: 4200, bidId: 'TB000038', projectId: 'XM000123',
     lines: [
       { matId: 'CL000123', catId: 'm211', name: '镀锌钢管', spec: 'DN100', unit: '米', qty: 5000, cost: 71, markup: 20, price: 85.2 },
@@ -480,8 +493,37 @@ export const QUOTES: Quote[] = [
       { catId: 'p21', name: '消防控制室驻点值班', spec: '持证值守 · 全年无休', unit: '人·年', qty: 2, cost: 95975, markup: 12, price: 107492 },
       { catId: 'p21', name: '消防泵房设备年度大修', spec: '含泵组解体检修与联动调试', unit: '项', qty: 1, cost: 140684, markup: 25, price: 175855 },
     ] },
-  { id: 'BJ000002', ver: 'V1', customer: '云南师大附中', customerId: 'KH20260312002', opp: 'SJ000461', name: '云南师大附中消防系统升级报价', total: 2100000, taxRate: 9, taxMode: '含税', status: '待审批', owner: '李思敏', date: '2026-08-25', update: '2026-09-18', approveLevel: '分管副总', markup: 22, region: '昆明', uplift: 0, items: 29, base: '教育', costSqm: 129, area: 11800 },
-  { id: 'BJ000001', ver: 'V2', customer: '柳州钢铁集团', customerId: 'KH20260620006', opp: 'SJ000482', name: '柳州钢铁厂区消防管网改造报价', total: 5600000, taxRate: 9, taxMode: '含税', status: '作废', owner: '赵薇', date: '2026-08-20', update: '2026-09-02', approveLevel: '总经理', markup: 18, region: '广西', uplift: 3, items: 52, base: '电力/制造', costSqm: 156, area: 26000 },
+  { id: 'BJ000002', ver: 'V1', customer: '云南师大附中', customerId: 'KH20260312002', opp: 'SJ000461', name: '云南师大附中消防系统升级报价', total: 2100000, taxRate: 9, taxMode: '含税', status: '待审批', owner: '李思敏', date: '2026-08-25', update: '2026-09-18', approveLevel: '分管副总', markup: 22, region: '昆明', uplift: 0, items: 9, base: '教育', costSqm: 129, area: 11800,
+    /* 明细行：升级类工程（报警系统扩容 + 喷淋 / 消火栓改造 + 应急照明）。
+       每行 qty × 单价都是整数元，末行「安装工程费」作包干额承担配平 ——
+       Σ8 行 = 2,100,000 = total，台账 / 详情 / 工作台三处口径一致。
+       （此前本单只有 items: 29 而无 lines，工作台打开时凭空补 15 行 ¥739,015。） */
+    lines: [
+      { matId: 'EQ000002', catId: 'm11', name: '感烟探测器', spec: 'JTY-GM-GST101', unit: '只', qty: 2400, cost: 54, markup: 22, price: 65.88 },
+      { matId: 'CL000233', catId: 'm11', name: '输入/输出模块', spec: 'GST-LD-8300', unit: '只', qty: 350, cost: 168, markup: 22, price: 204.96 },
+      { matId: 'EQ000001', catId: 'm11', name: '火灾报警控制器', spec: 'JB-QB-GST5000', unit: '台', qty: 2, cost: 5575, markup: 22, price: 6801.5 },
+      { matId: 'CL000145', catId: 'm212', name: '喷淋头（上喷）', spec: '68℃ / DN15', unit: '个', qty: 3200, cost: 23, markup: 22, price: 28.06 },
+      { matId: 'CL000123', catId: 'm211', name: '镀锌钢管', spec: 'DN100', unit: '米', qty: 4200, cost: 70, markup: 22, price: 85.4 },
+      { matId: 'CL000158', catId: 'm22', name: '消火栓箱', spec: 'SG24A65', unit: '台', qty: 100, cost: 377, markup: 22, price: 459.94 },
+      { matId: 'CL000201', catId: 'm4', name: '应急照明灯具', spec: 'ZF-JCZ', unit: '套', qty: 900, cost: 78, markup: 22, price: 95.16 },
+      { matId: 'CL000234', catId: 'm4', name: '应急照明集中电源', spec: 'EPS-3KVA', unit: '台', qty: 5, cost: 2130, markup: 22, price: 2598.6 },
+      { catId: 'p11', name: '安装工程费（人工+机械+辅材）', unit: '项', qty: 1, cost: 1035611.48, markup: 22, price: 1263445.81 },
+    ] },
+  { id: 'BJ000001', ver: 'V2', customer: '柳州钢铁集团', customerId: 'KH20260620006', opp: 'SJ000482', name: '柳州钢铁厂区消防管网改造报价', total: 5600000, taxRate: 9, taxMode: '含税', status: '作废', owner: '赵薇', date: '2026-08-20', update: '2026-09-02', approveLevel: '总经理', markup: 18, region: '广西', uplift: 3, items: 9, base: '电力/制造', costSqm: 156, area: 26000,
+    /* 明细行：厂区管网改造（干管更换 + 消火栓 / 水带水枪配套 + 桥架 + 报警主机）。
+       末行「安装工程费」为包干额配平，Σ9 行 = 5,600,000 = total（不含 3% 区域上浮）。
+       本单已作废，保留完整明细以便「作废前报价 vs 现价」对照。 */
+    lines: [
+      { matId: 'CL000123', catId: 'm211', name: '镀锌钢管', spec: 'DN100', unit: '米', qty: 14000, cost: 70, markup: 18, price: 82.6 },
+      { matId: 'CL000145', catId: 'm212', name: '喷淋头（上喷）', spec: '68℃ / DN15', unit: '个', qty: 2600, cost: 23, markup: 18, price: 27.14 },
+      { matId: 'CL000158', catId: 'm22', name: '消火栓箱', spec: 'SG24A65', unit: '台', qty: 200, cost: 377, markup: 18, price: 444.86 },
+      { matId: 'CL000226', catId: 'm22', name: '消防水泵接合器', spec: 'SQX100', unit: '套', qty: 25, cost: 602, markup: 18, price: 710.36 },
+      { matId: 'CL000231', catId: 'm22', name: '消防水带', spec: 'DN65 × 25m', unit: '盘', qty: 250, cost: 68, markup: 18, price: 80.24 },
+      { matId: 'CL000232', catId: 'm22', name: '直流水枪', spec: 'QZ19', unit: '个', qty: 250, cost: 39, markup: 18, price: 46.02 },
+      { matId: 'CL000188', catId: 'm12', name: '桥架', spec: '200×100', unit: '米', qty: 3200, cost: 58, markup: 18, price: 68.44 },
+      { matId: 'EQ000001', catId: 'm11', name: '火灾报警控制器', spec: 'JB-QB-GST5000', unit: '台', qty: 4, cost: 5575, markup: 18, price: 6578.5 },
+      { catId: 'p11', name: '安装工程费（人工+机械+辅材）', unit: '项', qty: 1, cost: 3380863, markup: 18, price: 3989418.34 },
+    ] },
   { id: 'BJ000021', ver: 'V1', customer: '曲靖万达广场商业管理有限公司', customerId: 'KH20260728008', opp: 'SJ000478', name: '曲靖万达广场消防维护保养报价（2027 年度）', total: 680000, taxRate: 6, taxMode: '含税', status: '草稿', owner: '李慧敏', date: '2026-09-21', update: '2026-09-21', approveLevel: '—', markup: 25, region: '曲靖', uplift: 0, items: 9, base: '商业综合体', costSqm: 0, area: 60000,
     /* 本单尚未转项目，没有项目台账可取基数 —— 面积 60,000 ㎡ 由业务经理在本页手填。
        这正是「维保报价必须先有人认下计量基数」的场景：没有基数就试算不出金额，
@@ -568,9 +610,24 @@ export const MARK_TYPES = [
 
 /* ============================ 业务字典（多页共用枚举，可在「系统设置」维护） ============================ */
 /** 供应商供货范围 */
-export const SUP_CATS = ['材料', '分包', '劳务', '机械', '检测'];
+export const SUP_CATS = ['物料', '分包', '服务', '机械', '检测'];
 /** 客户来源 */
 export const CUST_SOURCES = ['自主开发', '老客户转介绍', '政府平台招标', '招投标平台', '同行引荐', '属地排查', '行业展会'];
+/* ------------------------------------------------------------------
+   客户档案字典（唯一事实源）—— 客户管理「新增客户」与各业务页的「弹层新建客户」共用同一套，
+   避免两处口径漂移：曾出现商机页弹层里行业选项为 商业/工业/政府/住宅（客户主数据里并不存在），
+   区域也少了 文山/普洱/广西。新增区域 / 行业须同时补进本表，否则该取值无法被选中。
+   ------------------------------------------------------------------ */
+/** 客户区域（新建客户下拉 · 客户列表快筛档位由此派生） */
+export const CUST_REGIONS = ['昆明', '曲靖', '楚雄', '丽江', '大理', '文山', '普洱', '广西', '其他'];
+/** 客户分级字典（A 战略 · B 重点 · C 常规） */
+export const CUST_GRADES = ['A', 'B', 'C'] as const;
+/** 客户分级中文全称（下拉展示用） */
+export const CUST_GRADE_LABEL: Record<string, string> = { A: 'A 级 · 战略客户', B: 'B 级 · 重点客户', C: 'C 级 · 常规客户' };
+/** 客户状态：新建时仅可选 潜在 / 意向（成交态由业务动作流转，不可手工选） */
+export const CUST_STATUS_NEW = ['潜在', '意向'] as const;
+/** 行业标签（用于业绩与合同检索） */
+export const CUST_INDUSTRIES = ['商业综合体', '医疗', '电力/制造', '文旅', '地产', '园区/政府平台', '教育', '交通枢纽', '其他'];
 /** 跟进方式（上门拜访须上传带水印照片 · 硬拦截） */
 export const FOLLOW_WAYS = ['上门拜访', '电话', '微信/邮件', '会议'];
 /** 部门与角色（人员 / 权限基线） */
@@ -584,8 +641,11 @@ export const DEPTS = [
 
 /* ============================ 立项向导字典（项目管理模块改造 第 19–38 条） ============================ */
 
-/** 项目类型固定字典（第 19 条：不允许自由输入，避免同义异名） */
-export const PROJ_TYPES = ['新建', '改造', '维护保养', '检测'] as const;
+/**
+ * 项目类型固定字典（第 19 条：不允许自由输入，避免同义异名）。
+ * 「应急抢修」原缺失，导致抢修类项目被迫标成「维护保养」——已补齐，与业务域 QT 对应。
+ */
+export const PROJ_TYPES = ['新建', '改造', '维护保养', '检测', '应急抢修'] as const;
 
 /**
  * 业务来源（第 19 条）：与「项目类型」的区别 ——
@@ -710,7 +770,7 @@ export type Bid = {
 };
 export const BIDS: Bid[] = [
   { id: 'TB000041', name: '云南××中学消防改造', customer: '××市教育局', stage: '开标', amt: 860000, deposit: 50000, depositSt: '已交', openDate: '2026-09-25', owner: '李强', certNeed: 3, certGot: 3, projMgr: '张工', pmB: '有效', pmBusy: false, risk: '', opp: 'SJ000512' },
-  { id: 'TB000038', name: '昆明万达广场消防改造', customer: '昆明万达广场商业管理有限公司', customerId: 'KH20260312001', stage: '做标书', amt: 3200000, deposit: 100000, depositSt: '已交', openDate: '2026-09-22', owner: '蓝峰', certNeed: 4, certGot: 4, projMgr: '张工', pmB: '有效', pmBusy: false, risk: '安许 60 天内到期', opp: 'SJ000462', quoteId: 'BJ000007' },
+  { id: 'TB000038', name: '昆明万达广场消防改造', customer: '昆明万达广场商业管理有限公司', customerId: 'KH20260312001', stage: '做标书', amt: 3200000, deposit: 100000, depositSt: '已交', openDate: '2026-09-22', owner: '蓝峰', certNeed: 4, certGot: 4, projMgr: '张工', pmB: '有效', pmBusy: false, risk: '', opp: 'SJ000462', quoteId: 'BJ000007' },
   { id: 'TB000045', name: '昆明市第一人民医院住院楼升级', customer: '昆明市第一人民医院', customerId: 'KH20260418003', stage: '开标', amt: 4800000, deposit: 150000, depositSt: '已交', openDate: '2026-09-28', owner: '王志海', certNeed: 3, certGot: 3, projMgr: '王工', pmB: '有效', pmBusy: false, risk: '', opp: 'SJ000470', quoteId: 'BJ000011' },
   { id: 'TB000052', name: '楚雄州人民医院维护保养续投', customer: '楚雄州人民医院', customerId: 'KH20250902004', stage: '做标书', amt: 960000, deposit: 60000, depositSt: '已交', openDate: '2026-10-08', owner: '赵薇', certNeed: 2, certGot: 2, projMgr: '李工', pmB: '有效', pmBusy: false, risk: '', opp: 'SJ000495', quoteId: 'BJ000004' },
   { id: 'TB000056', name: '柳州钢铁管网改造二标段', customer: '广西柳州钢铁集团有限公司', customerId: 'KH20260620006', stage: '报名', amt: 2600000, deposit: 80000, depositSt: '未交', openDate: '2026-10-15', owner: '赵薇', certNeed: 4, certGot: 2, projMgr: '张工', pmB: '有效', pmBusy: false, risk: '证书缺口 2 本' },
@@ -722,23 +782,119 @@ export const BIDS: Bid[] = [
 
 /* ============================ 证书（ZS + 6 位，三分法） ============================ */
 // 占用方式：一证一项目 single / 多项目引用 multi / 按次登记 log
-export const CERTS = [
-  { id: 'ZS000015', name: '一级注册消防工程师', type: '人员证书', subType: '注册消防工程师', holder: '张工', holderId: 'EMP001', mode: 'single', validTo: '2026-10-20', warnDays: 30, cap: 1, used: ['XM000123'], status: '30 天内到期', issue: '云南省消防救援总队' },
-  { id: 'ZS000018', name: '一级注册消防工程师', type: '人员证书', subType: '注册消防工程师', holder: '王工', holderId: 'EMP002', mode: 'single', validTo: '2027-06-30', warnDays: 0, cap: 1, used: ['XM000118'], status: '正常', issue: '云南省消防救援总队' },
-  { id: 'ZS000022', name: '建构筑物消防员（中级）', type: '人员证书', subType: '建构筑物消防员', holder: '李工', holderId: 'EMP003', mode: 'log', validTo: '2027-03-15', warnDays: 0, cap: 2, used: ['XM000123', 'XM000118'], status: '正常', issue: '应急管理部' },
-  { id: 'ZS000031', name: '消防设施维护保养检测资质（二级）', type: '企业资质', subType: '维护保养资质', holder: '诺盾博达消防科技有限公司', holderId: 'COMPANY', mode: 'multi', validTo: '2027-01-31', warnDays: 0, cap: 99, used: ['XM000123', 'XM000118', 'XM000105'], status: '正常', issue: '云南省住建厅' },
-  { id: 'ZS000035', name: '消防设施工程专业承包（二级）', type: '企业资质', subType: '施工资质', holder: '诺盾博达消防科技有限公司', holderId: 'COMPANY', mode: 'multi', validTo: '2026-11-05', warnDays: 60, cap: 99, used: ['XM000123', 'XM000105', 'XM000098', 'XM000087'], status: '60 天内到期', issue: '云南省住建厅' },
-  { id: 'ZS000008', name: '电工操作证', type: '人员证书', subType: '电工', holder: '陈工', holderId: 'EMP005', mode: 'log', validTo: '2025-12-20', warnDays: 0, cap: 2, used: [], status: '已过期', issue: '应急管理部' },
-  { id: 'ZS000041', name: '消防设施工程设计资质（乙级）', type: '企业资质', subType: '设计资质', holder: '诺盾博达消防科技有限公司', holderId: 'COMPANY', mode: 'multi', validTo: '2027-04-20', warnDays: 0, cap: 99, used: ['XM000105'], status: '正常', issue: '云南省住建厅' },
-  { id: 'ZS000028', name: '焊工操作证', type: '人员证书', subType: '焊工', holder: '孙工', holderId: 'EMP006', mode: 'log', validTo: '2026-12-28', warnDays: 0, cap: 2, used: ['XM000123'], status: '正常', issue: '应急管理部' },
-  { id: 'ZS000044', name: '安全生产许可证', type: '企业资质', subType: '安许', holder: '诺盾博达消防科技有限公司', holderId: 'COMPANY', mode: 'multi', validTo: '2026-09-10', warnDays: 60, cap: 99, used: ['XM000123', 'XM000118', 'XM000105', 'XM000098', 'XM000087'], status: '已过期', issue: '云南省住建厅', level: 'company-red' },
-  { id: 'ZS000050', name: '注册建造师（机电工程 · 一级）', type: '人员证书', subType: '建造师', holder: '张工', holderId: 'EMP001', mode: 'single', validTo: '2027-08-31', warnDays: 0, cap: 1, used: ['XM000123'], status: '正常', issue: '住建部', isBuilder: true, hasB: true, bValidTo: '2027-05-31' },
-  { id: 'ZS000051', name: '注册建造师（机电工程 · 二级）', type: '人员证书', subType: '建造师', holder: '王工', holderId: 'EMP002', mode: 'single', validTo: '2026-12-15', warnDays: 0, cap: 1, used: [], status: '正常', issue: '住建部', isBuilder: true, hasB: true, bValidTo: '2027-06-30' },
-  { id: 'ZS000055', name: 'B 类安全生产考核合格证', type: '人员证书', subType: 'B证', holder: '陈工', holderId: 'EMP005', mode: 'log', validTo: '2026-10-15', warnDays: 30, cap: 1, used: [], status: '30 天内到期', issue: '云南省住建厅', followBuilder: true },
+//
+// ⚠️ 必须显式声明类型（不能靠字面量推断）：证书要按 id 局部回写（借出 / 收回 / 续证），
+// `Partial<Cert>` 在字面量推断出的联合类型上会报 excess property。
+
+/** 证书子类字典（唯一事实源）—— 新增证书下拉 / 批量导入识别 / 子类归一化共用。
+ *  ⚠️ 往这里加子类时，必须同时在 CERT_CAT_OF 与 CERT_SUBTYPE_META 里补一行，
+ *  否则该子类的证书在大类筛选 chips 里会「凭空消失」（计数不进任何一档）。 */
+export const CERT_SUBTYPES = [
+  '注册消防工程师', '建造师', 'B证',
+  '电工', '焊工', '建构筑物消防员',
+  '安许',
+  '施工资质', '维护保养资质', '设计资质',
+] as const;
+export type CertSubType = (typeof CERT_SUBTYPES)[number];
+
+/** 证书大类（筛选 chips 用） */
+export const CERT_CATS = [
+  { key: '', label: '全部' },
+  { key: 'reg', label: '注册类' },
+  { key: 'skill', label: '技能类' },
+  { key: 'safety', label: '安全类' },
+  { key: 'qual', label: '资质类' },
+] as const;
+/** 子类 → 大类：注册类（人员注册执业）/ 技能类（特种作业操作）/ 安全类 / 资质类（企业） */
+export const CERT_CAT_OF: Record<string, string> = {
+  注册消防工程师: 'reg', 建造师: 'reg', B证: 'reg',
+  电工: 'skill', 焊工: 'skill', 建构筑物消防员: 'skill',
+  安许: 'safety',
+  施工资质: 'qual', 维护保养资质: 'qual', 设计资质: 'qual',
+};
+
+/** 子类 → 归属类型 / 默认占用方式 / 并行占用上限（新增与批量导入的默认值来源） */
+export const CERT_SUBTYPE_META: Record<string, { owner: '人员证书' | '企业资质'; mode: 'single' | 'multi' | 'log'; cap: number }> = {
+  注册消防工程师: { owner: '人员证书', mode: 'single', cap: 1 },
+  建造师: { owner: '人员证书', mode: 'single', cap: 1 },
+  B证: { owner: '人员证书', mode: 'log', cap: 1 },
+  电工: { owner: '人员证书', mode: 'log', cap: 2 },
+  焊工: { owner: '人员证书', mode: 'log', cap: 2 },
+  建构筑物消防员: { owner: '人员证书', mode: 'log', cap: 2 },
+  安许: { owner: '企业资质', mode: 'multi', cap: 99 },
+  施工资质: { owner: '企业资质', mode: 'multi', cap: 99 },
+  维护保养资质: { owner: '企业资质', mode: 'multi', cap: 99 },
+  设计资质: { owner: '企业资质', mode: 'multi', cap: 99 },
+};
+
+/** 占用方式中文名 */
+export const CERT_MODE_CN: Record<string, string> = { single: '一证一项目', multi: '多项目引用', log: '按次登记' };
+
+/** 发证机关候选（新增证书下拉；导入时也用于把识别结果归一化） */
+export const CERT_ISSUERS = [
+  '住建部', '云南省住建厅', '云南省消防救援总队', '应急管理部', '国家消防救援局', '云南省市场监督管理局',
+];
+
+export type Cert = {
+  id: string;
+  /** 证书编号（发证机关给的证号）——**业务唯一键**，批量导入靠它去重。
+   *  ⚠️ 与 id 不同：id 是系统内部流水（ZS + 6 位），certNo 是证件上的号。 */
+  certNo: string;
+  name: string; type: string; subType: string;
+  holder: string; holderId: string; mode: string;
+  validTo: string;
+
+  /**
+   * 预警档位快照（0 正常 / 30 / 60 / 90 天内到期）——**存储值，不是派生值**。
+   * ⚠️ 改有效期（续证 / 手工调期）必须用 certWarnDays() 一并重算：
+   * 否则「有效期已改到 2027-09 但 warnDays 还留着 60」会让全部临期提醒继续误报。
+   */
+  warnDays: number;
+  cap: number; used: string[];
+  /** 状态枚举：正常 / 30 天内到期 / 60 天内到期 / 90 天内到期 / 已过期（口径见 certStatusOf） */
+  status: string;
+  issue: string;
+  /**
+   * 长期有效（不设到期日 · 如建构筑物消防员职业资格证书）。
+   * ⚠️ 必须是**模型字段**而非页面内的 id 白名单 —— 批量导入产生的新证书拿不到老 id，
+   * 只靠白名单判定会让「长期有效」被当成「有效期为空 → 已过期」。
+   * 长期有效的证书 `validTo` 为空串。
+   */
+  longTerm?: boolean;
+  /** 到期提前提醒天数（7/15/30/60/90）。未设时回落页面白名单，再兜底 30 天 */
+  remind?: number;
+  /**
+   * 持证补贴（仅人员证书）。
+   * ⚠️ 必须是模型字段 —— 否则新增 / 批量导入的证书补贴无处落库，
+   * 页面只能靠 id 白名单，新证书的补贴填了就丢。
+   */
+  subsidy?: { mode: 'none' | 'monthly' | 'yearly' | 'once'; amount: number; start: string };
+  /** 公司级红色风险项标记（安许过期这类「全公司停摆」的证才挂） */
+  level?: string;
+  /** 建造师三要素：是否建造师 / 是否持 B 证 / B 证有效期 */
+  isBuilder?: boolean; hasB?: boolean; bValidTo?: string;
+  /** B 证随建造师一并借出，不单独外借 */
+  followBuilder?: boolean;
+  /** 外借状态（证书外借审批通过后标记：已外借；驳回后清除） */
+  loanStatus?: string;
+};
+export const CERTS: Cert[] = [
+  { id: 'ZS000015', certNo: 'XF1012025000431', name: '一级注册消防工程师', type: '人员证书', subType: '注册消防工程师', holder: '张工', holderId: 'EMP001', mode: 'single', validTo: '2026-10-20', warnDays: 30, cap: 1, used: ['XM000123'], status: '30 天内到期', issue: '云南省消防救援总队' },
+  { id: 'ZS000018', certNo: 'XF1012026000918', name: '一级注册消防工程师', type: '人员证书', subType: '注册消防工程师', holder: '王工', holderId: 'EMP002', mode: 'single', validTo: '2027-06-30', warnDays: 0, cap: 1, used: ['XM000118'], status: '正常', issue: '云南省消防救援总队' },
+  { id: 'ZS000022', certNo: 'JZ20240315-2218', name: '建构筑物消防员（中级）', type: '人员证书', subType: '建构筑物消防员', holder: '李工', holderId: 'EMP003', mode: 'log', validTo: '', warnDays: 0, cap: 2, used: ['XM000123', 'XM000118'], status: '正常', issue: '应急管理部', longTerm: true },
+  { id: 'ZS000031', certNo: 'YJZ2024-WB0731', name: '消防设施维护保养检测资质（二级）', type: '企业资质', subType: '维护保养资质', holder: '诺盾博达消防科技有限公司', holderId: 'COMPANY', mode: 'multi', validTo: '2027-01-31', warnDays: 0, cap: 99, used: ['XM000123', 'XM000118', 'XM000105'], status: '正常', issue: '云南省住建厅' },
+  { id: 'ZS000035', certNo: 'YJZ2023-SG1105', name: '消防设施工程专业承包（二级）', type: '企业资质', subType: '施工资质', holder: '诺盾博达消防科技有限公司', holderId: 'COMPANY', mode: 'multi', validTo: '2026-11-05', warnDays: 60, cap: 99, used: ['XM000123', 'XM000105', 'XM000098', 'XM000087'], status: '60 天内到期', issue: '云南省住建厅' },
+  { id: 'ZS000008', certNo: 'T5301-0012345', name: '电工操作证', type: '人员证书', subType: '电工', holder: '陈工', holderId: 'EMP005', mode: 'log', validTo: '2025-12-20', warnDays: 0, cap: 2, used: [], status: '已过期', issue: '应急管理部' },
+  { id: 'ZS000041', certNo: 'YJZ2025-SJ0420', name: '消防设施工程设计资质（乙级）', type: '企业资质', subType: '设计资质', holder: '诺盾博达消防科技有限公司', holderId: 'COMPANY', mode: 'multi', validTo: '2027-04-20', warnDays: 0, cap: 99, used: ['XM000105'], status: '正常', issue: '云南省住建厅' },
+  { id: 'ZS000028', certNo: 'T5301-0028451', name: '焊工操作证', type: '人员证书', subType: '焊工', holder: '孙工', holderId: 'EMP006', mode: 'log', validTo: '2026-12-28', warnDays: 0, cap: 2, used: ['XM000123'], status: '正常', issue: '应急管理部' },
+  { id: 'ZS000044', certNo: '（云）JZ安许证字〔2024〕000318', name: '安全生产许可证', type: '企业资质', subType: '安许', holder: '诺盾博达消防科技有限公司', holderId: 'COMPANY', mode: 'multi', validTo: '2027-09-10', warnDays: 0, cap: 99, used: ['XM000123', 'XM000118', 'XM000105', 'XM000098', 'XM000087'], status: '正常', issue: '云南省住建厅' },
+  { id: 'ZS000050', certNo: '云1112024001234', name: '注册建造师（机电工程 · 一级）', type: '人员证书', subType: '建造师', holder: '张工', holderId: 'EMP001', mode: 'single', validTo: '2027-08-31', warnDays: 0, cap: 1, used: ['XM000123'], status: '正常', issue: '住建部', isBuilder: true, hasB: true, bValidTo: '2027-05-31' },
+  { id: 'ZS000051', certNo: '云2222023005678', name: '注册建造师（机电工程 · 二级）', type: '人员证书', subType: '建造师', holder: '王工', holderId: 'EMP002', mode: 'single', validTo: '2026-12-15', warnDays: 0, cap: 1, used: [], status: '正常', issue: '住建部', isBuilder: true, hasB: true, bValidTo: '2027-06-30' },
+  { id: 'ZS000055', certNo: '云建安B〔2024〕04512', name: 'B 类安全生产考核合格证', type: '人员证书', subType: 'B证', holder: '陈工', holderId: 'EMP005', mode: 'log', validTo: '2026-10-15', warnDays: 30, cap: 1, used: [], status: '30 天内到期', issue: '云南省住建厅', followBuilder: true },
 ];
 
 /* ============================ 合同（HT 销售 / CG 采购 / FK 框架 / WB 维护保养） ============================ */
-export const CONTRACT_TYPES = ['销售合同', '采购合同', '框架协议', '维护保养合同'] as const;
+export const CONTRACT_TYPES = ['销售合同', '检测合同', '采购合同', '框架协议', '维护保养合同'] as const;
 /**
  * 合同状态机（唯一事实源 · 对齐《研发级功能规格》§5.2 · 2026-09-22 收敛为 6 态）
  *   草稿 ─提交→ 待审批 ─通过 + 电子签完成→ 已签约 ─首笔款 / 进场→ 履约中 ─到期续签→ 已续签〔生成新合同〕
@@ -825,6 +981,15 @@ export type Contract = {
   /** 收款期次明细（仅收款类合同有；付款类合同的付款计划走付款申请） */
   installments?: Installment[];
 };
+
+/** C5：收款逾期 / 超付预警由收款期次派生（不再读种子静态 overdue/overpay 字段）。
+ *  口径与项目经营中心一致：已开票且未收齐 = 逾期应收（挂账龄，不计回款）；
+ *  超付 = Σ已收 > 执行额（含已生效变更）。风险信息单点派生，全站共用。 */
+export const contractOverdue = (c: Contract): boolean =>
+  (c.installments ?? []).some((i) => i.inv === '已开票' && (i.got ?? 0) < i.amt);
+export const contractOverpay = (c: Contract): boolean =>
+  (c.installments ?? []).reduce((s, i) => s + (i.got ?? 0), 0) > c.execAmt;
+
 export const CONTRACTS: Contract[] = [
   /* XM000123 主合同：合同额冻结为签约价 180 万（立项锚点）；执行额 195 万 = 180 + 已生效价格调整补充 +15 万。
      recv=银行已到账 54 万；已开票未到账 33.75 万挂应收账龄（见 RECEIVABLES），不计入 recv。 */
@@ -922,6 +1087,58 @@ export const CONTRACTS: Contract[] = [
       { n: '收款期次 2 · 第二季度服务费（25%）', amt: 105000, plan: '2025-10-01', got: 105000, gotDate: '2025-09-30', inv: '已开票', note: '银行已到账' },
       { n: '收款期次 3 · 第三季度服务费（25%）', amt: 105000, plan: '2026-01-01', got: 105000, gotDate: '2025-12-30', inv: '已开票', note: '银行已到账' },
       { n: '收款期次 4 · 第四季度服务费（25%）', amt: 105000, plan: '2026-04-01', got: 105000, gotDate: '2026-03-31', inv: '已开票', note: '服务期满结清，客户未续签，合同按「正常结束」终止' },
+    ] },
+  /* ---------- 演示补充：在办项目配套合同（与下方 PROJECTS 补充段一一对应） ----------
+     均为「主合同（contractRole: primary / maintenance）」，执行额 = 签约额；收款期次 Σ=execAmt、Σ已收=recv。 */
+  { id: 'HT000012', name: '昆明市第一人民医院门诊楼消防设施改造合同', type: '销售合同', party: '昆明市第一人民医院', project: 'XM000156', amt: 1420000, execAmt: 1420000, status: '履约中', signStatus: '已签', contractRole: 'primary', recvPct: 30, recv: 426000, owner: '刘宇', sign: '2026-08-05', start: '2026-08-10', end: '2027-01-31', nodes: '预付 30% · 进度 40% · 竣工 27% · 质保 3%', overdue: false, overpay: false,
+    installments: [
+      { n: '收款期次 1 · 预付款（30%）', amt: 426000, plan: '2026-08-15', got: 426000, gotDate: '2026-08-14', inv: '已开票', note: '银行已到账' },
+      { n: '收款期次 2 · 进度款（40%）', amt: 568000, plan: '2026-11-15', got: 0, gotDate: '—', inv: '未开票', note: '管线安装完成 60% 后计量' },
+      { n: '收款期次 3 · 竣工结算款（27%）', amt: 383400, plan: '2027-02-28', got: 0, gotDate: '—', inv: '未开票', note: '竣工验收合格后结算' },
+      { n: '收款期次 4 · 质保金（3%）', amt: 42600, plan: '2028-01-31', got: 0, gotDate: '—', inv: '未开票', note: '质保期满无质量问题后无息退还' },
+    ] },
+  { id: 'HT000013', name: '云南师范大学附属中学教学楼消防设施检测合同', type: '销售合同', party: '云南师范大学附属中学', project: 'XM000161', amt: 560000, execAmt: 560000, status: '已签约', signStatus: '已签', contractRole: 'primary', recvPct: 0, recv: 0, owner: '赵薇', sign: '2026-10-05', start: '2026-10-08', end: '2027-01-20', nodes: '预付 30% · 报告交付 70%', overdue: false, overpay: false,
+    installments: [
+      { n: '收款期次 1 · 预付款（30%）', amt: 168000, plan: '2026-10-10', got: 0, gotDate: '—', inv: '未开票', note: '进场前支付' },
+      { n: '收款期次 2 · 检测报告交付款（70%）', amt: 392000, plan: '2027-01-20', got: 0, gotDate: '—', inv: '未开票', note: '报告交付并备案后支付' },
+    ] },
+  { id: 'HT000014', name: '昆明滇池国家旅游度假区智慧消防新建工程合同', type: '销售合同', party: '昆明滇池国家旅游度假区', project: 'XM000165', amt: 3200000, execAmt: 3200000, status: '履约中', signStatus: '已签', contractRole: 'primary', recvPct: 25, recv: 800000, owner: '蓝峰', sign: '2026-08-20', start: '2026-08-25', end: '2027-06-30', nodes: '预付 25% · 进度 45% · 竣工 27% · 质保 3%', overdue: false, overpay: false,
+    installments: [
+      { n: '收款期次 1 · 预付款（25%）', amt: 800000, plan: '2026-09-01', got: 800000, gotDate: '2026-08-29', inv: '已开票', note: '银行已到账' },
+      { n: '收款期次 2 · 进度款（45%）', amt: 1440000, plan: '2027-01-15', got: 0, gotDate: '—', inv: '未开票', note: '设备进场安装 50% 后计量' },
+      { n: '收款期次 3 · 竣工结算款（27%）', amt: 864000, plan: '2027-07-31', got: 0, gotDate: '—', inv: '未开票', note: '竣工验收合格后结算' },
+      { n: '收款期次 4 · 质保金（3%）', amt: 96000, plan: '2028-06-30', got: 0, gotDate: '—', inv: '未开票', note: '质保期满无质量问题后无息退还' },
+    ] },
+  { id: 'WB000004', name: '楚雄州人民医院消防设施维护保养合同（二期）', type: '维护保养合同', party: '楚雄州人民医院', project: 'XM000170', amt: 780000, execAmt: 780000, status: '履约中', signStatus: '已签', contractRole: 'maintenance', recvPct: 50, recv: 390000, owner: '赵薇', sign: '2026-06-25', start: '2026-07-01', end: '2027-06-30', nodes: '首期 50% · 二期 50%', overdue: false, overpay: false,
+    installments: [
+      { n: '收款期次 1 · 首期服务费（50%）', amt: 390000, plan: '2026-07-01', got: 390000, gotDate: '2026-06-30', inv: '已开票', note: '服务期起始日支付' },
+      { n: '收款期次 2 · 二期服务费（50%）', amt: 390000, plan: '2027-01-01', got: 0, gotDate: '—', inv: '未开票', note: '上半年巡检报告确认后支付' },
+    ] },
+  { id: 'HT000015', name: '曲靖万达广场消防设施改造合同', type: '销售合同', party: '曲靖万达广场商业管理有限公司', project: 'XM000174', amt: 980000, execAmt: 980000, status: '已签约', signStatus: '已签', contractRole: 'primary', recvPct: 0, recv: 0, owner: '陈静', sign: '2026-10-15', start: '2026-10-15', end: '2027-03-31', nodes: '预付 30% · 进度 40% · 竣工 27% · 质保 3%', overdue: false, overpay: false,
+    installments: [
+      { n: '收款期次 1 · 预付款（30%）', amt: 294000, plan: '2026-10-20', got: 0, gotDate: '—', inv: '未开票', note: '合同生效后支付' },
+      { n: '收款期次 2 · 进度款（40%）', amt: 392000, plan: '2027-01-31', got: 0, gotDate: '—', inv: '未开票', note: '管线安装 60% 后计量' },
+      { n: '收款期次 3 · 竣工结算款（27%）', amt: 264600, plan: '2027-04-30', got: 0, gotDate: '—', inv: '未开票', note: '竣工验收合格后结算' },
+      { n: '收款期次 4 · 质保金（3%）', amt: 29400, plan: '2028-03-31', got: 0, gotDate: '—', inv: '未开票', note: '质保期满无质量问题后无息退还' },
+    ] },
+  { id: 'HT000016', name: '云南建工集团办公楼消防设施检测合同', type: '销售合同', party: '云南建工集团有限公司', project: 'XM000178', amt: 1450000, execAmt: 1450000, status: '履约中', signStatus: '已签', contractRole: 'primary', recvPct: 40, recv: 580000, owner: '赵薇', sign: '2026-08-30', start: '2026-09-01', end: '2026-12-20', nodes: '预付 40% · 报告交付 57% · 质保 3%', overdue: false, overpay: false,
+    installments: [
+      { n: '收款期次 1 · 预付款（40%）', amt: 580000, plan: '2026-09-05', got: 580000, gotDate: '2026-09-04', inv: '已开票', note: '银行已到账' },
+      { n: '收款期次 2 · 检测报告交付款（57%）', amt: 826500, plan: '2026-12-20', got: 0, gotDate: '—', inv: '未开票', note: '报告交付并备案后支付' },
+      { n: '收款期次 3 · 质保金（3%）', amt: 43500, plan: '2027-12-20', got: 0, gotDate: '—', inv: '未开票', note: '质保期满无质量问题后无息退还' },
+    ] },
+  { id: 'HT000017', name: '文山三七产业园消防工程合同', type: '销售合同', party: '文山三七产业园管委会', project: 'XM000183', amt: 6800000, execAmt: 6800000, status: '履约中', signStatus: '已签', contractRole: 'primary', recvPct: 80, recv: 5440000, owner: '蓝峰', sign: '2026-03-20', start: '2026-03-25', end: '2026-10-31', nodes: '预付 20% · 进度 50% · 竣工 27% · 质保 3%', overdue: false, overpay: false,
+    installments: [
+      { n: '收款期次 1 · 预付款（20%）', amt: 1360000, plan: '2026-04-01', got: 1360000, gotDate: '2026-03-30', inv: '已开票', note: '银行已到账' },
+      { n: '收款期次 2 · 进度款（50%）', amt: 3400000, plan: '2026-07-31', got: 3400000, gotDate: '2026-07-30', inv: '已开票', note: '银行已到账' },
+      { n: '收款期次 3 · 竣工结算款（27%）', amt: 1836000, plan: '2026-11-30', got: 680000, gotDate: '2026-09-10', inv: '已开票', note: '部分到账 68 万，余款待竣工验收合格后结算' },
+      { n: '收款期次 4 · 质保金（3%）', amt: 204000, plan: '2027-11-30', got: 0, gotDate: '—', inv: '未开票', note: '质保期满无质量问题后无息退还' },
+    ] },
+  { id: 'WB000005', name: '大理古城文旅街区消防维护保养合同', type: '维护保养合同', party: '大理古城文旅运营管理有限公司', project: 'XM000188', amt: 620000, execAmt: 620000, status: '履约中', signStatus: '已签', contractRole: 'maintenance', recvPct: 25, recv: 155000, owner: '周斌', sign: '2026-09-05', start: '2026-09-10', end: '2027-09-09', nodes: '首期 25% · 二期 25% · 三期 50%', overdue: false, overpay: false,
+    installments: [
+      { n: '收款期次 1 · 首期服务费（25%）', amt: 155000, plan: '2026-09-10', got: 155000, gotDate: '2026-09-09', inv: '已开票', note: '服务期起始日支付' },
+      { n: '收款期次 2 · 二期服务费（25%）', amt: 155000, plan: '2026-12-10', got: 0, gotDate: '—', inv: '未开票', note: '第四季度巡检报告确认后支付' },
+      { n: '收款期次 3 · 三期服务费（50%）', amt: 310000, plan: '2027-06-10', got: 0, gotDate: '—', inv: '未开票', note: '年度消防设施完好率达标后支付' },
     ] },
 ];
 
@@ -1100,6 +1317,141 @@ export const PROJECT_RISKS: Record<string, { label: string; tone: 'red' | 'orang
 /** 取项目风险标记（risk === 'none' 返回 null） */
 export const riskOf = (risk: string) => PROJECT_RISKS[risk] || null;
 
+/**
+ * 业务运行配置（原型演示 · 内存态 + localStorage 持久化）
+ * 项2：商机跟进超期未跟进天数（原硬编码 14）；项20：项目风险判定规则（原 PROJECT_RISKS 阈值硬编码）。
+ * SettingsPage「业务字典」区可改；业务页只读 getters。刷新后由 localStorage 回填，清缓存重置默认。
+ */
+export type ProjectRiskRuleKey = 'noContract' | 'costOverrun' | 'milestoneOverdue' | 'paymentOverdue';
+export type ProjectRiskRules = Record<ProjectRiskRuleKey, { enabled: boolean; threshold?: number; days?: number }>;
+/** 客户分级自动建议规则（项1）：达阈值自动建议等级，仍可手动覆盖 */
+export type CustomerLevelRules = {
+  /** 新增客户表单是否开启分级自动建议 */
+  autoSuggest: boolean;
+  /** 升级阈值（合同单数 / 在谈商机额，万元）；达到任一档即建议该级 */
+  thresholds: {
+    A: { contracts: number; oppAmount: number };
+    B: { contracts: number; oppAmount: number };
+  };
+};
+/** 跟进超期自动进待办配置（项2） */
+export type TodoConfig = {
+  /** 开关：关闭后驾驶舱不再自动生成「待我跟进客户」待办 */
+  followOverdueAutoTodo: boolean;
+  /** 超过该天数未跟进即进待办（原硬编码 30） */
+  remindDays: number;
+};
+export type BusinessConfig = {
+  /** 商机超过该天数未跟进即标红（统计卡 / 列表 / 看板 / 详情统一口径） */
+  oppFollowOverdueDays: number;
+  /** 项目风险判定口径开关：禁用的风险标记不计入风险榜 / 风险统计 */
+  projectRiskRules: ProjectRiskRules;
+  /** 客户分级自动建议规则（项1） */
+  customerLevelRules: CustomerLevelRules;
+  /** 跟进超期自动进待办配置（项2） */
+  todoConfig: TodoConfig;
+};
+export const DEFAULT_BUSINESS_CONFIG: BusinessConfig = {
+  oppFollowOverdueDays: 14,
+  projectRiskRules: {
+    noContract: { enabled: true },
+    costOverrun: { enabled: true, threshold: 1.0 },
+    milestoneOverdue: { enabled: true, days: 7 },
+    paymentOverdue: { enabled: true, days: 30 },
+  },
+  customerLevelRules: {
+    autoSuggest: true,
+    thresholds: {
+      A: { contracts: 5, oppAmount: 500 },
+      B: { contracts: 2, oppAmount: 100 },
+    },
+  },
+  todoConfig: { followOverdueAutoTodo: true, remindDays: 30 },
+};
+
+const BIZ_CONFIG_KEY = 'nuoan-cloud-6-business-config-v1';
+
+function loadBusinessConfig(): BusinessConfig {
+  const base: BusinessConfig = JSON.parse(JSON.stringify(DEFAULT_BUSINESS_CONFIG));
+  try {
+    const raw = localStorage.getItem(BIZ_CONFIG_KEY);
+    if (!raw) return base;
+    const saved = JSON.parse(raw) as Partial<BusinessConfig>;
+    if (typeof saved.oppFollowOverdueDays === 'number' && saved.oppFollowOverdueDays > 0) {
+      base.oppFollowOverdueDays = saved.oppFollowOverdueDays;
+    }
+    if (saved.projectRiskRules) {
+      (Object.keys(base.projectRiskRules) as ProjectRiskRuleKey[]).forEach((k) => {
+        const sv = saved.projectRiskRules?.[k];
+        if (!sv) return;
+        if (typeof sv.enabled === 'boolean') base.projectRiskRules[k].enabled = sv.enabled;
+        if (typeof sv.threshold === 'number') base.projectRiskRules[k].threshold = sv.threshold;
+        if (typeof sv.days === 'number') base.projectRiskRules[k].days = sv.days;
+      });
+    }
+    if (saved.customerLevelRules) {
+      const cl = saved.customerLevelRules;
+      if (typeof cl.autoSuggest === 'boolean') base.customerLevelRules.autoSuggest = cl.autoSuggest;
+      (['A', 'B'] as const).forEach((lv) => {
+        const sv = cl.thresholds?.[lv];
+        if (!sv) return;
+        if (typeof sv.contracts === 'number') base.customerLevelRules.thresholds[lv].contracts = sv.contracts;
+        if (typeof sv.oppAmount === 'number') base.customerLevelRules.thresholds[lv].oppAmount = sv.oppAmount;
+      });
+    }
+    if (saved.todoConfig) {
+      if (typeof saved.todoConfig.followOverdueAutoTodo === 'boolean') base.todoConfig.followOverdueAutoTodo = saved.todoConfig.followOverdueAutoTodo;
+      if (typeof saved.todoConfig.remindDays === 'number' && saved.todoConfig.remindDays > 0) base.todoConfig.remindDays = saved.todoConfig.remindDays;
+    }
+  } catch { /* 原型容错：损坏缓存回退默认 */ }
+  return base;
+}
+
+/** 运行态配置（模块级单例；setBusinessConfig 整体替换引用并写 localStorage） */
+export let BUSINESS_CONFIG: BusinessConfig = loadBusinessConfig();
+
+/** 商机超期未跟进天数（项2） */
+export const getOppFollowDays = (): number => BUSINESS_CONFIG.oppFollowOverdueDays;
+/** 项目风险规则（项20） */
+export const getProjectRiskRules = (): ProjectRiskRules => BUSINESS_CONFIG.projectRiskRules;
+/** 客户分级自动建议规则（项1） */
+export const getCustomerLevelRules = (): CustomerLevelRules => BUSINESS_CONFIG.customerLevelRules;
+/** 跟进超期自动进待办配置（项2） */
+export const getTodoConfig = (): TodoConfig => BUSINESS_CONFIG.todoConfig;
+
+/** 保存配置（SettingsPage 调用；内存态即时生效 + localStorage 持久化） */
+export function setBusinessConfig(patch: Partial<BusinessConfig>): void {
+  BUSINESS_CONFIG = {
+    oppFollowOverdueDays: patch.oppFollowOverdueDays ?? BUSINESS_CONFIG.oppFollowOverdueDays,
+    projectRiskRules: patch.projectRiskRules
+      ? JSON.parse(JSON.stringify(patch.projectRiskRules))
+      : BUSINESS_CONFIG.projectRiskRules,
+    customerLevelRules: patch.customerLevelRules
+      ? JSON.parse(JSON.stringify(patch.customerLevelRules))
+      : BUSINESS_CONFIG.customerLevelRules,
+    todoConfig: patch.todoConfig
+      ? { ...patch.todoConfig }
+      : BUSINESS_CONFIG.todoConfig,
+  };
+  try { localStorage.setItem(BIZ_CONFIG_KEY, JSON.stringify(BUSINESS_CONFIG)); } catch { /* ignore */ }
+}
+
+/** 风险标记 key（PROJECT_RISKS 字典键）→ 配置规则 key 映射；未纳入配置的口径（维保问题超期等）恒启用 */
+const RISK_KEY_TO_RULE: Record<string, ProjectRiskRuleKey> = {
+  nocontract: 'noContract',
+  overcost: 'costOverrun',
+  milestoneOverdue: 'milestoneOverdue',
+  overdue: 'paymentOverdue',
+};
+
+/** 该风险口径是否在配置中启用（项20：禁用口径不计入风险）；none 与未配置口径按恒启处理 */
+export function isProjectRiskEnabled(riskKey: string): boolean {
+  if (riskKey === 'none') return false;
+  const ruleKey = RISK_KEY_TO_RULE[riskKey];
+  if (!ruleKey) return true;
+  return !!BUSINESS_CONFIG.projectRiskRules[ruleKey].enabled;
+}
+
 /** 旧状态别名归一化（历史数据兼容） */
 export const PROJECT_STATUS_ALIAS: Record<string, string> = {
   草稿: '待启动', 待审批: '待启动', 已立项: '待启动',
@@ -1184,7 +1536,7 @@ export const PROJECTS: Project[] = [
     ] },
   { id: 'XM000118', name: '楚雄州人民医院消防维护保养', type: '维护保养', biz: 'WB', source: '商机直签', customer: '楚雄州人民医院', customerId: 'KH20250902004', owner: '赵薇', pm: '李工', contractAmt: 960000, execAmt: 960000, cost: 590000, milestone: 58, milestoneName: '周期巡检', recvPct: 62.5, risk: 'none', status: '维保服务中', serviceStart: '2026-09-01', serviceEnd: '2027-08-31', start: '2026-09-01', end: '2027-08-31', profit: 38.5, updatedAt: '2026-09-18', budget: 620000, budgetSrc: 'manual', contractId: 'WB000003' },
   { id: 'XM000105', name: '丽江景区智慧消防平台', type: '新建', biz: 'RJ', source: '报价转化', customer: '丽江××文旅开发集团', owner: '陈静', pm: '王工', contractAmt: 2400000, execAmt: 2400000, cost: 1620000, milestone: 25, milestoneName: '进场准备', recvPct: 25, risk: 'none', status: '待启动', start: '2026-09-01', end: '2027-01-31', profit: 32.5, updatedAt: '2026-09-15', budget: 1680000, budgetSrc: 'quote', contractId: 'HT000005' },
-  { id: 'XM000098', name: '××酒店消防设施应急抢修', type: '维护保养', biz: 'QT', source: '应急工程', customer: '××酒店管理公司', owner: '周斌', pm: '张工', contractAmt: 0, execAmt: 0, cost: 186000, milestone: 90, milestoneName: '质保期', recvPct: 0, risk: 'nocontract', status: '执行中', start: '2026-07-15', end: '2026-12-31', profit: 0, noContract: true, backfillBy: '2026-08-14', expectAmt: 260000, updatedAt: '2026-09-19', budget: 200000, budgetSrc: 'manual', logs: [{ at: '2026-07-15', from: '—', to: '执行中', by: '周斌', reason: '无合同先施工立项（来源：应急工程）· 原因：酒店消控主机故障导致停业，甲方要求当日进场抢修 · 预计合同额 26 万按同类应急抢修项目暂估 · 须于 2026-08-14 前补签合同' }] },
+  { id: 'XM000098', name: '××酒店消防设施应急抢修', type: '应急抢修', biz: 'QT', source: '应急工程', customer: '××酒店管理公司', owner: '周斌', pm: '张工', contractAmt: 0, execAmt: 0, cost: 186000, milestone: 90, milestoneName: '质保期', recvPct: 0, risk: 'nocontract', status: '执行中', start: '2026-07-15', end: '2026-12-31', profit: 0, noContract: true, backfillBy: '2026-08-14', expectAmt: 260000, updatedAt: '2026-09-19', budget: 200000, budgetSrc: 'manual', logs: [{ at: '2026-07-15', from: '—', to: '执行中', by: '周斌', reason: '无合同先施工立项（来源：应急工程）· 原因：酒店消控主机故障导致停业，甲方要求当日进场抢修 · 预计合同额 26 万按同类应急抢修项目暂估 · 须于 2026-08-14 前补签合同' }] },
   { id: 'XM000096', name: '曲靖一院消控室改造', type: '改造', biz: 'GC', source: '商机直签', customer: '曲靖××第一人民医院', owner: '周斌', pm: '陈工', contractId: 'HT000003', contractAmt: 680000, execAmt: 680000, cost: 452000, milestone: 100, milestoneName: '质保期', recvPct: 95, risk: 'none', status: '已结项', start: '2026-03-01', end: '2026-08-31', profit: 33.5, updatedAt: '2026-08-31', budget: 460000, budgetSrc: 'manual' },
   { id: 'XM000087', name: '产业园一期消防工程', type: '新建', biz: 'GC', source: '投标中标', customer: '××工业园区开发有限公司', owner: '周斌', pm: '张工', contractAmt: 2600000, execAmt: 2600000, cost: 1820000, milestone: 88, milestoneName: '竣工验收', recvPct: 78, risk: 'none', status: '执行中', start: '2026-08-01', end: '2026-12-31', profit: 30, updatedAt: '2026-09-21', budget: 1820000, budgetSrc: 'manual', contractId: 'HT000002' },
   { id: 'XM000131', name: '柳州钢铁厂区消防管网改造', type: '改造', biz: 'GC', source: '商机直签', customer: '广西柳州钢铁集团有限公司', customerId: 'KH20260620006', owner: '赵薇', pm: '王工', contractAmt: 5600000, execAmt: 5600000, cost: 3860000, milestone: 96, milestoneName: '待验收', recvPct: 0, risk: 'overdue', status: '验收结算中', acceptStatus: '已申报', start: '2026-07-31', end: '2026-10-31', profit: 31.1, updatedAt: '2026-09-16', budget: 3920000, budgetSrc: 'manual', contractId: 'HT000011' },
@@ -1202,6 +1554,18 @@ export const PROJECTS: Project[] = [
   /* 作废样例：建错单据（终态，留痕不可恢复） */
   { id: 'XM000075', name: '××科技园消防改造工程（重复录入）', type: '改造', biz: 'GC', source: '商机直签', customer: '××科技园运营管理有限公司', owner: '陈静', pm: '王工', contractAmt: 0, execAmt: 0, cost: 0, milestone: 0, milestoneName: '—', recvPct: 0, risk: 'none', status: '作废', start: '2026-05-10', end: '2026-05-10', profit: 0, updatedAt: '2026-05-12',
     logs: [{ at: '2026-05-12', from: '待启动', to: '作废', by: '陈静', reason: '与 XM000074 重复录入，作废' }] },
+  /* ---------- 演示补充：在办项目（8 条，四种项目类型各 2 条） ----------
+     用途：项目数量增长到 20 条后，验证「关联项目」选择器的类型快筛计数与分页（默认前 10 条 + 获取更多）。
+     全部为非终态（不在 PROJECT_TERMINAL 内）；contractAmt > 0 的项目一律配 contractId 且合同 project 反指本项目。
+     profit = round((contractAmt − cost) ÷ contractAmt × 100, 1)；recvPct 与配套合同一致。 */
+  { id: 'XM000156', name: '昆明市第一人民医院门诊楼消防设施改造工程', type: '改造', biz: 'GC', source: '商机直签', customer: '昆明市第一人民医院', customerId: 'KH20260418003', owner: '刘宇', pm: '陈工', contractId: 'HT000012', contractAmt: 1420000, execAmt: 1420000, cost: 880000, milestone: 55, milestoneName: '管线安装', recvPct: 30, risk: 'none', status: '执行中', start: '2026-08-10', end: '2027-01-31', profit: 38.0, updatedAt: '2026-09-22', budget: 900000, budgetSrc: 'quote' },
+  { id: 'XM000161', name: '云南师范大学附属中学教学楼消防设施检测', type: '检测', biz: 'JC', source: '投标中标', customer: '云南师范大学附属中学', customerId: 'KH20260312002', owner: '赵薇', pm: '陈工', contractId: 'HT000013', contractAmt: 560000, execAmt: 560000, cost: 340000, milestone: 0, milestoneName: '进场准备', recvPct: 0, risk: 'none', status: '待启动', start: '2026-10-08', end: '2027-01-20', profit: 39.3, updatedAt: '2026-09-23', budget: 350000, budgetSrc: 'manual' },
+  { id: 'XM000165', name: '昆明滇池国家旅游度假区智慧消防平台建设', type: '新建', biz: 'RJ', source: '投标中标', customer: '昆明滇池国家旅游度假区', customerId: 'KH20250823009', owner: '蓝峰', pm: '张工', contractId: 'HT000014', contractAmt: 3200000, execAmt: 3200000, cost: 2140000, milestone: 35, milestoneName: '施工中', recvPct: 25, risk: 'none', status: '执行中', start: '2026-08-25', end: '2027-06-30', profit: 33.1, updatedAt: '2026-09-21', budget: 2200000, budgetSrc: 'quote' },
+  { id: 'XM000170', name: '楚雄州人民医院消防设施维护保养（二期）', type: '维护保养', biz: 'WB', source: '商机直签', customer: '楚雄州人民医院', customerId: 'KH20250902004', owner: '赵薇', pm: '李工', contractId: 'WB000004', contractAmt: 780000, execAmt: 780000, cost: 470000, milestone: 50, milestoneName: '周期巡检', recvPct: 50, risk: 'none', status: '维保服务中', serviceStart: '2026-07-01', serviceEnd: '2027-06-30', start: '2026-07-01', end: '2027-06-30', profit: 39.7, updatedAt: '2026-09-19', budget: 480000, budgetSrc: 'manual' },
+  { id: 'XM000174', name: '曲靖万达广场消防设施改造工程', type: '改造', biz: 'GC', source: '商机直签', customer: '曲靖万达广场商业管理有限公司', customerId: 'KH20260728008', owner: '陈静', pm: '王工', contractId: 'HT000015', contractAmt: 980000, execAmt: 980000, cost: 640000, milestone: 0, milestoneName: '进场准备', recvPct: 0, risk: 'none', status: '待启动', start: '2026-10-15', end: '2027-03-31', profit: 34.7, updatedAt: '2026-09-23', budget: 660000, budgetSrc: 'manual' },
+  { id: 'XM000178', name: '云南建工集团办公楼消防设施检测', type: '检测', biz: 'JC', source: '报价转化', customer: '云南建工集团有限公司', customerId: 'KH20260928010', owner: '赵薇', pm: '王工', contractId: 'HT000016', contractAmt: 1450000, execAmt: 1450000, cost: 920000, milestone: 45, milestoneName: '检测作业', recvPct: 40, risk: 'none', status: '执行中', start: '2026-09-01', end: '2026-12-20', profit: 36.6, updatedAt: '2026-09-20', budget: 940000, budgetSrc: 'manual' },
+  { id: 'XM000183', name: '文山三七产业园消防工程', type: '新建', biz: 'GC', source: '投标中标', customer: '文山三七产业园管委会', customerId: 'KH20260506005', owner: '蓝峰', pm: '张工', contractId: 'HT000017', contractAmt: 6800000, execAmt: 6800000, cost: 4620000, milestone: 95, milestoneName: '待验收', recvPct: 80, risk: 'overdue', status: '验收结算中', acceptStatus: '已申报', start: '2026-03-25', end: '2026-10-31', profit: 32.1, updatedAt: '2026-09-18', budget: 4700000, budgetSrc: 'manual' },
+  { id: 'XM000188', name: '大理古城文旅街区消防维护保养', type: '维护保养', biz: 'WB', source: '商机直签', customer: '大理古城文旅运营管理有限公司', customerId: 'KH20260511011', owner: '周斌', pm: '李工', contractId: 'WB000005', contractAmt: 620000, execAmt: 620000, cost: 395000, milestone: 20, milestoneName: '周期巡检', recvPct: 25, risk: 'none', status: '执行中', serviceStart: '2026-09-10', serviceEnd: '2027-09-09', start: '2026-09-10', end: '2027-09-09', profit: 36.3, updatedAt: '2026-09-23', budget: 400000, budgetSrc: 'manual' },
 ];
 
 /* ---------- 消防设施台账种子（维保 / 检测报价的计量基数） ----------
@@ -1271,6 +1635,11 @@ export const projFacilityOf = (id?: string) => PROJECTS.find((p) => p.id === id)
 
 /* ============================ 里程碑模板（规格 §6.4 PRJ-04 / EFF-06） ============================
  * 由系统管理员按项目类型维护；新建施工型项目一键套用。套用后为实例，改模板不影响已生成项目。
+ *
+ * ⚠️ 当前这套按「项目类型」划分的模板**未被页面调用**——项目详情实际渲染的是
+ * components/project-center/seed.ts 的 MILE_TPL（按业务域 biz 划分，带 pct 与准入资料）。
+ * 本文件中真正生效的只有下面的 MILESTONE_LEGAL（法定节点清单，被 seed.ts 的 isLegalNode 复用）。
+ * 改这里不会改变任何页面表现；要改流程请改 seed.ts。
  * ============================================================ */
 export const MILESTONE_TPL: { type: string; name: string; nodes: string[] }[] = [
   {
@@ -1385,20 +1754,22 @@ export const supScore = (s: { q: number; d: number; p: number; s: number }) =>
   Math.round(s.q * SUP_SCORE_W.q + s.d * SUP_SCORE_W.d + s.p * SUP_SCORE_W.p + s.s * SUP_SCORE_W.s);
 
 export const SUPPLIERS = [
-  { id: 'GYS000012', name: '云南××消防设备有限公司', cats: ['材料', '分包'], status: '已准入', level: 'A', coop: 12, amt: 3860000, blacklist: false, validTo: '2027-06-30', contact: '刘经理', phone: '138****3301', q: 94, d: 91, p: 86, s: 92, onTime: 96.2, qualRate: 99.1, priceAgr: '2026 年度框架价 · 有效期至 12-31' },
-  { id: 'GYS000023', name: '昆明××建筑劳务有限公司', cats: ['劳务', '分包'], status: '已准入', level: 'B', coop: 8, amt: 1420000, blacklist: false, validTo: '2027-03-31', contact: '张经理', phone: '138****4402', q: 85, d: 82, p: 88, s: 80, onTime: 88.5, qualRate: 96.4, priceAgr: '按项目议价 · 无年度协议' },
-  { id: 'GYS000028', name: '××安防材料科技有限公司', cats: ['材料'], status: '待准入', level: 'C', coop: 0, amt: 0, blacklist: false, validTo: '', contact: '陈经理', phone: '138****5503', q: 0, d: 0, p: 0, s: 0, onTime: 0, qualRate: 0, priceAgr: '未建档 · 待准入后议定' },
-  { id: 'GYS000035', name: '曲靖××机电安装有限公司', cats: ['机械', '分包'], status: '已准入', level: 'B', coop: 5, amt: 860000, blacklist: false, validTo: '2027-01-31', contact: '周经理', phone: '138****6604', q: 82, d: 88, p: 79, s: 84, onTime: 92.1, qualRate: 95.8, priceAgr: '2026 年度框架价 · 有效期至 12-31' },
-  { id: 'GYS000019', name: '××线缆供应链有限公司', cats: ['材料'], status: '已冻结', level: 'D', coop: 2, amt: 320000, blacklist: true, validTo: '2026-06-30', contact: '孙经理', phone: '138****7705', q: 58, d: 46, p: 72, s: 50, onTime: 61.3, qualRate: 82.7, priceAgr: '协议已过期 · 已冻结' },
-  { id: 'GYS000041', name: '云南××检测技术有限公司', cats: ['检测'], status: '已准入', level: 'A', coop: 9, amt: 480000, blacklist: false, validTo: '2027-08-31', contact: '吴经理', phone: '138****8806', q: 96, d: 94, p: 78, s: 95, onTime: 97.4, qualRate: 99.6, priceAgr: '2026 年度框架价 · 有效期至 12-31' },
+  { id: 'GYS000012', name: '云南××消防设备有限公司', cats: ['物料', '分包'], status: '已准入', level: 'A', coop: 12, amt: 3860000, blacklist: false, validTo: '2027-06-30', contact: '刘经理', phone: '138****3301', q: 94, d: 91, p: 86, s: 92, onTime: 96.2, qualRate: 99.1, priceAgr: '2026 年度框架价 · 有效期至 12-31', scopeCodes: ['CL000123', 'CL000145', 'CL000158', 'CL000177', 'EQ000001'] },
+  { id: 'GYS000023', name: '昆明××建筑劳务有限公司', cats: ['服务', '分包'], status: '已准入', level: 'B', coop: 8, amt: 1420000, blacklist: false, validTo: '2027-03-31', contact: '张经理', phone: '138****4402', q: 85, d: 82, p: 88, s: 80, onTime: 88.5, qualRate: 96.4, priceAgr: '按项目议价 · 无年度协议', scopeCodes: ['SV000004', 'SV000008'] },
+  { id: 'GYS000028', name: '××安防材料科技有限公司', cats: ['物料'], status: '待准入', level: 'C', coop: 0, amt: 0, blacklist: false, validTo: '', contact: '陈经理', phone: '138****5503', q: 0, d: 0, p: 0, s: 0, onTime: 0, qualRate: 0, priceAgr: '未建档 · 待准入后议定', scopeCodes: ['CL000201'] },
+  { id: 'GYS000035', name: '曲靖××机电安装有限公司', cats: ['机械', '分包'], status: '已准入', level: 'B', coop: 5, amt: 860000, blacklist: false, validTo: '2027-01-31', contact: '周经理', phone: '138****6604', q: 82, d: 88, p: 79, s: 84, onTime: 92.1, qualRate: 95.8, priceAgr: '2026 年度框架价 · 有效期至 12-31', scopeCodes: ['EQ000002', 'CL000188', 'SW000001'] },
+  { id: 'GYS000019', name: '××线缆供应链有限公司', cats: ['物料'], status: '已冻结', level: 'D', coop: 2, amt: 320000, blacklist: true, validTo: '2026-06-30', contact: '孙经理', phone: '138****7705', q: 58, d: 46, p: 72, s: 50, onTime: 61.3, qualRate: 82.7, priceAgr: '协议已过期 · 已冻结', scopeCodes: ['CL000233'] },
+  { id: 'GYS000041', name: '云南××检测技术有限公司', cats: ['检测'], status: '已准入', level: 'A', coop: 9, amt: 480000, blacklist: false, validTo: '2027-08-31', contact: '吴经理', phone: '138****8806', q: 96, d: 94, p: 78, s: 95, onTime: 97.4, qualRate: 99.6, priceAgr: '2026 年度框架价 · 有效期至 12-31', scopeCodes: ['SV000006'] },
+  /* 可落地③：已拒绝供应商（资质造假）——状态机演示「已拒绝」分支 */
+  { id: 'GYS000042', name: '××防火门制造有限公司', cats: ['物料'], status: '已拒绝', level: 'D', coop: 0, amt: 0, blacklist: false, validTo: '2026-05-31', contact: '马经理', phone: '138****9907', q: 0, d: 0, p: 0, s: 0, onTime: 0, qualRate: 0, priceAgr: 'CCCF 证书系伪造 · 资质造假，永久拒绝', scopeCodes: [] },
 ];
 
 /* ============================ 主数据 · 多级分类树（任意层级 · 两棵根树） ============================ */
 // 依据参考「主数据管理.html」TREE 模型：两棵根树，节点可无限嵌套。
 // 维护能力：＋新增子分类 / 重命名 / 删除（有子级或被引用则禁删）+ 同级重名校验。
-// 本次重构：分类树覆盖全部四种物料类型，不再只挂材料 ——
-//   物料目录（mat）= 材料 + 设备（硬件，有库存 / 有证书）
-//   服务与套件目录（prod）= 服务 + 套件（无实物库存 / 引用主数据构成成本）
+// 本次重构：分类树覆盖全部四类物料类型，不再只挂物料 ——
+//   物料目录（mat）= 物料（硬件，有库存 / 有证书）
+//   服务与套件目录（prod）= 服务 + 软件 + 套件（无实物库存 / 引用主数据构成成本）
 // 树上计数由页面的 countOf 从 ITEMS 实时统计，不再出现「树上 21 条、台账 8 条」这类无来源数字。
 export type CatNode = {
   id: string; n: string; owner?: string; ch?: CatNode[];
@@ -1445,7 +1816,7 @@ export const newCatId = (root: 'prod' | 'mat') => `${root}-c${Date.now().toStrin
 
 export const CAT_TREE: Record<'prod' | 'mat', CatNode> = {
   mat: {
-    id: 'mat', n: '物料目录（材料 / 设备）', ch: [
+    id: 'mat', n: '物料目录', ch: [
       /* 认证要求按「强制性认证目录」标在最能决定准入的那一层，子级继承：
          消防电 = 火灾报警产品（CCC 强制）；应急照明 = 避难逃生产品（CCC 强制）；
          消防水 / 防排烟 / 气体灭火 / 消防结构 = 2019 改革后转入自愿性认证。 */
@@ -1478,12 +1849,14 @@ export const CAT_TREE: Record<'prod' | 'mat', CatNode> = {
          改造前这三条关系是写死在 QuoteEditPage 的 CAT_MAP 叶子码映射表里的。 */
       {
         id: 'p3', n: '成套产品', owner: '徐工', certRule: 'none', ch: [
-          /* 成套本身不是认证对象，其准入要求由配方行的构成件继承（见 inheritsMand / itemNeedCCC） */
+          /* 成套本身不是认证对象，其准入要求由配置行的构成件继承（见 inheritsMand / itemNeedCCC） */
           { id: 'p31', n: '报警成套', quoteScope: 'fireelec', listCode: '030904' },
           { id: 'p32', n: '消火栓成套', quoteScope: 'firewater', listCode: '030901' },
           { id: 'p33', n: '疏散成套', quoteScope: 'emergency', listCode: '0304' },
         ],
       },
+      /* 软件与许可：无实物库存、无强制认证（订阅 / 永久许可），与服务同属「非库存」目录 */
+      { id: 'p4', n: '软件与许可', owner: '徐工', quoteScope: 'service', certRule: 'none' },
     ],
   },
 };
@@ -1800,7 +2173,7 @@ export function catRemove(root: 'prod' | 'mat', id: string): boolean {
   return true;
 }
 
-/** 树工具：分类路径文案，如「材料目录 / 消防水 / 管阀件」 */
+/** 树工具：分类路径文案，如「物料目录 / 消防水 / 管阀件」 */
 export function catPath(id: string): string {
   const hit = catFind(id);
   return hit ? hit.path.map((x) => x.n).join(' / ') : '—';
@@ -1825,23 +2198,23 @@ export function catOptions(root: 'prod' | 'mat'): { id: string; label: string }[
  *   ① 套件的「人工 / 其他」是自由填写的数字，不引用任何主数据 → 成本与台账脱节；
  *   ② 强制认证标记与合规证书两处各自维护 → 同一物料证书类型两页说法不一；
  *   ③ 合规页出现台账中根本不存在的「孤儿物料」。
- * 现在统一为 ITEMS 一张表，用 ty 区分四类：
+ * 现在统一为 ITEMS 一张表，用 ty 区分三类：
  *   材料 | 有库存（仓库分账 + 安全线） | CCCF 等证书        | 成本 = 采购价
  *   设备 | 有库存                     | CCCF 等证书        | 成本 = 采购价
  *   服务 | 无实物库存                 | 资质要求字段        | 成本 = 人工构成 + 耗材行
- *   套件 | 视组成                     | 继承所含硬件证书    | 成本 = 配方行（引用主数据）
+ *   套件 | 视组成                     | 继承所含硬件证书    | 成本 = 配置行（引用主数据）
  * 硬规则：
  *   · 人工费只能来自 LABOR_RATES（工种 × 工日 × 单价），禁止自由文本数字；
- *   · 配方行只能引用 ITEMS 中已存在的主数据（搜不到 → 先去主数据新建）；
+ *   · 配置行只能引用 ITEMS 中已存在的主数据（搜不到 → 先去主数据新建）；
  *   · 证书类型是物料属性（certType），合规台账由它派生，杜绝两处维护。
  * ================================================================== */
 
 /** 物料类型（统一主数据的唯一分类维度） */
-export const ITEM_KINDS = ['材料', '设备', '服务', '套件'] as const;
+export const ITEM_KINDS = ['物料', '服务', '软件', '套件'] as const;
 export type ItemKind = (typeof ITEM_KINDS)[number];
 
-/** 是否持有实物库存（服务的成本是人工，不建库存账） */
-export const isStocked = (k: ItemKind) => k === '材料' || k === '设备';
+/** 是否持有实物库存（服务 / 软件无实物库存，不建库存账） */
+export const isStocked = (k: ItemKind) => k === '物料';
 
 /* ---------- 人工工种单价：人工费的唯一来源 ---------- */
 export const LABOR_RATES = [
@@ -1868,17 +2241,66 @@ export const ATT_MARKS = [
   { k: '', label: '未在现场', v: 0 },
 ] as const;
 
+/* ---------- 班组（考勤归属主数据） ---------- */
+/**
+ * 班组是考勤的归属主数据：一个班组归属一个劳务单位（外包用工），配一名班组长。
+ * 人员档案挂班组；项目归属由「派工」决定 —— 换项目只改派工并留痕，不重建人员档案。
+ * 编号：BZH + 6 位流水（BZ 已被「保证金」占用，班组取 BZH，避免两个实体共用号段）。
+ */
+export const ATT_TEAM_STATUS = ['启用', '停用'] as const;
+export type AttTeamStatus = (typeof ATT_TEAM_STATUS)[number];
+
+export type AttTeam = {
+  id: string;
+  name: string;
+  /** 劳务单位（外包公司）；自有班组填「本公司」 */
+  laborUnit: string;
+  /** 班组长 */
+  leader: string;
+  /** 联系电话 */
+  phone: string;
+  /** 主要工种 —— 引用 LABOR_RATES */
+  trade: string;
+  status: AttTeamStatus;
+  note?: string;
+};
+
+export const ATT_TEAM_SEED: AttTeam[] = [
+  { id: 'BZH000001', name: '宏基劳务班组', laborUnit: '云南宏基劳务有限公司', leader: '赵维维', phone: '138****6621', trade: '电工', status: '启用', note: '长期合作，主做电气安装' },
+  { id: 'BZH000002', name: '云安消防安装班组', laborUnit: '云安消防工程有限公司', leader: '杨昕玥', phone: '139****3308', trade: '焊工', status: '启用' },
+  { id: 'BZH000003', name: '滇通机电班组', laborUnit: '滇通机电安装有限公司', leader: '陈志远', phone: '137****9912', trade: '调试工程师', status: '启用' },
+  { id: 'BZH000004', name: '临时用工班组', laborUnit: '—（临时招募）', leader: '未指定', phone: '', trade: '消防设施操作员', status: '停用', note: '旺季临时用工，当前无在册人员' },
+];
+
+/* ---------- 考勤人员档案 ---------- */
+/** 人员在册状态：已离场不再进考勤矩阵与人工成本 */
+export const ATT_WORKER_STATUS = ['在册', '已离场'] as const;
+export type AttWorkerStatus = (typeof ATT_WORKER_STATUS)[number];
+
+/** 派工留痕：每次换项目追加一条（首次派工 fromProjId 为空串） */
+export type AttDispatch = { at: string; fromProjId: string; toProjId: string; by: string; note?: string };
+
 export type AttWorker = {
   id: string;
   name: string;
   /** 岗位 / 工种 —— 引用 LABOR_RATES，决定人工单价 */
   trade: string;
-  /** 外包班组 */
-  team: string;
-  /** 关联项目（外包成本归属） */
+  /** 所属班组 —— 引用 ATT_TEAM_SEED（班组是考勤归属主数据） */
+  teamId: string;
+  /** 联系电话 */
+  phone: string;
+  /** 在册状态 */
+  status: AttWorkerStatus;
+  /** 当前所在项目（由派工决定）—— 外包成本按此归属 */
   proj: string;
-  /** 1~31 日 → 符号 */
-  marks: Record<number, string>;
+  /**
+   * 逐月考勤：'YYYY-MM' → { 1~31 日 → 符号 }。
+   * 按月的理由：考勤天然按月录入（现场每月一张《考勤记录表》），
+   * 单层 marks 会导致「导入 8 月」和「9 月已有记录」互相覆盖。
+   */
+  marksByMonth: Record<string, Record<number, string>>;
+  /** 派工留痕 */
+  dispatches: AttDispatch[];
 };
 
 /** 由模式串生成 marks（逐日）；'.' 表示未在现场（空格） */
@@ -1888,51 +2310,72 @@ export const attMarks = (pat: string) => {
   return m;
 };
 
+/** 取某人某月的逐日符号（没录过该月 → 空表，不伪造数据） */
+export const attMarksOf = (w: AttWorker, ym: string): Record<number, string> => w.marksByMonth[ym] ?? {};
+
 /** 出勤天数 = Σ 各日符号值（半 = 0.5 · 加 = 1.5 · 休/假/空 = 0） */
-export const attDays = (w: AttWorker, upTo = 31) => {
+export const attDays = (w: AttWorker, ym: string, upTo = 31) => {
+  const m = attMarksOf(w, ym);
   let d = 0;
   for (let i = 1; i <= upTo; i++) {
-    const hit = ATT_MARKS.find((x) => x.k === w.marks[i]);
+    const hit = ATT_MARKS.find((x) => x.k === m[i]);
     if (hit) d += hit.v;
   }
   return Math.round(d * 10) / 10;
 };
 
 /** 人工成本 = 出勤天数 × 岗位单价 */
-export const attCost = (w: AttWorker, upTo = 31) => Math.round(attDays(w, upTo) * laborRate(w.trade));
+export const attCost = (w: AttWorker, ym: string, upTo = 31) => Math.round(attDays(w, ym, upTo) * laborRate(w.trade));
 
-/** 外包班组 */
-export const ATT_TEAMS = ['宏基劳务班组', '云安消防安装班组', '滇通机电班组'];
+/**
+ * 种子考勤所在月。
+ * ⚠️ 必须与 `TODAY` 同月（`TODAY` 定义在本文件后段的权限 / 日期区，此处只能写字面量）。
+ * 两者不一致会让「已过天数」按错误的月份计算；改 `TODAY` 时一并改这里。
+ */
+export const ATT_BASE_YM = '2026-09';
 
-export const ATT_WORKERS: AttWorker[] = [
-  { id: 'WG000001', name: '赵维维', trade: '电工', team: '宏基劳务班组', proj: 'XM000123', marks: attMarks('假假√√√√√√√√√√√假假√√√√√√') },
-  { id: 'WG000002', name: '魏银宇', trade: '管工', team: '宏基劳务班组', proj: 'XM000123', marks: attMarks('假假√√假假假假假假假假假假假假假假假假') },
-  { id: 'WG000003', name: '杨昕玥', trade: '焊工', team: '云安消防安装班组', proj: 'XM000123', marks: attMarks('假假√√√假假假假假假假假假假假假假假假假') },
-  { id: 'WG000004', name: '杨来伟', trade: '消防设施操作员', team: '云安消防安装班组', proj: 'XM000123', marks: attMarks('假假√√√假假假假假假假假假假假假假假假假') },
-  { id: 'WG000005', name: '李文强', trade: '电工', team: '滇通机电班组', proj: 'XM000131', marks: attMarks('√√√√√半半√√√√√假假假√√√√√√') },
-  { id: 'WG000006', name: '陈志远', trade: '调试工程师', team: '滇通机电班组', proj: 'XM000131', marks: attMarks('√√√加加√√√√√√√√√√√√√√√√') },
-  { id: 'WG000007', name: '王海涛', trade: '管工', team: '宏基劳务班组', proj: 'XM000118', marks: attMarks('休休√√√√√√√休休√√√√√√√√√') },
-  { id: 'WG000008', name: '刘建军', trade: '焊工', team: '云安消防安装班组', proj: 'XM000118', marks: attMarks('假假假√√√√√√√√√√√√√√√√√') },
+/**
+ * 考勤人员档案种子。
+ * 每人带一条「入场派工」留痕，说明「人从班组派到项目」的链路；
+ * WG000009 演示「在册」、WG000010 演示「已离场」（离场后不进矩阵与成本）。
+ * 考勤只录在 `ATT_BASE_YM`（其余月份为空态）—— 导入功能可按月写入。
+ */
+export const ATT_WORKERS_SEED: AttWorker[] = [
+  { id: 'WG000001', name: '赵维维', trade: '电工', teamId: 'BZH000001', phone: '138****6621', status: '在册', proj: 'XM000123', marksByMonth: { [ATT_BASE_YM]: attMarks('假假√√√√√√√√√√√假假√√√√√√') }, dispatches: [{ at: '2026-08-18', fromProjId: '', toProjId: 'XM000123', by: '蓝峰', note: '入场派工' }] },
+  { id: 'WG000002', name: '魏银宇', trade: '管工', teamId: 'BZH000001', phone: '135****7742', status: '在册', proj: 'XM000123', marksByMonth: { [ATT_BASE_YM]: attMarks('假假√√假假假假假假假假假假假假假假假假') }, dispatches: [{ at: '2026-08-18', fromProjId: '', toProjId: 'XM000123', by: '蓝峰', note: '入场派工' }] },
+  { id: 'WG000003', name: '杨昕玥', trade: '焊工', teamId: 'BZH000002', phone: '139****3308', status: '在册', proj: 'XM000123', marksByMonth: { [ATT_BASE_YM]: attMarks('假假√√√假假假假假假假假假假假假假假假假') }, dispatches: [{ at: '2026-08-20', fromProjId: '', toProjId: 'XM000123', by: '蓝峰', note: '入场派工' }] },
+  { id: 'WG000004', name: '杨来伟', trade: '消防设施操作员', teamId: 'BZH000002', phone: '136****5109', status: '在册', proj: 'XM000123', marksByMonth: { [ATT_BASE_YM]: attMarks('假假√√√假假假假假假假假假假假假假假假假') }, dispatches: [{ at: '2026-08-20', fromProjId: '', toProjId: 'XM000123', by: '蓝峰', note: '入场派工' }] },
+  { id: 'WG000005', name: '李文强', trade: '电工', teamId: 'BZH000003', phone: '137****2286', status: '在册', proj: 'XM000131', marksByMonth: { [ATT_BASE_YM]: attMarks('√√√√√半半√√√√√假假假√√√√√√') }, dispatches: [{ at: '2026-09-01', fromProjId: '', toProjId: 'XM000131', by: '蓝峰', note: '入场派工' }] },
+  { id: 'WG000006', name: '陈志远', trade: '调试工程师', teamId: 'BZH000003', phone: '137****9912', status: '在册', proj: 'XM000131', marksByMonth: { [ATT_BASE_YM]: attMarks('√√√加加√√√√√√√√√√√√√√√√') }, dispatches: [{ at: '2026-09-01', fromProjId: '', toProjId: 'XM000131', by: '蓝峰', note: '入场派工' }] },
+  { id: 'WG000007', name: '王海涛', trade: '管工', teamId: 'BZH000001', phone: '135****4417', status: '在册', proj: 'XM000118', marksByMonth: { [ATT_BASE_YM]: attMarks('休休√√√√√√√休休√√√√√√√√√') }, dispatches: [{ at: '2026-07-06', fromProjId: '', toProjId: 'XM000118', by: '蓝峰', note: '入场派工' }] },
+  { id: 'WG000008', name: '刘建军', trade: '焊工', teamId: 'BZH000002', phone: '138****6033', status: '在册', proj: 'XM000118', marksByMonth: { [ATT_BASE_YM]: attMarks('假假假√√√√√√√√√√√√√√√√√') }, dispatches: [{ at: '2026-07-06', fromProjId: '', toProjId: 'XM000118', by: '蓝峰', note: '入场派工' }] },
+  { id: 'WG000009', name: '郑海峰', trade: '焊工', teamId: 'BZH000003', phone: '139****8874', status: '在册', proj: 'XM000131', marksByMonth: { [ATT_BASE_YM]: attMarks('√√√√√√半半√√√√√√假假√√√√√') }, dispatches: [{ at: '2026-09-03', fromProjId: '', toProjId: 'XM000131', by: '蓝峰', note: '入场派工' }] },
+  { id: 'WG000010', name: '孙立群', trade: '消防设施操作员', teamId: 'BZH000002', phone: '136****1520', status: '已离场', proj: '', marksByMonth: { [ATT_BASE_YM]: attMarks('') }, dispatches: [{ at: '2026-08-30', fromProjId: 'XM000118', toProjId: '', by: '蓝峰', note: '项目完工离场' }] },
 ];
 
 /** 人工行（工种引用 LABOR_RATES · 工日可小数） */
 export type LaborLine = { trade: string; days: number };
-/** 耗材行（引用材料 / 设备主数据） */
+/** 耗材行（引用物料主数据） */
 export type ConsumableLine = { code: string; qty: number };
 
 export type Item = {
   id: string; code: string; name: string; spec: string;
-  /** 类型：材料 / 设备 / 服务 / 套件（统一列表的「类型」列） */
+  /** 类型：物料 / 服务 / 软件 / 套件（统一列表的「类型」列；套件是前三类的组合，排末位） */
   ty: ItemKind;
   unit: string; cat: string;
-  /** 参考单价：材料 / 设备 = 采购含税价；服务 = 人工 + 耗材成本；套件 = 对外价（等价 sale） */
+  /** 参考单价：物料 = 采购含税价；服务 = 人工 + 耗材成本；套件 = 对外价（等价 sale） */
   price: number;
-  /** 适用税率（%）：材料 / 设备 / 套件 = 13（货物）；服务 = 6（现代服务）或 9（建筑服务）。
+  /** 适用税率（%）：物料 / 套件 = 13（货物）；服务 = 6（现代服务）或 9（建筑服务）。
    *  成本还原的除数由此字段决定，禁止各处硬编码 1.13 —— 详见 itemCostBase()。 */
   taxRate?: number;
   status: '启用' | '停用';
   /** 库存三件套：结余 / 预占 / 安全线。可用 = 结余 − 预占；服务与套件恒为 0 */
   stock: number; hold: number; safe: number;
+  /**
+   * 存货金额（元 · 不含税）：入库按不含税采购价累加、领用按加权平均单价结转递减。
+   * 材料成本的归集点在「领用」——入库只是先把钱垫在存货里，领用才结转到项目。
+   */
+  stockAmt?: number;
   ccc: boolean; mand: boolean;
   /** 认证（物料级唯一配置 → 台账徽标与合规台账同源） */
   certType?: string; certNo?: string; certValidTo?: string; certFiles?: number;
@@ -1951,28 +2394,30 @@ export type Item = {
   owner: string;
 };
 
-/* ---------- 材料（CL + 6 位）：纯物料，有库存 ---------- */
+/* ---------- 物料（CL + 6 位）：纯物料，有库存 ---------- */
 export const MATERIALS: Item[] = [
-  { id: 'CL000123', code: 'CL000123', name: '镀锌钢管', spec: 'DN100', ty: '材料', unit: '米', cat: 'm211', price: 85, taxRate: 13, status: '启用', stock: 1280, hold: 80, safe: 500, ccc: false, mand: false, owner: '张仓' },
-  { id: 'CL000145', code: 'CL000145', name: '喷淋头（上喷）', spec: '68℃ / DN15', ty: '材料', unit: '个', cat: 'm212', price: 28, taxRate: 13, status: '启用', stock: 560, hold: 34, safe: 300, ccc: false, mand: false, owner: '张仓' },
-  { id: 'CL000158', code: 'CL000158', name: '消火栓箱', spec: 'SG24A65', ty: '材料', unit: '台', cat: 'm22', price: 460, taxRate: 13, status: '启用', stock: 32, hold: 2, safe: 60, ccc: true, mand: true, certType: 'CCCF 强制性认证', certNo: 'CCCF-2025-FH-008821', certValidTo: '2027-05-31', certFiles: 2, batch: 'PC20260512-A', notifyCh: '站内 + 钉钉 + 短信', owner: '张仓' },
-  { id: 'CL000177', code: 'CL000177', name: '防火阀', spec: 'FHF-400', ty: '材料', unit: '台', cat: 'm3', price: 620, taxRate: 13, status: '启用', stock: 48, hold: 3, safe: 40, ccc: true, mand: true, certType: 'CCCF 强制性认证', certNo: 'CCCF-2025-FH-009117', certValidTo: '2027-08-31', certFiles: 2, batch: 'PC20260608-B', notifyCh: '站内 + 钉钉 + 短信', owner: '张仓' },
-  { id: 'CL000188', code: 'CL000188', name: '桥架', spec: '200×100', ty: '材料', unit: '米', cat: 'm12', price: 65, taxRate: 13, status: '启用', stock: 860, hold: 52, safe: 400, ccc: false, mand: false, certType: '型式检验报告', certNo: 'XJ2025-0873', certValidTo: '2028-06-30', certFiles: 1, batch: 'PC20260705-A', notifyCh: '站内 + 钉钉', owner: '张仓' },
-  { id: 'CL000201', code: 'CL000201', name: '应急照明灯具', spec: 'ZF-JCZ', ty: '材料', unit: '套', cat: 'm4', price: 95, taxRate: 13, status: '启用', stock: 320, hold: 20, safe: 200, ccc: true, mand: true, certType: 'CCCF 强制性认证', certNo: 'CCCF-2025-ZM-002290', certValidTo: '2027-01-31', certFiles: 2, batch: 'PC20260530-A', notifyCh: '站内 + 短信', owner: '张仓' },
-  { id: 'CL000214', code: 'CL000214', name: '防火门（甲级）', spec: 'FM1021', ty: '材料', unit: '樘', cat: 'm6', price: 1580, taxRate: 13, status: '启用', stock: 12, hold: 1, safe: 20, ccc: true, mand: true, certType: 'CCCF 强制性认证', certNo: 'CCCF-2025-FH-010334', certValidTo: '2027-11-30', certFiles: 1, batch: 'PC20260811-A', notifyCh: '站内 + 钉钉', owner: '张仓' },
-  { id: 'CL000226', code: 'CL000226', name: '消防水泵接合器', spec: 'SQX100', ty: '材料', unit: '套', cat: 'm22', price: 680, taxRate: 13, status: '启用', stock: 18, hold: 1, safe: 15, ccc: false, mand: false, certType: '出厂合格证', certNo: 'HG2026-0092', certValidTo: '—', certFiles: 1, batch: 'PC20260912-A', notifyCh: '', owner: '张仓' },
-  { id: 'CL000231', code: 'CL000231', name: '消防水带', spec: 'DN65 × 25m', ty: '材料', unit: '盘', cat: 'm22', price: 78, taxRate: 13, status: '启用', stock: 240, hold: 14, safe: 150, ccc: false, mand: false, owner: '张仓' },
-  { id: 'CL000232', code: 'CL000232', name: '直流水枪', spec: 'QZ19', ty: '材料', unit: '个', cat: 'm22', price: 45, taxRate: 13, status: '启用', stock: 180, hold: 10, safe: 120, ccc: false, mand: false, owner: '张仓' },
-  { id: 'CL000233', code: 'CL000233', name: '输入/输出模块', spec: 'GST-LD-8300', ty: '材料', unit: '只', cat: 'm11', price: 210, taxRate: 13, status: '启用', stock: 420, hold: 25, safe: 300, ccc: false, mand: false, owner: '张仓' },
-  { id: 'CL000234', code: 'CL000234', name: '应急照明集中电源', spec: 'EPS-3KVA', ty: '材料', unit: '台', cat: 'm4', price: 2600, taxRate: 13, status: '启用', stock: 26, hold: 2, safe: 10, ccc: false, mand: false, owner: '张仓' },
+  { id: 'CL000123', code: 'CL000123', name: '镀锌钢管', spec: 'DN100', ty: '物料', unit: '米', cat: 'm211', price: 85, taxRate: 13, status: '启用', stock: 1280, hold: 80, safe: 500, ccc: false, mand: false, owner: '张仓' },
+  { id: 'CL000145', code: 'CL000145', name: '喷淋头（上喷）', spec: '68℃ / DN15', ty: '物料', unit: '个', cat: 'm212', price: 28, taxRate: 13, status: '启用', stock: 560, hold: 34, safe: 300, ccc: false, mand: false, owner: '张仓' },
+  { id: 'CL000158', code: 'CL000158', name: '消火栓箱', spec: 'SG24A65', ty: '物料', unit: '台', cat: 'm22', price: 460, taxRate: 13, status: '启用', stock: 32, hold: 2, safe: 60, ccc: true, mand: true, certType: 'CCCF 强制性认证', certNo: 'CCCF-2025-FH-008821', certValidTo: '2027-05-31', certFiles: 2, batch: 'PC20260512-A', notifyCh: '站内 + 钉钉 + 短信', owner: '张仓' },
+  { id: 'CL000177', code: 'CL000177', name: '防火阀', spec: 'FHF-400', ty: '物料', unit: '台', cat: 'm3', price: 620, taxRate: 13, status: '启用', stock: 48, hold: 3, safe: 40, ccc: true, mand: true, certType: 'CCCF 强制性认证', certNo: 'CCCF-2025-FH-009117', certValidTo: '2027-08-31', certFiles: 2, batch: 'PC20260608-B', notifyCh: '站内 + 钉钉 + 短信', owner: '张仓' },
+  { id: 'CL000188', code: 'CL000188', name: '桥架', spec: '200×100', ty: '物料', unit: '米', cat: 'm12', price: 65, taxRate: 13, status: '启用', stock: 860, hold: 52, safe: 400, ccc: false, mand: false, certType: '型式检验报告', certNo: 'XJ2025-0873', certValidTo: '2028-06-30', certFiles: 1, batch: 'PC20260705-A', notifyCh: '站内 + 钉钉', owner: '张仓' },
+  { id: 'CL000201', code: 'CL000201', name: '应急照明灯具', spec: 'ZF-JCZ', ty: '物料', unit: '套', cat: 'm4', price: 95, taxRate: 13, status: '启用', stock: 320, hold: 20, safe: 200, ccc: true, mand: true, certType: 'CCCF 强制性认证', certNo: 'CCCF-2025-ZM-002290', certValidTo: '2027-01-31', certFiles: 2, batch: 'PC20260530-A', notifyCh: '站内 + 短信', owner: '张仓' },
+  { id: 'CL000214', code: 'CL000214', name: '防火门（甲级）', spec: 'FM1021', ty: '物料', unit: '樘', cat: 'm6', price: 1580, taxRate: 13, status: '启用', stock: 12, hold: 1, safe: 20, ccc: true, mand: true, certType: 'CCCF 强制性认证', certNo: 'CCCF-2025-FH-010334', certValidTo: '2027-11-30', certFiles: 1, batch: 'PC20260811-A', notifyCh: '站内 + 钉钉', owner: '张仓' },
+  { id: 'CL000226', code: 'CL000226', name: '消防水泵接合器', spec: 'SQX100', ty: '物料', unit: '套', cat: 'm22', price: 680, taxRate: 13, status: '启用', stock: 18, hold: 1, safe: 15, ccc: false, mand: false, certType: '出厂合格证', certNo: 'HG2026-0092', certValidTo: '—', certFiles: 1, batch: 'PC20260912-A', notifyCh: '', owner: '张仓' },
+  { id: 'CL000231', code: 'CL000231', name: '消防水带', spec: 'DN65 × 25m', ty: '物料', unit: '盘', cat: 'm22', price: 78, taxRate: 13, status: '启用', stock: 240, hold: 14, safe: 150, ccc: false, mand: false, owner: '张仓' },
+  { id: 'CL000232', code: 'CL000232', name: '直流水枪', spec: 'QZ19', ty: '物料', unit: '个', cat: 'm22', price: 45, taxRate: 13, status: '启用', stock: 180, hold: 10, safe: 120, ccc: false, mand: false, owner: '张仓' },
+  { id: 'CL000233', code: 'CL000233', name: '输入/输出模块', spec: 'GST-LD-8300', ty: '物料', unit: '只', cat: 'm11', price: 210, taxRate: 13, status: '启用', stock: 420, hold: 25, safe: 300, ccc: false, mand: false, owner: '张仓' },
+  { id: 'CL000234', code: 'CL000234', name: '应急照明集中电源', spec: 'EPS-3KVA', ty: '物料', unit: '台', cat: 'm4', price: 2600, taxRate: 13, status: '启用', stock: 26, hold: 2, safe: 10, ccc: false, mand: false, owner: '张仓' },
+  /* 可落地③：停用物料（停产喷淋头）——列表「状态=停用」筛选可见，不进库存与价格库 */
+  { id: 'CL000235', code: 'CL000235', name: '喷淋头（下喷）', spec: '68℃ / DN15（停产）', ty: '物料', unit: '个', cat: 'm212', price: 26, taxRate: 13, status: '停用', stock: 0, hold: 0, safe: 0, ccc: false, mand: false, owner: '张仓' },
 ];
 
-/* ---------- 设备（EQ + 6 位）：消防设备，有库存 · 原属合规页「孤儿物料」，本次补入主数据 ---------- */
+/* ---------- 物料（EQ + 6 位 · 消防设备，历史编码保留）：有库存 ---------- */
 export const EQUIPMENTS: Item[] = [
-  { id: 'EQ000001', code: 'EQ000001', name: '火灾报警控制器', spec: 'JB-QB-GST5000', ty: '设备', unit: '台', cat: 'm11', price: 6800, taxRate: 13, status: '启用', stock: 6, hold: 1, safe: 2, ccc: true, mand: true, certType: 'CCCF 强制性认证', certNo: 'CCCF-2025-DQ-005511', certValidTo: '2027-07-31', certFiles: 3, batch: 'PC20260701-A', notifyCh: '站内 + 钉钉 + 短信', owner: '徐工' },
-  { id: 'EQ000002', code: 'EQ000002', name: '感烟探测器', spec: 'JTY-GM-GST101', ty: '设备', unit: '只', cat: 'm11', price: 68, taxRate: 13, status: '启用', stock: 860, hold: 60, safe: 200, ccc: true, mand: true, certType: 'CCCF 强制性认证', certNo: 'CCCF-2024-GW-007733', certValidTo: '2026-10-15', certFiles: 1, batch: 'PC20260420-C', notifyCh: '站内 + 钉钉 + 短信', owner: '徐工' },
-  { id: 'EQ000003', code: 'EQ000003', name: '气体灭火装置（七氟丙烷）', spec: 'GQQ70', ty: '设备', unit: '套', cat: 'm5', price: 18500, taxRate: 13, status: '启用', stock: 2, hold: 0, safe: 1, ccc: true, mand: true, certType: 'CCCF 强制性认证', certNo: 'CCCF-2025-QT-003318', certValidTo: '2026-11-30', certFiles: 2, batch: 'PC20260318-B', notifyCh: '站内 + 钉钉', owner: '徐工' },
-  { id: 'EQ000004', code: 'EQ000004', name: '电气火灾监控设备', spec: 'LDT9100', ty: '设备', unit: '台', cat: 'm11', price: 4200, taxRate: 13, status: '启用', stock: 5, hold: 1, safe: 3, ccc: true, mand: true, certType: 'CCCF 强制性认证', certNo: 'CCCF-2025-DQ-005506', certValidTo: '2027-09-30', certFiles: 2, batch: 'PC20260722-A', notifyCh: '站内 + 钉钉', owner: '徐工' },
+  { id: 'EQ000001', code: 'EQ000001', name: '火灾报警控制器', spec: 'JB-QB-GST5000', ty: '物料', unit: '台', cat: 'm11', price: 6800, taxRate: 13, status: '启用', stock: 6, hold: 1, safe: 2, ccc: true, mand: true, certType: 'CCCF 强制性认证', certNo: 'CCCF-2025-DQ-005511', certValidTo: '2027-07-31', certFiles: 3, batch: 'PC20260701-A', notifyCh: '站内 + 钉钉 + 短信', owner: '徐工' },
+  { id: 'EQ000002', code: 'EQ000002', name: '感烟探测器', spec: 'JTY-GM-GST101', ty: '物料', unit: '只', cat: 'm11', price: 68, taxRate: 13, status: '启用', stock: 860, hold: 60, safe: 200, ccc: true, mand: true, certType: 'CCCF 强制性认证', certNo: 'CCCF-2024-GW-007733', certValidTo: '2026-08-15', certFiles: 1, batch: 'PC20260420-C', notifyCh: '站内 + 钉钉 + 短信', owner: '徐工' },
+  { id: 'EQ000003', code: 'EQ000003', name: '气体灭火装置（七氟丙烷）', spec: 'GQQ70', ty: '物料', unit: '套', cat: 'm5', price: 18500, taxRate: 13, status: '启用', stock: 2, hold: 0, safe: 1, ccc: true, mand: true, certType: 'CCCF 强制性认证', certNo: 'CCCF-2025-QT-003318', certValidTo: '2026-11-30', certFiles: 2, batch: 'PC20260318-B', notifyCh: '站内 + 钉钉', owner: '徐工' },
+  { id: 'EQ000004', code: 'EQ000004', name: '电气火灾监控设备', spec: 'LDT9100', ty: '物料', unit: '台', cat: 'm11', price: 4200, taxRate: 13, status: '启用', stock: 5, hold: 1, safe: 3, ccc: true, mand: true, certType: 'CCCF 强制性认证', certNo: 'CCCF-2025-DQ-005506', certValidTo: '2027-09-30', certFiles: 2, batch: 'PC20260722-A', notifyCh: '站内 + 钉钉', owner: '徐工' },
 ];
 
 /* ---------- 服务（SV + 6 位）：人工构成 + 可挂耗材，无实物库存 ----------
@@ -1999,7 +2444,7 @@ export const SERVICES: Item[] = [
   （检测 0.5 万元/次）。同一服务可支持多种口径，报价时切换对比，是企业侧真实的比价动作。
 
   注意：这里只描述「怎么算钱」，不改动既有的 qty × cost 材料行模型 ——
-  材料 / 设备 / 套件仍按 unit 行；只有登记了计价方案的维保 / 检测类服务才走这套
+  物料 / 套件仍按 unit 行；只有登记了计价方案的维保 / 检测类服务才走这套
   「计量基数 → 试算明细 → 金额」的模型。 */
 
 /** 服务行计价口径 */
@@ -2150,15 +2595,24 @@ export function wbQuoteOf(
   return { basis, rows, subtotal, hitMin, minFee, total: hitMin ? minFee : subtotal };
 }
 
-/* ---------- 套件（CP + 6 位）：配方引用主数据，对外计价 ---------- */
+/* ---------- 套件（CP + 6 位）：配置引用主数据，对外计价 ---------- */
 export const KITS: Item[] = [
-  { id: 'CP000041', code: 'CP000041', name: '消防报警套件', spec: '控制器 ×1 + 探测器 ×20 + 模块 ×8 + 安装调试', ty: '套件', unit: '套', cat: 'p31', price: 15800, taxRate: 13, sale: 15800, refs: 6, status: '启用', stock: 0, hold: 0, safe: 0, ccc: false, mand: false, owner: '徐工' },
-  { id: 'CP000042', code: 'CP000042', name: '消火栓箱成套', spec: '箱 ×1 + 水带 ×2 + 水枪 ×1 + 成套安装', ty: '套件', unit: '套', cat: 'p32', price: 1680, taxRate: 13, sale: 1680, refs: 3, status: '启用', stock: 0, hold: 0, safe: 0, ccc: false, mand: false, owner: '张仓' },
-  { id: 'CP000043', code: 'CP000043', name: '应急疏散照明包', spec: '灯具 ×6 + 集中电源 ×1 + 安装调试', ty: '套件', unit: '套', cat: 'p33', price: 5600, taxRate: 13, sale: 5600, refs: 0, status: '启用', stock: 0, hold: 0, safe: 0, ccc: false, mand: false, owner: '张仓' },
+  { id: 'CP000041', code: 'CP000041', name: '火灾自动报警系统', spec: '控制器 ×1 + 探测器 ×20 + 模块 ×8 + 安装调试', ty: '套件', unit: '套', cat: 'p31', price: 15800, taxRate: 13, sale: 15800, refs: 6, status: '启用', stock: 0, hold: 0, safe: 0, ccc: false, mand: false, owner: '徐工' },
+  { id: 'CP000042', code: 'CP000042', name: '消火栓箱组', spec: '箱 ×1 + 水带 ×2 + 水枪 ×1 + 成套安装', ty: '套件', unit: '套', cat: 'p32', price: 1680, taxRate: 13, sale: 1680, refs: 3, status: '启用', stock: 0, hold: 0, safe: 0, ccc: false, mand: false, owner: '张仓' },
+  { id: 'CP000043', code: 'CP000043', name: '应急照明系统', spec: '灯具 ×6 + 集中电源 ×1 + 安装调试', ty: '套件', unit: '套', cat: 'p33', price: 5600, taxRate: 13, sale: 5600, refs: 0, status: '启用', stock: 0, hold: 0, safe: 0, ccc: false, mand: false, owner: '张仓' },
+  /* D1：复合套件「消防物联网采集包」BOM = 报警主机(物料) + 安装调试(服务) + 云平台年费(软件) 三类 */
+  { id: 'CP000044', code: 'CP000044', name: '消防物联网采集包', spec: '报警主机×1 + 安装调试×1 + 云平台年费×1', ty: '套件', unit: '套', cat: 'p31', price: 26800, taxRate: 6, sale: 26800, refs: 0, status: '启用', stock: 0, hold: 0, safe: 0, ccc: false, mand: false, owner: '徐工' },
+];
+
+/* ---------- 软件（SW + 6 位）：许可 / 订阅，无实物库存、无强制认证 ----------
+   参考价 = 订阅年费或永久许可费；成本按现代服务 6% 口径直接取价（不做价税分离，同服务）。 */
+export const SOFTWARE: Item[] = [
+  { id: 'SW000001', code: 'SW000001', name: '消防物联网云平台年费', spec: 'SaaS 订阅 · 按年', ty: '软件', unit: '年/套', cat: 'p4', price: 12000, taxRate: 6, status: '启用', stock: 0, hold: 0, safe: 0, ccc: false, mand: false, owner: '徐工' },
+  { id: 'SW000002', code: 'SW000002', name: '火灾报警监控软件 V3.0', spec: '永久许可 · 单机授权', ty: '软件', unit: '套', cat: 'p4', price: 28000, taxRate: 6, status: '启用', stock: 0, hold: 0, safe: 0, ccc: false, mand: false, owner: '徐工' },
 ];
 
 /** 统一主数据：页面上看到的「一张表」 */
-export const ITEMS: Item[] = [...MATERIALS, ...EQUIPMENTS, ...SERVICES, ...KITS];
+export const ITEMS: Item[] = [...MATERIALS, ...EQUIPMENTS, ...SOFTWARE, ...SERVICES, ...KITS];
 export const itemByCode = (code: string) => ITEMS.find((x) => x.code === code);
 export const itemLabel = (code: string) => { const i = itemByCode(code); return i ? `${i.name} ${i.spec}`.trim() : code; };
 export const byKind = (k: ItemKind) => ITEMS.filter((x) => x.ty === k);
@@ -2167,22 +2621,22 @@ export const byKind = (k: ItemKind) => ITEMS.filter((x) => x.ty === k);
 export const PRODUCTS = [...SERVICES, ...KITS];
 
 /* ==================================================================
- * 配方（套件 / 服务共用同一套「成本构成」编辑器）
+ * 配置（套件 / 服务共用同一套「成本构成」编辑器）
  * ------------------------------------------------------------------
- * 配方行只能「引用主数据」，不再允许手工填数字：
- *   材料 / 设备行 → 单价自动取自 ITEMS，可锁价修改但会标记 lockedPrice；
- *   服务行       → 其人工构成即为本次配方的人工费来源（替代原自由填写的「人工」）；
+ * 配置行只能「引用主数据」，不再允许手工填数字：
+ *   物料行 → 单价自动取自 ITEMS，可锁价修改但会标记 lockedPrice；
+ *   服务行       → 其人工构成即为本次配置的人工费来源（替代原自由填写的「人工」）；
  *   子套件行     → 支持嵌套，成本递归展开。
- * 编辑已被引用的配方 → 自动生成新版本，旧版永久保留（报价引用快照）。
+ * 编辑已被引用的配置 → 自动生成新版本，旧版永久保留（报价引用快照）。
  * ================================================================== */
 export type RecipeLine = {
-  /** 行类型：材料 / 设备 / 服务 / 子套件 */
+  /** 行类型：物料 / 服务 / 子套件 */
   kind: ItemKind;
   /** 引用对象（只能是 ITEMS 中已存在的主数据编码） */
   code: string;
   /** 数量 / 单耗 */
   qty: number;
-  /** 损耗%（仅材料 / 设备行） */
+  /** 损耗%（仅物料行） */
   loss?: number;
   /** 锁价：人工改过单价时记录，用于标记「偏离主数据」 */
   lockedPrice?: number;
@@ -2193,17 +2647,17 @@ export const RECIPES: Record<string, { pid: string; cur: string; versions: Recip
     pid: 'CP000041', cur: 'V1.2', versions: [
       {
         v: 'V1.2', st: '生效', created: '2026-08-01', refs: 6, lines: [
-          { kind: '设备', code: 'EQ000001', qty: 1 },
-          { kind: '设备', code: 'EQ000002', qty: 20 },
-          { kind: '材料', code: 'CL000233', qty: 8, loss: 2 },
+          { kind: '物料', code: 'EQ000001', qty: 1 },
+          { kind: '物料', code: 'EQ000002', qty: 20 },
+          { kind: '物料', code: 'CL000233', qty: 8, loss: 2 },
           { kind: '服务', code: 'SV000004', qty: 1 },
         ],
       },
       {
         v: 'V1.1', st: '历史', created: '2026-05-11', refs: 0, lines: [
-          { kind: '设备', code: 'EQ000001', qty: 1 },
-          { kind: '设备', code: 'EQ000002', qty: 16 },
-          { kind: '材料', code: 'CL000233', qty: 6, loss: 2 },
+          { kind: '物料', code: 'EQ000001', qty: 1 },
+          { kind: '物料', code: 'EQ000002', qty: 16 },
+          { kind: '物料', code: 'CL000233', qty: 6, loss: 2 },
         ],
       },
     ],
@@ -2212,9 +2666,9 @@ export const RECIPES: Record<string, { pid: string; cur: string; versions: Recip
     pid: 'CP000042', cur: 'V1.0', versions: [
       {
         v: 'V1.0', st: '生效', created: '2026-06-15', refs: 3, lines: [
-          { kind: '材料', code: 'CL000158', qty: 1, loss: 1 },
-          { kind: '材料', code: 'CL000231', qty: 2, loss: 1 },
-          { kind: '材料', code: 'CL000232', qty: 1, loss: 1 },
+          { kind: '物料', code: 'CL000158', qty: 1, loss: 1 },
+          { kind: '物料', code: 'CL000231', qty: 2, loss: 1 },
+          { kind: '物料', code: 'CL000232', qty: 1, loss: 1 },
           { kind: '服务', code: 'SV000008', qty: 1 },
         ],
       },
@@ -2224,12 +2678,24 @@ export const RECIPES: Record<string, { pid: string; cur: string; versions: Recip
     pid: 'CP000043', cur: 'V1.1', versions: [
       {
         v: 'V1.1', st: '生效', created: '2026-07-20', refs: 0, lines: [
-          { kind: '材料', code: 'CL000201', qty: 6, loss: 2 },
-          { kind: '材料', code: 'CL000234', qty: 1, loss: 2 },
+          { kind: '物料', code: 'CL000201', qty: 6, loss: 2 },
+          { kind: '物料', code: 'CL000234', qty: 1, loss: 2 },
           { kind: '服务', code: 'SV000004', qty: 1 },
         ],
       },
-      { v: 'V1.0', st: '历史', created: '2026-04-02', refs: 0, lines: [{ kind: '材料', code: 'CL000201', qty: 6, loss: 2 }] },
+      { v: 'V1.0', st: '历史', created: '2026-04-02', refs: 0, lines: [{ kind: '物料', code: 'CL000201', qty: 6, loss: 2 }] },
+    ],
+  },
+  /* D1：复合套件 BOM 含 物料(报警主机) + 服务(安装调试) + 软件(云平台年费) 三类 */
+  CP000044: {
+    pid: 'CP000044', cur: 'V1.0', versions: [
+      {
+        v: 'V1.0', st: '生效', created: '2026-09-15', refs: 0, lines: [
+          { kind: '物料', code: 'EQ000001', qty: 1 },
+          { kind: '服务', code: 'SV000004', qty: 1 },
+          { kind: '软件', code: 'SW000001', qty: 1 },
+        ],
+      },
     ],
   },
 };
@@ -2247,7 +2713,7 @@ export const serviceCost = (code: string, items?: Item[]) => {
 };
 
 export type RecipeCost = {
-  /** 材料小计（材料 + 设备行，自动按引用单价合计） */
+  /** 材料小计（物料行，自动按引用单价合计） */
   mat: number;
   /** 人工小计（服务行的人工构成 + 嵌套子套件的人工部分） */
   labor: number;
@@ -2267,7 +2733,7 @@ export type RecipeSource = {
   recipes?: Record<string, { pid: string; cur: string; versions: RecipeVersion[] }>;
 };
 
-/** 配方成本核算：材料小计 / 人工小计 / 套件成本 / 对外价 / 毛利率 */
+/** 配置成本核算：材料小计 / 人工小计 / 套件成本 / 对外价 / 毛利率 */
 export function recipeCost(pid: string, ver?: string, opts?: RecipeSource): RecipeCost {
   const src = opts?.recipes ?? RECIPES;
   const R = src[pid];
@@ -2287,6 +2753,9 @@ export function recipeCost(pid: string, ver?: string, opts?: RecipeSource): Reci
       mat += sub.mat * l.qty;
       labor += sub.labor * l.qty;
       if (sub.short > 0) short += 1;
+    } else if (l.kind === '软件') {
+      /* 软件 = 许可 / 订阅费：按引用价直接计入材料成本，无损耗、无实物库存校验 */
+      mat += (l.lockedPrice ?? ref.price) * l.qty;
     } else {
       const p = l.lockedPrice ?? ref.price;
       mat += p * l.qty * (1 + (l.loss ?? 0) / 100);
@@ -2300,18 +2769,19 @@ export function recipeCost(pid: string, ver?: string, opts?: RecipeSource): Reci
   return { mat, labor, total, sale, gross, short, lineCnt: v.lines.length, miss };
 }
 
-/** 兼容旧调用名：原「BOM 成本」= 配方成本 */
+/** 兼容旧调用名：原「BOM 成本」= 配置成本 */
 export const bomCost = recipeCost;
 
 /**
- * 主数据参考价 → 报价成本基准（不含税口径）。四类口径互不相同，禁止无差别「÷1.13」：
- *   · 材料 / 设备：price = 采购含税价                → ÷(1+13%) 还原为不含税成本
+ * 主数据参考价 → 报价成本基准（不含税口径）。三类口径互不相同，禁止无差别「÷1.13」：
+ *   · 物料：price = 采购含税价                → ÷(1+13%) 还原为不含税成本
  *   · 服务      ：price = 人工合计 + 耗材合计（人工无进项税）→ 参考价本身即成本，直接取用
- *   · 套件      ：price === sale = 对外价（≠ 成本）  → 取配方展开成本（配方内材料行为含税价）÷(1+13%)
+ *   · 套件      ：price === sale = 对外价（≠ 成本）  → 取配置展开成本（配置内材料行为含税价）÷(1+13%)
  * 报价工作台 / 投标成本测算 / 项目用料共用此函数，保证「同一物料同一成本口径」。
  */
 export const itemCostBase = (m: Item): number => {
-  if (m.ty === '服务') return m.price;
+  /* 服务 / 软件：参考价本身即成本（人工无进项税；软件按 6% 现代服务口径直接取价，不除税） */
+  if (m.ty === '服务' || m.ty === '软件') return m.price;
   const rate = (m.taxRate ?? 13) / 100;
   if (m.ty === '套件') {
     const c = recipeCost(m.code);
@@ -2324,14 +2794,28 @@ export const itemCostBase = (m: Item): number => {
 export const itemTaxRate = (m: Item) => m.taxRate ?? 13;
 
 /**
- * 强制认证继承：套件 / 服务自身不发证，但配方（含耗材）中任一硬件在强制目录内即继承。
+ * 存货单位成本（元 / 计量单位 · 移动加权平均）：存货金额 ÷ 结余。
+ * 无库存或无金额时回落为不含税参考价（itemCostBase），保证首次领用也有成本可结转。
+ * 领用结转、退料回冲、盘点差异一律取这个单价 —— 成本口径单点，不在各作业里另算一套。
+ */
+export const stockUnitCost = (m: Item): number => {
+  if (m.stock > 0 && m.stockAmt != null && m.stockAmt > 0) return m.stockAmt / m.stock;
+  return itemCostBase(m);
+};
+
+/** 含税单价 → 不含税金额（入库计存货用）：禁止各处硬编码 ÷1.13，税率取 Item.taxRate */
+export const toBaseAmt = (m: Item, gross: number): number =>
+  Math.round(gross / (1 + itemTaxRate(m) / 100));
+
+/**
+ * 强制认证继承：套件 / 服务自身不发证，但配置（含耗材）中任一硬件在强制目录内即继承。
  * 用于主数据列表的「强制（继承）」徽标 —— 与合规台账同源，不额外维护。
  */
 export const inheritsMand = (code: string): boolean => {
   const it = itemByCode(code);
   if (!it) return false;
-  /* 材料 / 设备：目录派生的要求 + 人工收紧（Item.mand），与 itemNeedCCC 同口径 */
-  if (it.ty === '材料' || it.ty === '设备') return itemNeedCCC(it);
+  /* 物料：目录派生的要求 + 人工收紧（Item.mand），与 itemNeedCCC 同口径 */
+  if (it.ty === '物料') return itemNeedCCC(it);
   const codes: string[] = [];
   if (it.consumables) it.consumables.forEach((c) => codes.push(c.code));
   const R = RECIPES[code];
@@ -2348,7 +2832,7 @@ export const suggestSale = (cost: number, targetGross = 25) =>
 
 /* ============================ 变更日志（主数据留痕） ============================ */
 export const CHANGE_LOGS = [
-  { t: '2026-09-21 09:12', who: '王敏', obj: '分类目录', act: '新增子分类「管阀件」于 材料目录 / 消防水', tone: 'blue' as const },
+  { t: '2026-09-21 09:12', who: '王敏', obj: '分类目录', act: '新增子分类「管阀件」于 物料目录 / 消防水', tone: 'blue' as const },
   { t: '2026-09-20 16:40', who: '徐工', obj: '产品 CP000041', act: 'BOM 升级 V1.1 → V1.2（旧版快照保留）', tone: 'orange' as const },
   { t: '2026-09-19 11:05', who: '张仓', obj: '材料 CL000226', act: '安全库存 15 → 15（确认），单位改为「套」', tone: 'gray' as const },
   { t: '2026-09-18 15:22', who: '王敏', obj: '认证标记', act: '新增「型式检验报告」类型，适用消防产品', tone: 'green' as const },
@@ -2356,7 +2840,7 @@ export const CHANGE_LOGS = [
   { t: '2026-09-15 09:30', who: '何总', obj: '价格浮率', act: '消防电整体浮率 25% → 24%（区域上浮规则不变）', tone: 'orange' as const },
 ];
 
-/* 材料 / 设备 / 服务 / 套件已合并为统一主数据 ITEMS（见上方「统一主数据」段）。 */
+/* 物料 / 服务 / 软件 / 套件已合并为统一主数据 ITEMS（见上方「统一主数据」段）。 */
 
 /* ============================ 发票（FP + 6 位流水） ============================ */
 export const INVOICES = [
@@ -2372,8 +2856,10 @@ export const APPROVALS = [
   // M29：node 为 0-based 审批链下标（0 = 发起），node > 1 表示已有决策节点通过 → 状态须为「审批中」而非「待审批」
   // cc = 抄送人列表（知会性质，不占待办；参考《审批中心》四 Tab 口径之「抄送我的」）
   { id: 'SP000008', ap: '蓝峰', type: '报价审批', obj: '昆明市第一人民医院住院楼消防升级报价', ref: 'BJ000011 报价单 V2', amt: 4800000, time: '2026-09-24 10:24', status: '审批中', level: '总经理', node: 2, reason: '', cc: ['李思敏', '蓝峰'] },
+  { id: 'SP000010', ap: '李思敏', type: '合同审批', obj: '丽江景区智慧消防平台合同（补充协议）', ref: 'HT000012 销售合同', amt: 1200000, time: '2026-09-23 16:20', status: '已通过', level: '分管副总', node: 2, reason: '', cc: ['蓝峰'] },
   { id: 'SP000007', ap: '赵薇', type: '合同审批', obj: '楚雄州人民医院消防维护保养合同（2027）', ref: 'WB000003 维护保养合同', amt: 960000, time: '2026-09-23 09:41', status: '待审批', level: '部门负责人', node: 1, reason: '', cc: ['李思敏'] },
   { id: 'SP000006', ap: '蓝峰', type: '变更审批', obj: '昆明万达广场消防改造 · 设计变更（增机房气体灭火）', ref: 'BG000009 变更单', amt: 80000, time: '2026-09-22 16:05', status: '待审批', level: '部门负责人', node: 1, reason: '', cc: [] },
+  { id: 'SP000009', ap: '陈静', type: '付款申请', obj: '劳务分包付款（喷淋安装）', ref: 'PF000033 付款单', amt: 180000, time: '2026-09-22 11:05', status: '已通过', level: '部门负责人', node: 1, reason: '', cc: [] },
   { id: 'SP000005', ap: '陈静', type: '付款申请', obj: '消防设备采购付款（报警系统）', ref: 'PF000031 付款单', amt: 258000, time: '2026-09-21 14:32', status: '待审批', level: '分管副总', node: 1, reason: '', cc: ['蓝峰'] },
   { id: 'SP000004', ap: '蓝峰', type: '合同审批', obj: '昆明万达广场消防改造工程合同', ref: 'HT000009 销售合同', amt: 3280000, time: '2026-09-20 11:18', status: '已通过', level: '总经理', node: 3, reason: '', cc: ['李思敏', '蓝峰'] },
   { id: 'SP000003', ap: '赵薇', type: '报价审批', obj: '柳州钢铁厂区消防管网改造报价', ref: 'BJ000001 报价单 V2', amt: 5600000, time: '2026-09-19 15:50', status: '已通过', level: '总经理', node: 3, reason: '', cc: ['蓝峰'] },
@@ -2417,7 +2903,7 @@ export const DOCS = [
   { id: 'DOC0014', name: '营业执照-云南诺安消防工程有限公司.pdf', cat: '资质证照', sub: '营业执照', type: '营业执照', proj: '', contract: '', stage: '投标', by: '行政', date: '2026-03-02', size: '1.1 MB', need: false, ver: 'V1', status: '已归档', tags: ['公司', '三证合一'], summary: '统一社会信用代码 91530100XXXX，经营范围含消防设施工程施工。', dl: 210, vis: '全员可见' },
   { id: 'DOC0015', name: '消防设施工程专业承包一级资质.pdf', cat: '资质证照', sub: '资质证书', type: '资质证书', proj: '', contract: '', stage: '投标', by: '行政', date: '2026-04-18', size: '980 KB', need: false, ver: 'V1', status: '已归档', tags: ['一级资质', '投标必备'], summary: '证书编号 D2-XXXX，有效期至 2029-04-17；投标资格审查必备。', dl: 188, vis: '全员可见' },
   { id: 'DOC0016', name: '一级注册消防工程师-蓝峰.pdf', cat: '资质证照', sub: '人员证书', type: '人员证书', proj: '', contract: '', stage: '投标', by: '行政', date: '2026-05-06', size: '640 KB', need: false, ver: 'V1', status: '已归档', tags: ['注册消防工程师', '蓝峰'], summary: '注册编号 XF2026XXXX，注册有效期至 2029-05-05。', dl: 33, vis: '仅上传者与管理员' },
-  { id: 'DOC0017', name: '安全生产许可证.pdf', cat: '资质证照', sub: '安全生产许可证', type: '安全生产许可证', proj: '', contract: '', stage: '投标', by: '行政', date: '2026-06-11', size: '720 KB', need: false, ver: 'V1', status: '已归档', tags: ['安许', '到期预警'], summary: '编号（云）JZ安许证〔2026〕XXXX，有效期至 2027-06-10。', dl: 96, vis: '全员可见' },
+  { id: 'DOC0017', name: '安全生产许可证.pdf', cat: '资质证照', sub: '安全生产许可证', type: '安全生产许可证', proj: '', contract: '', stage: '投标', by: '行政', date: '2026-06-11', size: '720 KB', need: false, ver: 'V1', status: '已归档', tags: ['安许', '资质证照'], summary: '编号（云）JZ安许证〔2026〕XXXX，有效期至 2027-09-10。', dl: 96, vis: '全员可见' },
   { id: 'DOC0018', name: '答疑澄清函-昆明万达广场（第 02 号）.pdf', cat: '招投标', sub: '答疑澄清', type: '答疑澄清', proj: 'XM000123', contract: '', stage: '投标', by: '蓝峰', date: '2026-09-10', size: '460 KB', need: false, ver: 'V1', status: '已归档', tags: ['万达', '答疑'], summary: '招标人回复：报警主机品牌可替换同等档次；工期不可顺延。', dl: 16, vis: '项目成员' },
   { id: 'DOC0019', name: '补充协议-增项报警点位 120 个.pdf', cat: '合同协议', sub: '补充协议', type: '补充协议', proj: 'XM000123', contract: 'HT000009', stage: '施工', by: '蓝峰', date: '2026-09-18', size: '1.6 MB', need: true, ver: 'V1', status: '待审核', tags: ['增项', '变更', '待审'], summary: '发包方书面确认增补报警点位 120 个，增项金额 12.8 万，走变更审批。', dl: 9, vis: '项目成员' },
   { id: 'DOC0020', name: '施工组织设计-昆明万达广场消防改造.pdf', cat: '施工过程', sub: '施工组织设计', type: '施工组织设计', proj: 'XM000123', contract: '', stage: '施工', by: '张工', date: '2026-09-13', size: '9.4 MB', need: true, ver: 'V2', status: '已归档', tags: ['万达', '专项方案'], summary: '含进度横道图、劳动力计划、动火作业专项方案与应急预案。', dl: 52, vis: '项目成员' },
@@ -2482,7 +2968,7 @@ export const RISKS = [
   { tone: 'orange', t: '已开票未到账 · 昆明万达广场', d: '进度款 40% 已开票未到账 · 账龄 75 天（60-90 天档）· ¥33.75 万', amt: 337500, owner: '蓝峰' },
   { tone: 'red', t: '成本超支 · XM000123 昆明万达广场', d: '实际成本 142.30 万超立项预算 130 万 · 超支 ¥12.3 万（9.5%）', amt: 123000, owner: '张工' },
   { tone: 'orange', t: '进度黄警 · XM000123 昆明万达广场', d: '实际 70% vs 计划应到 82% · 偏差 -12%（≥10% 黄警）', amt: 0, owner: '张工' },
-  { tone: 'red', t: '安全生产许可证已过期', d: 'ZS000044 · 已过期 · 全部投标废标，先续期再投标', amt: 0, owner: '行政' },
+  { tone: 'orange', t: '施工资质临期 · ZS000035', d: '消防设施工程专业承包（二级）2026-11-05 到期 · 剩 46 天 · 影响投标资格引用', amt: 0, owner: '行政' },
   { tone: 'orange', t: '无合同施工 · XM000098 酒店应急抢修', d: '已施工 68 天仍未补签合同 · ¥18.6 万成本无归口', amt: 186000, owner: '周斌' },
   { tone: 'gray', t: '沉默客户 · 昆明滇池度假区', d: '92 天未跟进 · 历史成交 ¥180 万', amt: 1800000, owner: '刘宇' },
 ];
@@ -2604,7 +3090,7 @@ export function addDays(ds: string, n: number): string {
 }
 
 /* ==================================================================
- * 材料 / 产品主数据 · 配套数据集
+ * 物料 / 服务与套件主数据 · 配套数据集
  * 说明：以下数据集原先硬编码在 MaterialPage 页内（无法溯源），
  *       现已下沉到数据层，使页面展示的每一条记录都可追溯到明确数据源。
  * ================================================================== */
@@ -2629,7 +3115,7 @@ const MAKER_LEGAL: Record<string, string> = {
   泰和安: '泰和安消防科技股份有限公司',
   北大青鸟: '北大青鸟环宇消防设备股份有限公司',
 };
-/** 可入库品清单（材料 + 设备）：品牌名录按此顺序轮换，材料在前，取值与 MATERIALS 自身序号一致 */
+/** 可入库品清单（物料）：品牌名录按此顺序轮换，材料在前，取值与 MATERIALS 自身序号一致 */
 const STOCKED_ITEMS = ITEMS.filter((i) => isStocked(i.ty));
 /** 型号 → 生产厂品牌（覆盖材料与设备；不在可入库品清单里则返回 ''，由调用方显式标明未备案） */
 const brandAt = (code: string) => {
@@ -2637,7 +3123,7 @@ const brandAt = (code: string) => {
   return k < 0 ? '' : BRAND_SEED[k % BRAND_SEED.length];
 };
 const SRC_SEED = ['采购合同沉淀', '询比价', '历史报价'];
-export const PRICE_LIB = MATERIALS.map((m, i) => {
+export const PRICE_LIB = [...MATERIALS, ...EQUIPMENTS].map((m, i) => {
   const dev = [-14.2, -8.5, -3.1, 0, 2.4, 6.8, 11.5, -6.2, 9.3, -2.0, 4.1, 13.6, -9.8][i % 13];
   return {
     code: m.code, name: m.name, spec: m.spec, unit: m.unit,
@@ -2655,18 +3141,18 @@ export const PRICE_LIB = MATERIALS.map((m, i) => {
 /** 仓库作业流水：入库 / 领用 / 调拨 / 退料 / 盘点 */
 export type FlowRow = { t: string; type: string; no: string; mat: string; qty: string; wh: string; by: string };
 export const FLOW_ROWS: FlowRow[] = [
-  { t: '2026-09-19 16:42', type: '入库', no: 'RK20260919008', mat: '镀锌钢管 DN100', qty: '+600 米', wh: '主仓库', by: '张仓' },
-  { t: '2026-09-19 10:15', type: '领用', no: 'LY20260919012', mat: '喷淋头（上喷）68℃', qty: '-120 个', wh: '项目临时仓·××中心大厦', by: '李工' },
-  { t: '2026-09-18 15:30', type: '调拨', no: 'DB20260918003', mat: '桥架 200×100', qty: '200 米', wh: '主仓库 → 项目临时仓', by: '张仓' },
-  { t: '2026-09-18 09:08', type: '退料', no: 'TL20260918002', mat: '防火阀 FHF-400', qty: '+6 台', wh: '项目临时仓 → 主仓库', by: '王工' },
-  { t: '2026-09-17 17:20', type: '盘点', no: 'PD20260917001', mat: '应急照明灯具 ZF-JCZ', qty: '-4 套（差异）', wh: '主仓库', by: '张仓' },
-  { t: '2026-09-17 11:05', type: '入库', no: 'RK20260917007', mat: '火灾报警控制器 JB-QB-GST5000', qty: '+4 台', wh: '主仓库', by: '张仓' },
-  { t: '2026-09-16 14:50', type: '领用', no: 'LY20260916011', mat: '输入/输出模块 GST-LD-8300', qty: '-800 只', wh: '项目临时仓·××中心大厦', by: '李工' },
-  { t: '2026-09-16 08:40', type: '入库', no: 'RK20260916006', mat: '消火栓箱 SG24A65', qty: '+20 台', wh: '主仓库', by: '张仓' },
-  { t: '2026-09-15 16:12', type: '领用', no: 'LY20260915010', mat: '感烟探测器 JTY-GM-GST101', qty: '-60 只', wh: '项目临时仓·××中心大厦', by: '王工' },
-  { t: '2026-09-15 09:33', type: '盘点', no: 'PD20260915001', mat: '防火门（甲级）FM1021', qty: '+0（无差异）', wh: '主仓库', by: '张仓' },
-  { t: '2026-09-14 15:26', type: '调拨', no: 'DB20260914002', mat: '消防水泵接合器 SQX100', qty: '8 套', wh: '主仓库 → 项目临时仓', by: '张仓' },
-  { t: '2026-09-12 10:02', type: '入库', no: 'RK20260912005', mat: '气体灭火装置 GQQ70', qty: '+2 套', wh: '主仓库', by: '张仓' },
+  { t: '2026-09-19 16:42', type: '入库', no: 'RK000004', mat: '镀锌钢管 DN100', qty: '+600 米', wh: '主仓库', by: '张仓' },
+  { t: '2026-09-19 10:15', type: '领用', no: 'LY000003', mat: '喷淋头（上喷）68℃', qty: '-120 个', wh: '项目临时仓·××中心大厦', by: '李工' },
+  { t: '2026-09-18 15:30', type: '调拨', no: 'DB000002', mat: '桥架 200×100', qty: '200 米', wh: '主仓库 → 项目临时仓', by: '张仓' },
+  { t: '2026-09-18 09:08', type: '退料', no: 'TL000001', mat: '防火阀 FHF-400', qty: '+6 台', wh: '项目临时仓 → 主仓库', by: '王工' },
+  { t: '2026-09-17 17:20', type: '盘点', no: 'PD000002', mat: '应急照明灯具 ZF-JCZ', qty: '-4 套（差异）', wh: '主仓库', by: '张仓' },
+  { t: '2026-09-17 11:05', type: '入库', no: 'RK000003', mat: '火灾报警控制器 JB-QB-GST5000', qty: '+4 台', wh: '主仓库', by: '张仓' },
+  { t: '2026-09-16 14:50', type: '领用', no: 'LY000002', mat: '输入/输出模块 GST-LD-8300', qty: '-800 只', wh: '项目临时仓·××中心大厦', by: '李工' },
+  { t: '2026-09-16 08:40', type: '入库', no: 'RK000002', mat: '消火栓箱 SG24A65', qty: '+20 台', wh: '主仓库', by: '张仓' },
+  { t: '2026-09-15 16:12', type: '领用', no: 'LY000001', mat: '感烟探测器 JTY-GM-GST101', qty: '-60 只', wh: '项目临时仓·××中心大厦', by: '王工' },
+  { t: '2026-09-15 09:33', type: '盘点', no: 'PD000001', mat: '防火门（甲级）FM1021', qty: '+0（无差异）', wh: '主仓库', by: '张仓' },
+  { t: '2026-09-14 15:26', type: '调拨', no: 'DB000001', mat: '消防水泵接合器 SQX100', qty: '8 套', wh: '主仓库 → 项目临时仓', by: '张仓' },
+  { t: '2026-09-12 10:02', type: '入库', no: 'RK000001', mat: '气体灭火装置 GQQ70', qty: '+2 套', wh: '主仓库', by: '张仓' },
 ];
 export const FLOW_TONE: Record<string, string> = { 入库: 'green', 领用: 'blue', 退料: 'orange', 盘点: 'purple', 调拨: 'link' };
 
@@ -2695,6 +3181,28 @@ export const daysLeft = (d: string) => {
   return Math.round((a - b) / 86400000);
 };
 
+/**
+ * 有效期 → 预警档位快照（0 正常 / 30 / 60 / 90 天内到期）。
+ * ⚠️ `Cert.warnDays` 是**存储值**而非派生值 —— 续证 / 手工调期后必须一并重算，
+ * 否则「有效期已改到 2027-09，但 warnDays 还留着 60」会让全部临期提醒继续误报，
+ * 表现为「改了证书，提示还是不消失」。
+ */
+export const certWarnDays = (validTo: string) => {
+  const n = daysLeft(validTo);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  if (n <= 30) return 30;
+  if (n <= 60) return 60;
+  if (n <= 90) return 90;
+  return 0;
+};
+
+/** 有效期 → 状态枚举（与证书台账筛选项同口径；必须与 certWarnDays 同时回写，两者不可分开改） */
+export const certStatusOf = (validTo: string) => {
+  if (daysLeft(validTo) <= 0) return '已过期';
+  const w = certWarnDays(validTo);
+  return w === 0 ? '正常' : `${w} 天内到期`;
+};
+
 /** 询比价（状态机：询价中 → 已报价 → 已选定 → 已关闭；
  *  已选定后可「生成采购订单」→ 与入库衔接，闭环到库存。）
  *  行内 mats 引用主数据编码（服务 / 套件不进询价，只寻源可外采的硬件与服务） */
@@ -2702,8 +3210,10 @@ export type RfqRow = {
   id: string; mats: { code: string; name: string; qty: number; unit: string }[];
   needDate: string; deadline: string; status: string; invited: string[];
   quotes: Record<string, Record<string, number>>; picked?: string;
-  /** 已生成的采购订单（选定后由「生成采购订单」写入，与入库衔接） */
-  po?: { no: string; supplier: string; amt: number; date: string; status: '待到货' | '部分到货' | '已入库' };
+  /** D5：非最低价中标时强制填写的议价原因（留痕）；最低价中标留空 */
+  bidReason?: string;
+  /** 已生成的采购订单（选定后由「生成采购订单」写入，与入库衔接）。received 为已入库数量（可落地⑮分次入库） */
+  po?: { no: string; supplier: string; amt: number; date: string; status: '待到货' | '部分到货' | '已入库'; received?: number };
   /** 来源：手工发起 / 库存补齐（库存预警一键带出物料与缺口数量） */
   from?: string;
 };
@@ -2740,11 +3250,11 @@ export const RFQ_TONE: Record<string, string> = { 询价中: 'orange', 已报价
 
 /** 主数据操作日志（关键操作审计） */
 export const MAT_AUDIT_ROWS = [
-  { t: '2026-09-19 16:42', who: '张仓', role: '仓管员', act: '入库登记 RK20260919008 · 镀锌钢管 +600 米 · 金额计入 XM000123 项目成本' },
-  { t: '2026-09-19 10:15', who: '李工', role: '项目经理', act: '领用登记 LY20260919012 · 喷淋头 −120 个 · 出库不影响成本' },
-  { t: '2026-09-18 15:30', who: '张仓', role: '仓管员', act: '库存调拨 DB20260918003 · 桥架 200 米（总量不变）' },
-  { t: '2026-09-18 09:08', who: '王工', role: '施工员', act: '退料登记 TL20260918002 · 防火阀 +6 台 · 回冲项目成本' },
-  { t: '2026-09-17 17:20', who: '张仓', role: '仓管员', act: '库存盘点 PD20260917001 · 生成《盘点调整单》差异 −4 套' },
+  { t: '2026-09-19 16:42', who: '张仓', role: '仓管员', act: '入库登记 RK000004 · 镀锌钢管 +600 米 · 金额计入 XM000123 项目成本' },
+  { t: '2026-09-19 10:15', who: '李工', role: '项目经理', act: '领用登记 LY000003 · 喷淋头 −120 个 · 结转至项目成本' },
+  { t: '2026-09-18 15:30', who: '张仓', role: '仓管员', act: '库存调拨 DB000002 · 桥架 200 米（总量不变）' },
+  { t: '2026-09-18 09:08', who: '王工', role: '施工员', act: '退料登记 TL000001 · 防火阀 +6 台 · 回冲项目成本' },
+  { t: '2026-09-17 17:20', who: '张仓', role: '仓管员', act: '库存盘点 PD000002 · 生成《盘点调整单》差异 −4 套' },
   { t: '2026-09-17 11:02', who: '李思敏', role: '商务合同管理员', act: '材料价格调整 · 火灾报警控制器 ¥6,500 → ¥6,800（变更单 MD000019）' },
   { t: '2026-09-16 14:50', who: '李思敏', role: '商务合同管理员', act: '发起询比价 XJ20260919002 · 邀约 2 家供应商 · 生成一人一码二维码' },
   { t: '2026-09-15 09:33', who: '王敏', role: '主数据管理员', act: '安全线调整 · 防火门（甲级）15 → 20（留痕：谁/何时/旧值→新值）' },
@@ -2761,7 +3271,7 @@ export const PROJ_WH = '项目临时仓·××中心大厦';
 
 /**
  * 期初仓库分布（库存的唯一事实源）。
- * 语义：每个「有库存」主数据（材料 / 设备）的 stock 总额按「主仓库 + 项目临时仓」建账，
+ * 语义：每个「有库存」主数据（物料）的 stock 总额按「主仓库 + 项目临时仓」建账，
  * Σ 各仓 = stock。之后所有库存变动只由作业流水驱动，不再按比例硬拆。
  * 服务与套件不建库存账（isStocked 过滤），从数据层就排除了「给服务记库存」这类错账。
  */
@@ -3015,13 +3525,13 @@ export function arrivalReqOf(it?: Item): string[] {
 /** 作业类型 → 单号前缀 */
 export const OP_PREFIX: Record<string, string> = { 入库: 'RK', 领用: 'LY', 退料: 'TL', 盘点: 'PD', 调拨: 'DB' };
 
-/** 作业单号：前缀 + 6 位流水（OP_PREFIX + opNo 生成） */
-export const opNo = (type: string, date: string, seq: number) =>
-  `${OP_PREFIX[type] || 'QT'}${date.replace(/-/g, '')}${String(seq).padStart(3, '0')}`;
+/** 作业单号：前缀 + 6 位流水（OP_PREFIX + opNo 生成，如 RK000001；日期参数保留仅为签名兼容） */
+export const opNo = (type: string, _date: string, seq: number) =>
+  `${OP_PREFIX[type] || 'QT'}${String(seq).padStart(6, '0')}`;
 
-/** 采购订单号：CG + 日期 + 三位流水（询比价「已选定」后生成，与入库衔接） */
-export const poNo = (date: string, seq: number) =>
-  `CG${date.replace(/-/g, '')}${String(seq).padStart(3, '0')}`;
+/** 采购订单号：CG + 6 位流水（询比价「已选定」后生成，与入库衔接，如 CG000001） */
+export const poNo = (_date: string, seq: number) =>
+  `CG${String(seq).padStart(6, '0')}`;
 
 /* ============================ 身份标识 · 二期：验真 / 回查 / 外部服务 ============================
  * 一期只采录了「企业侧镜像」（号段进了哪个项目、哪个部位）。

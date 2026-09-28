@@ -16,9 +16,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Banner, Btn, Card, ChainBar, DataTable, Drawer, EntityLink, Field, KvGrid, ListToolbar, Modal,
-  Op, OpNone, OpSep, PageHead, TableFoot, Tag, Tabs, Timeline, Tile, Tip, useToast, Code, IdCell, pressProps,} from '../components/ui';
+  Op, OpMore, OpNone, OpSep, PageHead, TableFoot, Tag, Tabs, Timeline, Tile, Tip, useToast, Code, IdCell, pressProps,
+  CustomerPicker, type CustOpt,} from '../components/ui';
 import {
   OPP_STATUS, LOSE_REASONS, isBidClosed, isOppClosed, fmtWan, canSeeMoney, TODAY, oppStageTone,
+  CUSTOMERS, CUST_GRADES, CUST_GRADE_LABEL, CUST_INDUSTRIES, CUST_REGIONS, CUST_SOURCES, CUST_STATUS_NEW,
+  getOppFollowDays,
 } from '../components/data';
 import {
   consumeFocus, setFocus, subscribeStore, getOpps, getOppLogs, getOppClose,
@@ -28,8 +31,9 @@ import {
   setPendingContract, setPendingProject, setPendingOppQuote,
 } from '../components/store';
 import { Ico } from '../components/icons';
+import { ExportButton, ExportDialog, useExport, getUserName, type ExportField } from '../components/export';
 
-const STATUS_TONE: Record<string, 'blue' | 'green' | 'red'> = { 跟进中: 'blue', 赢单: 'green', 输单: 'red' };
+const STATUS_TONE: Record<string, 'blue' | 'green' | 'gray'> = { 跟进中: 'blue', 赢单: 'green', 输单: 'gray' };
 const BIZ_NAME: Record<string, string> = { GC: '消防工程', WB: '维护保养', JC: '检测', RJ: '软件研发', QT: '其他' };
 const SYS_TYPES = ['火灾自动报警系统', '自动喷淋灭火系统', '防排烟系统', '应急照明与疏散', '气体灭火系统', '消防水系统', '全系统'];
 /** 商机来源（FR-OPP-003） */
@@ -77,6 +81,20 @@ const svySeed = (o: O): Svy[] => (getOppStageIdx(o.stage) >= getOppGateIdx() ? [
   quoteId: 'BJ000011',
 }] : []);
 
+/** 工程量项模板库（mock · 常用消防工程分项）：勾选后带出名称+单位+参考单价，数量现场手填 */
+const QTY_TPL = [
+  { n: '点型感烟火灾探测器', u: '只', p: 85 },
+  { n: '点型感温火灾探测器', u: '只', p: 65 },
+  { n: '喷洒头 ZSTX-15/68℃', u: '个', p: 12 },
+  { n: '火灾报警控制器（联动型）', u: '台', p: 12000 },
+  { n: '消防水泵接合器 SQD150-A', u: '套', p: 1800 },
+  { n: '消防广播扬声器', u: '只', p: 120 },
+  { n: '手动火灾报警按钮', u: '只', p: 45 },
+  { n: '电气火灾监控探测器', u: '只', p: 260 },
+  { n: '消防应急照明灯具', u: '盏', p: 95 },
+  { n: '防火卷帘门（含控制器）', u: '樘', p: 3500 },
+];
+
 /** 关联报价：按商机派生的示意数据（多版本口径，与列表「报价 N 版」同源） */
 const relQuotes = (o: O) => o.quotes > 0
   ? [{ id: 'BJ000011', ver: 'V2', amt: 4800000, status: '待审批', date: o.last }]
@@ -111,6 +129,7 @@ export default function OppPage({ go, role, nav }: { go: (p: string) => void; ro
   const [owner, setOwner] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const [oppSel, setOppSel] = useState<string[]>([]);
 
   const [detail, setDetail] = useState<O | null>(null);
   const [dTab, setDTab] = useState('overview');
@@ -129,6 +148,9 @@ export default function OppPage({ go, role, nav }: { go: (p: string) => void; ro
   const [svyOpen, setSvyOpen] = useState<{ o: O; s: Svy | null } | null>(null);
   const [svyForm, setSvyForm] = useState<Svy>({ id: '', at: TODAY, persons: [], sys: '', desc: '', photos: 0, rows: [] });
   const [svyMap, setSvyMap] = useState<Record<string, Svy[]>>({});
+  /* 工程量项模板库勾选：勾选常用分项后带出名称+单位+参考单价，数量现场手填 */
+  const [svyTplOpen, setSvyTplOpen] = useState(false);
+  const [svyTplSel, setSvyTplSel] = useState<number[]>([]);
   const [cvtHtOpen, setCvtHtOpen] = useState<O | null>(null);
   const [cvtXmOpen, setCvtXmOpen] = useState<O | null>(null);
   const [noContractReason, setNoContractReason] = useState('');
@@ -153,8 +175,20 @@ export default function OppPage({ go, role, nav }: { go: (p: string) => void; ro
   const [nNote, setNNote] = useState('');
   const [l1Open, setL1Open] = useState(false);
   const [custNew, setCustNew] = useState(false);
+  /* 弹层新建客户：字段与默认值对齐「客户管理 → 新增客户」的必填集（名称/联系人/电话/区域/分级/来源/状态） */
   const [custName, setCustName] = useState('');
-  const [custInd, setCustInd] = useState('医疗');
+  const [custContact, setCustContact] = useState('');
+  const [custPhone, setCustPhone] = useState('');
+  const [custRegion, setCustRegion] = useState('昆明');
+  const [custGrade, setCustGrade] = useState('C');
+  const [custSource, setCustSource] = useState('自主开发');
+  const [custStatus, setCustStatus] = useState('潜在');
+  const [custIndustry, setCustIndustry] = useState('商业综合体');
+  const [cErr, setCErr] = useState<Record<string, string>>({});
+  const [cDup, setCDup] = useState('');
+  /** 弹层新建的客户：并入选择器候选，让「自动回填并选中」在界面上真正可见（会话内有效） */
+  const [custExtra, setCustExtra] = useState<CustOpt[]>([]);
+  const custOpts = useMemo(() => (custExtra.length ? [...custExtra, ...CUSTOMERS] : undefined), [custExtra]);
 
   /** 重复不拦截，仅黄字提醒 */
   const dupHit = useMemo(() => {
@@ -162,6 +196,38 @@ export default function OppPage({ go, role, nav }: { go: (p: string) => void; ro
     if (k.length < 4) return [] as O[];
     return opps.filter((o) => o.name.includes(k) || k.includes(o.name.slice(0, 8)));
   }, [nName]);
+
+  /* 客户档案唯一性：与「客户管理 → 新增客户」同一算法（剥离行业后缀后取前 4 字比对），只提示不拦截 */
+  const CUST_SUFFIX = /有限公司|股份|集团|管理|科技|医院|中学|大学/g;
+  const onCustName = (v: string) => {
+    setCustName(v);
+    const key = v.replace(CUST_SUFFIX, '').slice(0, 4);
+    const hit = v.length >= 4 && CUSTOMERS.find((c) => c.name.replace(CUST_SUFFIX, '').slice(0, 4) === key);
+    setCDup(hit ? `与「${hit.name}」相似度 ≥80%，可能重复：查看 / 合并 / 仍要新建` : '');
+  };
+
+  /** 弹层建档：校验口径与客户管理一致，通过后回填并选中当前商机的客户 */
+  const doCreateCust = () => {
+    const e: Record<string, string> = {};
+    if (!custName.trim()) e.name = '请填写客户名称';
+    if (!custContact.trim()) e.contact = '联系人姓名必填（≤20 字）';
+    if (!custPhone.trim()) e.phone = '联系电话必填（重复将触发撞单提示）';
+    if (!custRegion) e.region = '区域必填';
+    setCErr(e);
+    if (Object.keys(e).length) { toast('表单校验未通过 · 请检查红框字段', 'err'); return; }
+    /* 新客户落进候选集，否则 CustomerPicker 解析不到这个值，界面只会显示占位符 */
+    const newId = `KH${TODAY.replace(/-/g, '')}${String(CUSTOMERS.length + custExtra.length + 1).padStart(3, '0')}`;
+    setCustExtra((a) => [{
+      id: newId, name: custName.trim(), grade: custGrade, status: custStatus,
+      industry: custIndustry, region: custRegion,
+    }, ...a]);
+    setNCust(custName.trim());
+    setCustNew(false);
+    toast(`客户「${custName.trim()}」已建档（${newId}）并回填选中（档案强校验通过）`);
+    setCustName(''); setCustContact(''); setCustPhone(''); setCustRegion('昆明');
+    setCustGrade('C'); setCustSource('自主开发'); setCustStatus('潜在'); setCustIndustry('商业综合体');
+    setCErr({}); setCDup('');
+  };
 
   const rows = useMemo(() => {
     const list = opps.filter((o) =>
@@ -236,6 +302,17 @@ export default function OppPage({ go, role, nav }: { go: (p: string) => void; ro
     persons: f.persons.includes(p) ? f.persons.filter((x) => x !== p) : (f.persons.length >= 5 ? (toast('勘察人员最多 5 人', 'err'), f.persons) : [...f.persons, p]),
   }));
   const setRow = (i: number, k: keyof QtyRow, v: string) => setSvyForm((f) => ({ ...f, rows: f.rows.map((r, ix) => (ix === i ? { ...r, [k]: v } : r)) }));
+  const openSvyTpl = () => { setSvyTplSel([]); setSvyTplOpen(true); };
+  const toggleTpl = (i: number) => setSvyTplSel((sel) => (sel.includes(i) ? sel.filter((x) => x !== i) : [...sel, i]));
+  const addTplRows = () => {
+    if (!svyTplSel.length) { toast('请先勾选要添加的工程量项', 'err'); return; }
+    setSvyForm((f) => ({ ...f, rows: [...f.rows, ...svyTplSel.map((i) => {
+      const t = QTY_TPL[i];
+      return { n: t.n, u: t.u, q: '', r: `参考单价¥${t.p}/${t.u}` } as QtyRow;
+    })] }));
+    toast(`已从模板库带入 ${svyTplSel.length} 项，请填写数量`);
+    setSvyTplOpen(false);
+  };
   const validSvy = () => {
     if (!svyForm.at) { toast('勘察时间必填', 'err'); return false; }
     if (svyForm.at > TODAY) { toast(`勘察时间不可晚于当前时间（${TODAY}）`, 'err'); return false; }
@@ -265,21 +342,39 @@ export default function OppPage({ go, role, nav }: { go: (p: string) => void; ro
     setSvyOpen(null);
   };
 
+  /* 统一导出：把原「一步直达 CSV」补全为标准弹窗流程；预计金额 / 加权金额为敏感字段 */
+  const exportFields: ExportField[] = [
+    { key: 'id', label: '商机编号' },
+    { key: 'name', label: '商机名称' },
+    { key: 'customer', label: '客户' },
+    { key: 'stage', label: '阶段' },
+    { key: 'status', label: '状态' },
+    { key: 'amt', label: '预计金额', sensitive: true },
+    { key: 'prob', label: '权重' },
+    { key: 'w', label: '加权金额', sensitive: true },
+    { key: 'owner', label: '负责人' },
+    { key: 'signDate', label: '预计签约日' },
+  ];
+  const exportApi = useExport({
+    pageKey: 'opp', pageName: '商机列表',
+    fields: exportFields, defaultFieldKeys: exportFields.map((f) => f.key),
+    totalCount: opps.length, filteredCount: rows.length, selectedCount: oppSel.length,
+    previewRows: rows.slice(0, 5),
+    userName: getUserName(role),
+    onExport: () => {},
+  });
+
   return (
     <>
       <PageHead
         title="商机管理"
         badges={<><Tag tone="gray">{stages.length} 阶段推进</Tag><Tag tone="blue">阶段可配置</Tag></>}
-        actions={<>
-          <Btn onClick={() => toast('商机列表已导出 CSV（含阶段 / 金额 / 权重 / 加权金额）')}>⇩ 导出 CSV</Btn>
-          <Btn kind="primary" onClick={() => setAddOpen(true)}>＋ 新建商机</Btn>
-        </>}
       />
 
       <div className="nc-tiles nc-tiles-5">
         <div className="nc-tile"><div className="nc-tile-label">在谈商机</div><div className="nc-tile-value">{active.length}</div><div className="nc-tile-sub">不含赢单 / 输单</div></div>
         <div className="nc-tile"><div className="nc-tile-label">在谈金额</div><div className="nc-tile-value nc-v-blue">{money ? fmtWan(active.reduce((s, o) => s + o.amt, 0)) : '—'}</div><div className="nc-tile-sub">含税未折权重</div></div>
-        <Tile label="加权金额" tone="orange" value={money ? fmtWan(weighted) : '—'} sub="用于经营测算"
+        <Tile label="加权金额" tone="blue" value={money ? fmtWan(weighted) : '—'} sub="用于经营测算"
           tip={<>
             <b>加权金额 = 金额 × 阶段权重</b><br />
             {stages.map((s) => `${s} ${stageW(s)}%`).join(' · ')}<br />
@@ -293,7 +388,7 @@ export default function OppPage({ go, role, nav }: { go: (p: string) => void; ro
             赢单后可一键转报价或转合同草稿，<b>转化不受阶段限制</b>。<br />
             推进 / 回退须填说明并留痕；赢单 / 输单为终态（输单必填原因）；终态仅管理员可重开，已转化不可重开；勘察生成报价后锁定只读（修改 = 新建一条）。
           </>} />
-        <div className="nc-tile"><div className="nc-tile-label">超 14 天未跟进</div><div className="nc-tile-value nc-v-red">{opps.filter((o) => o.lastDays > 14 && !isOppClosed(o)).length}</div><div className="nc-tile-sub">需立即跟进</div></div>
+        <div className="nc-tile"><div className="nc-tile-label">超 {getOppFollowDays()} 天未跟进</div><div className={`nc-tile-value${opps.filter((o) => o.lastDays > getOppFollowDays() && !isOppClosed(o)).length > 0 ? ' nc-v-red' : ''}`}>{opps.filter((o) => o.lastDays > getOppFollowDays() && !isOppClosed(o)).length}</div><div className="nc-tile-sub">需立即跟进</div></div>
       </div>
 
       <Card flush>
@@ -313,78 +408,105 @@ export default function OppPage({ go, role, nav }: { go: (p: string) => void; ro
                 ...OPP_STATUS.map((s) => ({ key: s, label: s, cnt: opps.filter((o) => o.status === s).length })),
               ],
             },
-            {
-              label: '类型', value: type, onChange: (k) => { setType(k); setPage(1); },
-              items: [
-                { key: '全部', label: '全部类型', cnt: opps.length },
-                ...['新建', '改造', '维护保养', '检测'].map((t) => ({ key: t, label: t, cnt: opps.filter((o) => o.type === t).length })),
-              ],
-            },
           ]}
-          children={more ? (
+          children={
             <div className="nc-ltrow" style={{ gap: 6, alignItems: 'center' }}>
-              <span className="nc-ltlbl">金额区间</span>
-              <input className="nc-input num" style={{ width: 88 }} value={amtMin} onChange={(e) => { setAmtMin(e.target.value); setPage(1); }} placeholder="最小" />
-              <span className="nc-muted nc-tiny">万元 ~</span>
-              <input className="nc-input num" style={{ width: 88 }} value={amtMax} onChange={(e) => { setAmtMax(e.target.value); setPage(1); }} placeholder="最大" />
-              <span className="nc-muted nc-tiny">万元</span>
-              <span className="nc-ltlbl" style={{ marginLeft: 14 }}>创建区间</span>
-              <input className="nc-input num" style={{ width: 132 }} type="date" value={from} onChange={(e) => { setFrom(e.target.value); setPage(1); }} />
-              <span className="nc-muted nc-tiny">~</span>
-              <input className="nc-input num" style={{ width: 132 }} type="date" value={to} onChange={(e) => { setTo(e.target.value); setPage(1); }} />
-              <span className="nc-tiny nc-muted" style={{ marginLeft: 'auto' }}>命中 <b>{rows.length}</b> 条 · 金额按万元输入</span>
+              <Btn onClick={() => setMore((v) => !v)}>{more ? '收起筛选 ▴' : '更多筛选 ▾'}</Btn>
+              {more && (<>
+                <span className="nc-ltlbl">类型</span>
+                <select className="nc-input" style={{ width: 120 }} value={type} onChange={(e) => { setType(e.target.value); setPage(1); }}>
+                  <option value="">全部类型</option>
+                  {['新建', '改造', '维护保养', '检测'].map((t) => <option key={t} value={t}>{t}</option>)}
+                </select>
+                <select className="nc-input" style={{ width: 130 }} value={owner} onChange={(e) => { setOwner(e.target.value); setPage(1); }}>
+                  <option value="">全部归属人</option>{['蓝峰', '李思敏', '王志海', '赵薇', '刘宇', '李慧敏'].map((s) => <option key={s}>{s}</option>)}
+                </select>
+                <span className="nc-ltlbl" style={{ marginLeft: 8 }}>金额区间</span>
+                <input className="nc-input num" style={{ width: 88 }} value={amtMin} onChange={(e) => { setAmtMin(e.target.value); setPage(1); }} placeholder="最小" />
+                <span className="nc-muted nc-tiny">万元 ~</span>
+                <input className="nc-input num" style={{ width: 88 }} value={amtMax} onChange={(e) => { setAmtMax(e.target.value); setPage(1); }} placeholder="最大" />
+                <span className="nc-muted nc-tiny">万元</span>
+                <span className="nc-ltlbl" style={{ marginLeft: 14 }}>创建区间</span>
+                <input className="nc-input num" style={{ width: 132 }} type="date" value={from} onChange={(e) => { setFrom(e.target.value); setPage(1); }} />
+                <span className="nc-muted nc-tiny">~</span>
+                <input className="nc-input num" style={{ width: 132 }} type="date" value={to} onChange={(e) => { setTo(e.target.value); setPage(1); }} />
+                <span className="nc-tiny nc-muted" style={{ marginLeft: 'auto' }}>命中 <b>{rows.length}</b> 条 · 金额按万元输入</span>
+              </>)}
             </div>
-          ) : undefined}
-          right={<>
-            <select className="nc-input" style={{ width: 130 }} value={owner} onChange={(e) => { setOwner(e.target.value); setPage(1); }}>
-              <option value="">全部归属人</option>{['蓝峰', '李思敏', '王志海', '赵薇', '刘宇', '李慧敏'].map((s) => <option key={s}>{s}</option>)}
-            </select>
-            <select className="nc-input" style={{ width: 140 }} value={sort} onChange={(e) => { setSort(e.target.value); setPage(1); }} title="排序">
-              {SORT_OPTS.map((s) => <option key={s} value={s}>{s}</option>)}
-            </select>
-            <Btn size="sm" onClick={() => setMore((v) => !v)}>{more ? '收起筛选 ▴' : '更多筛选 ▾'}</Btn>
-            <input className="nc-input nc-lt-search" value={kw} placeholder="搜索商机名称 / 客户 / 编号"
-              onChange={(e) => { setKw(e.target.value); setPage(1); }} />
-            <div className="nc-role-view">
-              <span className="nc-role-lbl">视图</span>
-              <Btn size="sm" kind={view === 'list' ? 'primary' : 'default'} onClick={() => setView('list')}>列表</Btn>
-              <Btn size="sm" kind={view === 'kanban' ? 'primary' : 'default'} onClick={() => setView('kanban')}>看板</Btn>
+          }
+          search={{ value: kw, onChange: setKw, placeholder: '搜索商机名称 / 客户 / 编号', width: 220 }}
+          onReset={() => {
+            setStage('全部'); setStatusF('全部'); setType('全部'); setKw(''); setOwner(''); setAmtMin(''); setAmtMax(''); setFrom(''); setTo(''); setSort(SORT_OPTS[0]); setPage(1); toast('筛选已重置');
+          }}
+          viewSwitch={
+            <div className="nc-seg">
+              <button type="button" className={`nc-seg-btn${view === 'list' ? ' is-on' : ''}`} onClick={() => setView('list')}>≡ 列表</button>
+              <button type="button" className={`nc-seg-btn${view === 'kanban' ? ' is-on' : ''}`} onClick={() => setView('kanban')}>▦ 看板</button>
             </div>
-            <Btn onClick={() => {
-              setStage('全部'); setStatusF('全部'); setType('全部'); setKw(''); setOwner(''); setAmtMin(''); setAmtMax(''); setFrom(''); setTo(''); setSort(SORT_OPTS[0]); setPage(1); toast('筛选已重置');
-            }}>重置</Btn>
-          </>}
+          }
+          echoItems={[
+            ...(stage !== '全部' ? [{ key: 'stage', label: `阶段：${stage}` }] : []),
+            ...(statusF !== '全部' ? [{ key: 'status', label: `状态：${statusF}` }] : []),
+            ...(type !== '全部' ? [{ key: 'type', label: `类型：${type}` }] : []),
+            ...(owner ? [{ key: 'owner', label: `归属人：${owner}` }] : []),
+            ...((amtMin || amtMax) ? [{ key: 'amt', label: `金额：${amtMin || 0} ~ ${amtMax || '不限'} 万` }] : []),
+          ]}
+          onEchoRemove={(key) => {
+            if (key === 'stage') setStage('全部');
+            else if (key === 'status') setStatusF('全部');
+            else if (key === 'type') setType('全部');
+            else if (key === 'owner') setOwner('');
+            else if (key === 'amt') { setAmtMin(''); setAmtMax(''); }
+          }}
+          onEchoClear={() => {
+            setStage('全部'); setStatusF('全部'); setType('全部'); setKw(''); setOwner(''); setAmtMin(''); setAmtMax(''); setFrom(''); setTo(''); setSort(SORT_OPTS[0]); setPage(1); toast('筛选已重置');
+          }}
+          actions={
+            <div style={{ display: 'flex', gap: 8 }}>
+              <ExportButton onClick={exportApi.trigger} selectedCount={oppSel.length} />
+              <Btn kind="primary" onClick={() => setAddOpen(true)}>＋ 新建商机</Btn>
+            </div>
+          }
         />
       </Card>
 
       {view === 'list' ? (
         <Card flush>
             <DataTable<O>
-              minWidth={1600}
+              selectable selected={oppSel}
+              onSelectAll={setOppSel}
+              onSelectRow={(id) => setOppSel((p) => p.includes(id) ? p.filter((x) => x !== id) : [...p, id])}
+              minWidth={1490}
               cols={[
-                { key: 'id', title: '商机编号', width: 104, render: (o) => <IdCell onClick={() => { setDetail(o); setDTab('overview'); }} title="查看商机详情">{o.id}</IdCell> },
-                { key: 'name', title: '商机名称', width: 220, render: (o) => (<div><div className="nc-td-main">{o.name}{isWonDeal(o.id) && <Tag tone="green">已成交</Tag>}</div><div className="nc-td-sub">{BIZ_NAME[o.biz]} · {o.type} · 报价 {o.quotes} 版</div></div>) },
+                { key: 'id', title: '商机编号', width: 104, hide: true, render: (o) => <IdCell onClick={() => { setDetail(o); setDTab('overview'); }} title="查看商机详情">{o.id}</IdCell> },
+                { key: 'name', title: '商机名称', width: 240, sticky: 'left', render: (o) => { const nameTags = [
+                    ...(isWonDeal(o.id) ? [{ k: 'won', label: '已成交', tone: 'green' as const }] : []),
+                    { k: 'biz', label: BIZ_NAME[o.biz], tone: 'gray' as const },
+                    { k: 'type', label: o.type, tone: 'blue' as const },
+                  ];
+                  const shown = nameTags.slice(0, 2);
+                  const rest = nameTags.slice(2);
+                  return (<div><div className="nc-td-main">{o.name} {shown.map((t) => <Tag key={t.k} tone={t.tone}>{t.label}</Tag>)}{rest.length > 0 && <Tag tone="gray">+{rest.length}</Tag>}</div></div>);
+                } },
                 { key: 'customer', title: '客户', width: 165, render: (o) => <span>{o.customer}</span> },
                 { key: 'stage', title: '阶段', width: 82, render: (o) => <Tag tone={oppStageTone(idxOf(o.stage))}>{o.stage}</Tag> },
                 { key: 'status', title: '状态', width: 78, render: (o) => <Tag tone={STATUS_TONE[o.status]}>{o.status}</Tag> },
                 { key: 'prob', title: '权重', width: 64, align: 'right', render: (o) => <span className="num">{stageW(o.stage)}%</span> },
-                { key: 'amt', title: '预计金额', width: 118, align: 'right', render: (o) => <b className="num">{money ? (o.amt ? fmtWan(o.amt) : '待定') : '—'}</b> },
+                { key: 'amt', title: '预计金额 ↕', width: 118, align: 'right', render: (o) => <b className="num">{money ? (o.amt ? fmtWan(o.amt) : '待定') : '—'}</b> },
                 { key: 'w', title: '加权金额', width: 112, align: 'right', render: (o) => <span className="num" style={{ color: 'var(--c-warning-deep)' }}>{money ? fmtWan(o.amt * (stageW(o.stage) || 0) / 100) : '—'}</span> },
-                { key: 'signDate', title: '预计签约', width: 106, render: (o) => o.signDate ? <span className={`num ${daysUntil(o.signDate) < 0 ? 'nc-v-red' : daysUntil(o.signDate) <= 30 ? 'nc-v-orange' : ''}`}>{o.signDate}</span> : <span style={{ color: 'var(--ink-3)' }}>待定</span> },
+                { key: 'signDate', title: '预计签约 ↕', width: 106, align: 'right', render: (o) => o.signDate ? <span className={`num ${daysUntil(o.signDate) < 0 ? 'nc-v-red' : daysUntil(o.signDate) <= 30 ? 'nc-v-orange' : ''}`} title={daysUntil(o.signDate) < 0 ? '预计签约日已逾期，请尽快推动签约' : daysUntil(o.signDate) <= 30 ? `距预计签约不足 ${daysUntil(o.signDate)} 天` : undefined}>{o.signDate}</span> : <span style={{ color: 'var(--ink-3)' }}>待定</span> },
                 { key: 'bids', title: '关联投标', width: 88, align: 'right', render: (o) => { const n = relBids(o).length; return n ? <span className="num">{n} 项</span> : <span style={{ color: 'var(--ink-3)' }}>—</span>; } },
                 { key: 'owner', title: '归属人', width: 76 },
-                { key: 'last', title: '最近跟进', width: 102, render: (o) => <span className="num" style={{ color: o.lastDays > 14 ? 'var(--c-danger)' : undefined }}>{o.last}{o.lastDays > 14 ? <> <Ico n="warning" size={12} style={{ color: 'var(--c-warning-mid)' }} /></> : null}</span> },
+                { key: 'last', title: '最近跟进', width: 102, align: 'right', render: (o) => <span className="num" style={{ color: o.lastDays > getOppFollowDays() ? 'var(--c-danger)' : undefined }} title={o.lastDays > getOppFollowDays() ? `已超过${getOppFollowDays()}天未跟进，需立即推进` : undefined}>{o.last}{o.lastDays > getOppFollowDays() ? <> <Ico n="warning" size={12} style={{ color: 'var(--c-warning-mid)' }} /></> : null}</span> },
                 {
-                  key: 'ops', title: '操作', width: 200, render: (o) => (
+                  key: 'ops', title: '操作', width: 160, render: (o) => (
                     <span className="nc-ops" onClick={(e) => e.stopPropagation()}>
-                      <Op onClick={() => { setDetail(o); setDTab('overview'); }}>详情</Op>
-                      {o.status !== '输单' && <><OpSep /><Op gold onClick={() => setQuoteOpen(o)}>转报价</Op></>}
-
-
-
-
-                      <OpSep /><Op onClick={() => openAdv(o)}>推进</Op>
-                      {!isOppClosed(o) && <><OpSep /><Op danger onClick={() => { setLoseOpen(o); setLoseStatus('输单'); setLoseReason(''); setLoseCompetitor(''); }}>标记结果</Op></>}
+                      <Op onClick={() => { setDetail(o); setDTab('overview'); }}>详情</Op><OpSep />
+                      <Op onClick={() => openAdv(o)}>推进</Op><OpSep />
+                      <OpMore items={[
+                        ...(o.status !== '输单' ? [{ label: '转报价', onClick: () => setQuoteOpen(o) }] : []),
+                        ...(!isOppClosed(o) ? [{ label: '标记结果', onClick: () => { setLoseOpen(o); setLoseStatus('输单'); setLoseReason(''); setLoseCompetitor(''); } }] : []),
+                      ]} />
                     </span>
                   ),
                 },
@@ -418,7 +540,7 @@ export default function OppPage({ go, role, nav }: { go: (p: string) => void; ro
                           <Tag tone="gray">{o.type}</Tag>
                           <Tag tone="blue">{stageW(o.stage)}%</Tag>
                           {o.status !== '跟进中' && <Tag tone={STATUS_TONE[o.status]}>{o.status}</Tag>}
-                          {o.lastDays > 14 && !isOppClosed(o) && <Tag tone="red"><Ico n="warning" size={16} /> {o.lastDays} 天未跟进</Tag>}
+                          {o.lastDays > getOppFollowDays() && !isOppClosed(o) && <Tag tone="red"><Ico n="warning" size={16} /> {o.lastDays} 天未跟进</Tag>}
                         </div>
                       </div>
                     ))}
@@ -443,16 +565,6 @@ export default function OppPage({ go, role, nav }: { go: (p: string) => void; ro
             isAdmin
               ? <Btn onClick={() => { setReopenOpen(detail); setDetail(null); }}>重开</Btn>
               : <Btn disabled title="仅管理员可重开；已转化不可重开">重开</Btn>
-          )}
-          {/* 三条转化出口互相独立、各落各的单，互不捆绑；不受阶段限制，输单后不可转化。
-              旧版把「项目 + 合同」捆成一个动作同时生成，且不落库 —— 既偏离规格 §2.2 的「或」，
-              又让用户看到假成功，已拆开。 */}
-          {detail && detail.status !== '输单' && (
-            <>
-              <Btn onClick={() => { setQuoteOpen(detail); setDetail(null); }}>转报价</Btn>
-              <Btn onClick={() => { setCvtHtOpen(detail); setDetail(null); }}>转合同</Btn>
-              <Btn onClick={() => { setCvtXmOpen(detail); setDetail(null); }}>转项目</Btn>
-            </>
           )}
           {detail && !isOppClosed(detail) && (
             <Btn kind="primary" onClick={() => { openAdv(detail); setDetail(null); }}>推进 / 回退阶段</Btn>
@@ -490,7 +602,7 @@ export default function OppPage({ go, role, nav }: { go: (p: string) => void; ro
                   { k: '状态', v: <Tag tone={STATUS_TONE[detail.status]}>{detail.status}</Tag> },
                   { k: '行业', v: detail.industry },
                   { k: '归属人', v: detail.owner },
-                  { k: '最近跟进', v: <span className="num" style={{ color: detail.lastDays > 14 ? 'var(--c-danger)' : undefined }}>{detail.last}（{detail.lastDays} 天前）{detail.lastDays > 14 ? <> <Ico n="warning" size={12} style={{ color: 'var(--c-warning-mid)' }} /></> : null}</span> },
+                  { k: '最近跟进', v: <span className="num" style={{ color: detail.lastDays > getOppFollowDays() ? 'var(--c-danger)' : undefined }}>{detail.last}（{detail.lastDays} 天前）{detail.lastDays > getOppFollowDays() ? <> <Ico n="warning" size={12} style={{ color: 'var(--c-warning-mid)' }} /></> : null}</span> },
                   { k: '已产出单据', v: <span className="num">{outText(detail.id)}{isWonDeal(detail.id) ? <> · <Tag tone="green">已成交</Tag></> : null}</span> },
                   { k: '输单复盘', v: detail.status === '输单' ? <span>原因：{detail.loseReason || '—'}{detail.loseCompetitor ? ` · 对手：${detail.loseCompetitor}` : ''}</span> : <span style={{ color: 'var(--ink-3)' }}>—</span> },
                 ]} />
@@ -591,7 +703,6 @@ export default function OppPage({ go, role, nav }: { go: (p: string) => void; ro
 
             {dTab === 'hist' && (
               <div style={{ marginTop: 12 }}>
-                <div className="nc-cell-sub" style={{ marginBottom: 8 }}>阶段可跳选可回退，每次变更留痕（时间 / 从 / 到 / 操作人 / 说明）</div>
                 <table className="nc-tbl" style={{ minWidth: 620 }}>
                   <thead><tr><th style={{ width: 110 }}>时间</th><th style={{ width: 90 }}>原阶段</th><th style={{ width: 90 }}>新阶段</th><th style={{ width: 90 }}>操作人</th><th>说明</th></tr></thead>
                   <tbody>{histOf(detail).map((h, i) => (
@@ -637,7 +748,7 @@ export default function OppPage({ go, role, nav }: { go: (p: string) => void; ro
           }}>创建商机</Btn>
         </>}>
         {dupHit.length > 0 && (
-          <div className="nc-warnbox is-orange">
+          <div className="nc-warnbox is-warn">
             <b><Ico n="warning" size={16} /> 创建前请确认：</b>
             <div>
               检测到 {dupHit.length} 条相似商机（重复<b>不拦截</b>，仅黄字提醒）：
@@ -652,14 +763,9 @@ export default function OppPage({ go, role, nav }: { go: (p: string) => void; ro
           </Field>
           <Field label="客户" req span={2} note="档案强校验；弹层新建后自动回填并选中">
             <div style={{ display: 'flex', gap: 8 }}>
-              <select className="nc-input" value={nCust} onChange={(e) => {
-                const v = e.target.value;
-                if (v === '__new__') { setCustNew(true); return; }
-                setNCust(v);
-              }}>
-                {['昆明万达广场商业管理有限公司', '曲靖市第一人民医院', '云南××置业有限公司', '昭通市第一人民医院'].map((c) => <option key={c} value={c}>{c}</option>)}
-                <option value="__new__">＋ 新建客户…</option>
-              </select>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <CustomerPicker value={nCust} onChange={setNCust} emit="name" options={custOpts} />
+              </div>
               <Btn size="sm" onClick={() => setCustNew(true)}>＋ 新建客户</Btn>
             </div>
           </Field>
@@ -705,26 +811,53 @@ export default function OppPage({ go, role, nav }: { go: (p: string) => void; ro
       </Drawer>
 
       {/* ============ 弹层新建客户（回填并选中） ============ */}
-      <Modal open={custNew} width={480} title="新建客户（弹层）" onClose={() => setCustNew(false)}
+      <Modal open={custNew} width={640} title="新建客户（弹层）" onClose={() => setCustNew(false)}
         foot={<><Btn onClick={() => setCustNew(false)}>取消</Btn>
-          <Btn kind="primary" disabled={!custName.trim()} title={custName.trim() ? undefined : '请填写客户名称（必填）'} onClick={() => {
-            setNCust(custName.trim()); setCustNew(false); setCustName('');
-            toast(`客户「${custName.trim()}」已建档并回填选中（档案强校验通过）`);
-          }}>保存并选中</Btn></>}>
+          <Btn kind="primary" onClick={doCreateCust}>保存并选中</Btn></>}>
         <div className="nc-warnbox is-info">客户档案强校验：名称不可与已有档案重复；弹层新建后<b>自动回填并选中</b>，无需返回客户管理页。</div>
         <div className="nc-form-grid" style={{ gridTemplateColumns: 'repeat(2,1fr)' }}>
-          <Field label="客户名称" req span={2}><input className="nc-input" value={custName} onChange={(e) => setCustName(e.target.value)} placeholder="如 曲靖市第二人民医院" /></Field>
-          <Field label="行业"><select className="nc-input" value={custInd} onChange={(e) => setCustInd(e.target.value)}>
-            {['医疗', '商业', '教育', '工业', '政府', '住宅', '其他'].map((i) => <option key={i} value={i}>{i}</option>)}
-          </select></Field>
-          <Field label="地区"><select className="nc-input">{['昆明', '曲靖', '昭通', '玉溪', '楚雄', '大理'].map((r) => <option key={r}>{r}</option>)}</select></Field>
+          <Field label="客户名称" req span={2} err={cErr.name} warn={!!cDup}
+            note={cDup || '唯一性 + 相似度 ≥80% 检测'}>
+            <input className="nc-input" value={custName} onChange={(e) => onCustName(e.target.value)} placeholder="如 昆明万达广场商业管理有限公司" />
+          </Field>
+          <Field label="联系人姓名" req err={cErr.contact} note="≤20 字">
+            <input className="nc-input" value={custContact} onChange={(e) => setCustContact(e.target.value)} placeholder="如 王志豪" />
+          </Field>
+          <Field label="联系电话" req err={cErr.phone} note="手机号或座机 · 重复触发撞单">
+            <input className="nc-input" value={custPhone} onChange={(e) => setCustPhone(e.target.value)} placeholder="如 13888001101" />
+          </Field>
+          <Field label="区域" req err={cErr.region} note="默认：昆明">
+            <select className="nc-select" value={custRegion} onChange={(e) => setCustRegion(e.target.value)}>
+              {CUST_REGIONS.map((r) => <option key={r}>{r}</option>)}
+            </select>
+          </Field>
+          <Field label="客户分级" req note="默认 C；可改（留痕）">
+            <select className="nc-select" value={custGrade} onChange={(e) => setCustGrade(e.target.value)}>
+              {CUST_GRADES.map((g) => <option key={g} value={g}>{CUST_GRADE_LABEL[g]}</option>)}
+            </select>
+          </Field>
+          <Field label="客户来源" req note="默认：自主开发">
+            <select className="nc-select" value={custSource} onChange={(e) => setCustSource(e.target.value)}>
+              {CUST_SOURCES.map((s) => <option key={s}>{s}</option>)}
+            </select>
+          </Field>
+          <Field label="客户状态" req note="新建仅可选潜在 / 意向">
+            <select className="nc-select" value={custStatus} onChange={(e) => setCustStatus(e.target.value)}>
+              {CUST_STATUS_NEW.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </Field>
+          <Field label="行业标签" span={2} note="用于业绩与合同检索">
+            <select className="nc-select" value={custIndustry} onChange={(e) => setCustIndustry(e.target.value)}>
+              {CUST_INDUSTRIES.map((s) => <option key={s}>{s}</option>)}
+            </select>
+          </Field>
         </div>
+        <div className="nc-cell-sub" style={{ marginTop: 8 }}>必填项与「客户管理 → 新增客户」一致（客户名称 / 联系人姓名 / 联系电话 / 区域 / 客户分级 / 客户来源 / 客户状态）；备注与决策链联系人可在客户详情中继续补充。</div>
       </Modal>
 
       {/* ============ 推进 / 回退阶段 ============ */}
       <Modal open={!!advOpen} width={480} title={`推进阶段：${advOpen?.stage ?? ''}`} onClose={() => setAdvOpen(null)}
         foot={<><Btn onClick={() => setAdvOpen(null)}>取消</Btn><Btn kind="primary" onClick={doAdv}>确认推进</Btn></>}>
-        <div className="nc-cell-sub" style={{ marginBottom: 8 }}>阶段可跳选也可回退，变更将写入「阶段历史」并留痕。</div>
         <div className="nc-form-grid">
           <Field label="新阶段" req>
             <select className="nc-select" value={advStage} onChange={(e) => setAdvStage(e.target.value)}>
@@ -739,7 +872,7 @@ export default function OppPage({ go, role, nav }: { go: (p: string) => void; ro
       </Modal>
 
       {/* ============ 赢单 / 输单（终态） ============ */}
-      <Modal open={!!loseOpen} width={480} title={`登记结果 · ${loseOpen?.id || ''}`} onClose={() => setLoseOpen(null)}
+      <Modal open={!!loseOpen} width={480} title={`登记结果 · ${loseOpen?.name || ''}`} onClose={() => setLoseOpen(null)}
         foot={<>
           <Btn onClick={() => setLoseOpen(null)}>取消</Btn>
           <Btn kind={loseStatus === '赢单' ? 'primary' : 'danger'} onClick={() => {
@@ -794,8 +927,8 @@ export default function OppPage({ go, role, nav }: { go: (p: string) => void; ro
             toast(`商机已重开至「${reopenOpen.stage}」· 重开记录已留痕`);
           }}>确认重开</Btn></>}>
         {reopenOpen && isWonDeal(reopenOpen.id)
-          ? <div className="nc-warnbox is-red"><Ico n="ban" size={16} /> 该商机下游已生成合同 / 项目，重开会造成来源冲突，不可重开。</div>
-          : <div className="nc-warnbox is-orange">重开后商机状态恢复为「跟进中」（阶段保持当前所处阶段），恢复跟进提醒并重新计入加权金额；重开记录写入阶段历史。</div>}
+          ? <div className="nc-warnbox is-danger"><Ico n="ban" size={16} /> 该商机下游已生成合同 / 项目，重开会造成来源冲突，不可重开。</div>
+          : <div className="nc-warnbox is-warn">重开后商机状态恢复为「跟进中」（阶段保持当前所处阶段），恢复跟进提醒并重新计入加权金额；重开记录写入阶段历史。</div>}
       </Modal>
 
       {/* ============ 转合同（商机直签 · 不经过报价 / 投标） ============ */}
@@ -945,12 +1078,42 @@ export default function OppPage({ go, role, nav }: { go: (p: string) => void; ro
                 ))}
               </tbody>
             </table>
-            {!svyOpen.s?.quoteId && svyForm.rows.length < 100 && (
-              <Btn size="sm" onClick={() => setSvyForm((f) => ({ ...f, rows: [...f.rows, { n: '', u: '个', q: '', r: '' }] }))}>＋ 新增工程量行</Btn>
+            {!svyOpen.s?.quoteId && (
+              <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                <Btn size="sm" onClick={openSvyTpl}>从模板库勾选</Btn>
+                {svyForm.rows.length < 100 && (
+                  <Btn size="sm" onClick={() => setSvyForm((f) => ({ ...f, rows: [...f.rows, { n: '', u: '个', q: '', r: '' }] }))}>＋ 新增工程量行</Btn>
+                )}
+              </div>
             )}
           </>
         )}
       </Modal>
+
+      {/* ============ 工程量项模板库勾选（在勘察弹窗之上叠加） ============ */}
+      <Modal open={svyTplOpen} size="M" title="从模板库勾选工程量项" onClose={() => setSvyTplOpen(false)}
+        foot={<>
+          <span className="nc-cell-sub">已选 {svyTplSel.length} 项 · 带出名称/单位/参考单价，数量现场补填</span>
+          <Btn onClick={() => setSvyTplOpen(false)}>取消</Btn>
+          <Btn kind="primary" onClick={addTplRows}>添加到清单</Btn>
+        </>}>
+        <table className="nc-tbl" style={{ minWidth: 480 }}>
+          <thead><tr><th style={{ width: 40 }}></th><th>分项名称</th><th style={{ width: 70 }}>单位</th><th style={{ width: 110 }} className="is-num">参考单价</th></tr></thead>
+          <tbody>
+            {QTY_TPL.map((t, i) => (
+              <tr key={t.n} onClick={() => toggleTpl(i)} {...pressProps(() => toggleTpl(i))} style={{ cursor: 'pointer' }}>
+                <td><input type="checkbox" className="nc-check" checked={svyTplSel.includes(i)} onChange={() => toggleTpl(i)} onClick={(e) => e.stopPropagation()} /></td>
+                <td>{t.n}</td>
+                <td>{t.u}</td>
+                <td className="is-num num">¥{t.p}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Modal>
+
+      {/* ============ 统一导出弹窗 ============ */}
+      <ExportDialog {...exportApi.dialogProps} />
     </>
   );
 }

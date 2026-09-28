@@ -3,8 +3,9 @@
 // 设计：模块级可变数组 + 订阅广播；各台账页用 useState(getXxx) 播种并 useEffect 订阅，
 //      保证 A 页写入后 B 页挂载 / 已挂载都能拿到最新数据（不引入第三方状态库）。
 // 说明：BIDS / QUOTES / INVOICES 等在下方「实体关系图」处二次导入，此处不重复声明。
-import { APPROVALS, BIDS, CERT_OCCUPANCY, CERT_OCCUPANCY_SEED, CONTRACTS, CUSTOMERS, ID_MARK_FLOWS, ID_MARK_FLOWS_SEED, ID_MARK_RANGES, ID_MARK_RANGES_SEED, INVOICES, ITEMS, OPP_STAGE_TPL, OPPS, PROJECTS, PUSH_BATCHES, PUSH_BATCHES_SEED, QUOTES, SIGN_CHAINS, TODAY, normContractStatus, verNo } from './data';
-import type { Item, OppStageTpl, Quote, QuoteVersion, SignConfig } from './data';
+import { APPROVALS, ATT_TEAM_SEED, ATT_WORKERS_SEED, BIDS, CERT_OCCUPANCY, CERT_OCCUPANCY_SEED, CERTS, CONTRACTS, CUSTOMERS, ID_MARK_FLOWS, ID_MARK_FLOWS_SEED, ID_MARK_RANGES, ID_MARK_RANGES_SEED, INVOICES, ITEMS, OPP_STAGE_TPL, OPPS, PROJECTS, PUSH_BATCHES, PUSH_BATCHES_SEED, QUOTES, SIGN_CHAINS, TODAY, certStatusOf, certWarnDays, isStocked, normContractStatus, verNo } from './data';
+import type { AttTeam, AttWorker, Cert, Item, OppStageTpl, Quote, QuoteVersion, SignConfig } from './data';
+import type { PjCostRow } from './project-center/ctx';
 
 type C = (typeof CONTRACTS)[number];
 type P = (typeof PROJECTS)[number];
@@ -43,14 +44,39 @@ export function addProject(p: P) {
 
 /* ============================ 主数据 / 报价 / 投标切片 ============================
  * 修复「新建 / 编辑不落库」：原先这三个实体只存在于各自页面的 useState，
- * 跨页不可见（材料新增后在报价工作台选不到、报价提交后审批中心无待办、投标新建后商机看不到）。
+ * 跨页不可见（物料新增后在报价工作台选不到、报价提交后审批中心无待办、投标新建后商机看不到）。
  * 与 contracts / projects 同构：模块级可变数组 + emit() 广播 + resetStore() 同步。
  * ========================================================================== */
 
-let items: Item[] = ITEMS.map((i) => ({ ...i }));
+/**
+ * 存货金额初始化：历史数据只有数量账，这里按「结余 × 不含税参考价」补出金额，
+ * 让首次领用 / 盘点就有一致的成本口径；后续入库按实际采购价入账，加权平均单价随之重算。
+ */
+const seedStockAmt = (i: Item): Item =>
+  isStocked(i.ty)
+    ? { ...i, stockAmt: i.stockAmt ?? Math.round((i.stock * i.price) / (1 + (i.taxRate ?? 13) / 100)) }
+    : i;
+
+let items: Item[] = ITEMS.map(seedStockAmt);
+
+/* ============================ 项目成本结转行（领用写入） ============================
+ * 材料成本的归集点在「领用」：入库只增存货，领用时按移动加权平均单价结转至领用项目，
+ * 退料按原领用项目回冲（负数行，与原行并存不物理删除）。
+ * 台账基础行由 seed 派生（buildPjDemo），本切片只存本次会话的结转行，读取端合并两者 ——
+ * 这就是「库存作业 → 项目成本」的闭合点：领用后项目成本台账立刻多一行材料费。
+ * ========================================================================== */
+let pjCostRows: Record<string, PjCostRow[]> = {};
+
+export const getPjCostRows = (projId: string) => pjCostRows[projId] ?? [];
+
+/** 追加一行项目成本（领用结转 / 退料回冲）。冲销按净额追加，原行只读不删（与成本台账既有规则一致）。 */
+export function addPjCostRow(projId: string, row: PjCostRow) {
+  pjCostRows = { ...pjCostRows, [projId]: [row, ...(pjCostRows[projId] ?? [])] };
+  emit();
+}
 
 export const getItems = () => items;
-/** 仅「启用」物料：报价 / 投标 / 配方等下游选择器一律用这个，避免停用物料继续被引用 */
+/** 仅「启用」物料：报价 / 投标 / 配置等下游选择器一律用这个，避免停用物料继续被引用 */
 export const getActiveItems = () => items.filter((i) => i.status === '启用');
 
 export function addItem(it: Item) {
@@ -58,7 +84,7 @@ export function addItem(it: Item) {
   emit();
 }
 
-/** 按编码局部回写物料（改价 / 认证 / 安全库存 / 配方对外价等） */
+/** 按编码局部回写物料（改价 / 认证 / 安全库存 / 配置对外价等） */
 export function patchItem(code: string, patch: Partial<Item>) {
   items = items.map((x) => (x.code === code ? ({ ...x, ...patch } as Item) : x));
   emit();
@@ -71,8 +97,8 @@ export function toggleItemStatus(code: string) {
 }
 
 /**
- * 整表更新（供材料页的批量操作使用）。
- * 材料页有多处「按条件 map 整表」的写点（入库回写库存 / 配方保存 / 改价 / 认证维护 / 停用启用），
+ * 整表更新（供物料页的批量操作使用）。
+ * 物料页有多处「按条件 map 整表」的写点（入库回写库存 / 配置保存 / 改价 / 认证维护 / 停用启用），
  * 逐个改成 patchItem 会打散原有逻辑，故保留 updater 形态；与 useState 的 setState 签名一致，
  * 页面侧只需把 `setItems` 指向本函数即可完成落库改造。
  */
@@ -538,7 +564,7 @@ export function setBizStatus(no: string, st: string) {
 
 /** 从审批单 ref 中解析上游业务单据号（BJ…/HT…/WB…/TB…/BG…/PF…） */
 export function refBizNo(ref: string): string {
-  const m = /^([A-Z]{2}\d{8}-\d{4}|[A-Z]{2}\d{6})/.exec(ref);
+  const m = /^([A-Z]{2}\d{8}-\d{4}|[A-Z]{2}\d{6}|[A-Z]{2}-\d{4}-\d+)/.exec(ref);
   return m ? m[1] : '';
 }
 
@@ -556,7 +582,7 @@ export function syncBizFromApproval(
 
   // 报价审批：待审批 → 审批中 → 已审批；退回回到草稿
   if (no.startsWith('BJ')) {
-    const q = QUOTES.find((x) => x.id === no);
+    const q = quotes.find((x) => x.id === no);
     if (!q) return '';
     const st = rejected ? '草稿' : allDone ? '已审批' : '待审批';
     setBizStatus(no, st);
@@ -564,7 +590,7 @@ export function syncBizFromApproval(
   }
   // 合同审批：通过 → 已签约（履约前）/ 退回 → 草稿（文档 §5.2：驳回 → 草稿）
   if (no.startsWith('HT') || no.startsWith('WB')) {
-    const k = CONTRACTS.find((x) => x.id === no);
+    const k = contracts.find((x) => x.id === no);
     if (!k) return '';
     const st = rejected ? '草稿' : allDone ? (normContractStatus(k.status) === '履约中' ? '履约中' : '已签约') : '待审批';
     setBizStatus(no, st);
@@ -686,6 +712,30 @@ export function consumePendingRenew() {
   pendingRenew = null;
   return v;
 }
+/** 框架执行单来源：合同详情「＋ 新增执行单」→ 新建合同向导预填执行单草稿（parentId 挂框架协议） */
+let pendingExec: { contractId: string } | null = null;
+export const getPendingExec = () => pendingExec;
+export function setPendingExec(v: typeof pendingExec) {
+  pendingExec = v;
+  emit();
+}
+export function consumePendingExec() {
+  const v = pendingExec;
+  pendingExec = null;
+  return v;
+}
+/** 补充协议来源：合同详情变更区块「＋ 发起补充协议」→ 新建合同向导预填草稿（parentId 挂主合同，kind=price/service） */
+let pendingSupplement: { contractId: string; kind: 'price' | 'service' } | null = null;
+export const getPendingSupplement = () => pendingSupplement;
+export function setPendingSupplement(v: typeof pendingSupplement) {
+  pendingSupplement = v;
+  emit();
+}
+export function consumePendingSupplement() {
+  const v = pendingSupplement;
+  pendingSupplement = null;
+  return v;
+}
 
 /* ============================ 立项待办交接（三来源） ============================
  *   合同交底 —— 合同详情「创建项目」，立项页切「入口 A」形态：预填合同要素 + 合同交底卡；
@@ -767,6 +817,197 @@ export function consumeFocusTab(page: string) {
   return t;
 }
 
+/* ============================ 跨页动作（AI 助手快捷操作） ============================
+ * 场景：OCR 识别 / 导入 / 上传这类能力散落在各页的按钮里，用户得先知道「入口在哪个
+ *       页、哪个按钮」才能用。助手既然知道当前在哪一页，就该把该页最常用的入口直接
+ *       摆出来 —— 点一下跳过去并打开，不必自己找。
+ * 与 focusTab 同构：消费式读取，读后即清除。不清的话，用户下次从侧栏正常进入该页
+ *       会莫名弹出一个「新增」窗口。
+ * ⚠️ 助手只负责「打开入口」，不代替用户提交 —— 写操作不该由问答组件代劳。
+ * ============================================================================ */
+let pageAction: Record<string, string> = {};
+
+/** 跳转前声明目标页要执行的动作（如 setPageAction('cert', 'new-ocr')） */
+export function setPageAction(page: string, action: string) {
+  pageAction = { ...pageAction, [page]: action };
+  emit();
+}
+
+/** 目标页消费式读取动作，读后立即清除（只生效一次） */
+export function consumePageAction(page: string) {
+  const a = pageAction[page] || '';
+  if (a) {
+    const next = { ...pageAction };
+    delete next[page];
+    pageAction = next;
+  }
+  return a;
+}
+
+/* ============================ 证书切片（企业资质 / 人员证书） ============================
+ * 修复「证书管理页改了不生效」：原先 CertPage 用 useState(CERTS) 存**页面局部副本**，
+ * 借出 / 收回 / 登记使用 / 续证只在页内可见、刷新即丢；而投标页读的是 data.ts 的 CERTS 常量
+ * —— 在证书管理页把安许续期后，投标页照样提示「安许已过期，全部投标废标」，
+ * 侧栏证书徽标与驾驶舱证书预警也一动不动。
+ * 根因不是「按钮没反应」，而是**写的人和读的人不是同一份数据**。
+ * 现落库：证书管理页写，投标页 / 侧栏徽标 / 驾驶舱预警 / 项目详情资格列读同一份。
+ * ⚠️ used 是嵌套数组，resetStore 必须深拷贝。
+ * ========================================================================== */
+
+let certs: Cert[] = JSON.parse(JSON.stringify(CERTS));
+
+export const getCerts = () => certs;
+export const getCert = (id: string) => certs.find((c) => c.id === id) ?? null;
+
+export function addCert(c: Cert) {
+  certs = [c, ...certs];
+  emit();
+}
+
+/**
+ * 批量入库（证书批量导入用）：一次 emit，避免 N 条各触发一次重渲染。
+ * 头插，与单条新增的观感一致。
+ */
+export function addCerts(list: Cert[]) {
+  if (!list.length) return;
+  certs = [...list, ...certs];
+  emit();
+}
+
+/**
+ * 批量生成证书编号（ZS + 6 位流水，现有最大流水 +1 起算）。
+ * ⚠️ 必须**一次算够 n 个** —— 逐次调单个生成器时数组还没落库，
+ * 每次都返回同一个号，批量导入会造出 N 条同 id 的记录。
+ */
+export function nextCertNos(n: number): string[] {
+  const max = certs.reduce((m, c) => Math.max(m, Number(c.id.replace(/\D/g, '')) || 0), 0);
+  return Array.from({ length: n }, (_, i) => `ZS${String(max + 1 + i).padStart(6, '0')}`);
+}
+
+/** 按 id 局部回写证书（借给项目 / 用完收回 / 外借 / 收回外借 / 登记使用） */
+export function patchCert(id: string, patch: Partial<Cert>) {
+  certs = certs.map((c) => (c.id === id ? ({ ...c, ...patch } as Cert) : c));
+  emit();
+}
+
+/**
+ * 续证 / 改期：回写新有效期，并**一并重算预警档位与状态**。
+ * 原先「续证安排」弹窗只 toast 不写库，证书台账上的有效期永远不动 ——「续证」这个动作
+ * 等于没发生。warnDays / status 是存储值而非派生值，必须跟着 validTo 一起走，
+ * 否则会出现「有效期已延到 2027-09，但临期提醒照旧」的假续证。
+ */
+export function renewCert(id: string, validTo: string) {
+  certs = certs.map((c) => (c.id === id
+    ? ({ ...c, validTo, warnDays: certWarnDays(validTo), status: certStatusOf(validTo) } as Cert)
+    : c));
+  emit();
+}
+
+/* ============================ 考勤切片（班组 / 人员） ============================
+ * 修复「班组与考勤人员无处维护」：原先 ATT_TEAMS / ATT_WORKERS 只是 data.ts 的模块常量，
+ * 页面上班组仅作筛选条件、人员完全不可增删改，班组换个名字也无处改。
+ * 现按五切片同构落库：
+ *   班组（AttTeam）= 归属主数据，人员挂班组；人员（AttWorker）= 档案，项目归属由「派工」决定。
+ * ⚠️ 人员含 marks（逐日符号）与 dispatches（派工留痕）两处嵌套结构，resetStore 必须深拷贝。
+ * ========================================================================== */
+
+let attTeams: AttTeam[] = ATT_TEAM_SEED.map((t) => ({ ...t }));
+let attWorkers: AttWorker[] = JSON.parse(JSON.stringify(ATT_WORKERS_SEED));
+
+export const getAttTeams = () => attTeams;
+export const getAttWorkers = () => attWorkers;
+/** 启用中的班组（人员档案的班组下拉只列这些；已停用班组不再新增人员进去） */
+export const getActiveAttTeams = () => attTeams.filter((t) => t.status === '启用');
+
+/** 班组名（渲染用）：未知 id 回落原值，避免历史数据把名字显示成空白 */
+export const attTeamNameOf = (teamId: string) => attTeams.find((t) => t.id === teamId)?.name ?? teamId;
+
+/** 班组编号：BZH + 6 位流水（现有最大流水 + 1） */
+export function nextAttTeamNo(): string {
+  const max = attTeams.reduce((m, t) => Math.max(m, Number(t.id.replace(/\D/g, '')) || 0), 0);
+  return `BZH${String(max + 1).padStart(6, '0')}`;
+}
+/** 人员编号：WG + 6 位流水 */
+export function nextAttWorkerNo(): string {
+  const max = attWorkers.reduce((m, w) => Math.max(m, Number(w.id.replace(/\D/g, '')) || 0), 0);
+  return `WG${String(max + 1).padStart(6, '0')}`;
+}
+
+export function addAttTeam(t: AttTeam) {
+  attTeams = [t, ...attTeams];
+  emit();
+}
+export function patchAttTeam(id: string, patch: Partial<AttTeam>) {
+  attTeams = attTeams.map((t) => (t.id === id ? { ...t, ...patch } : t));
+  emit();
+}
+/** 启用 ⇄ 停用。停用只影响「还能不能新增人员进来」，已在册人员的归属保留。 */
+export function toggleAttTeam(id: string) {
+  attTeams = attTeams.map((t) => (t.id === id ? { ...t, status: t.status === '启用' ? '停用' : '启用' } : t));
+  emit();
+}
+
+export function addAttWorker(w: AttWorker) {
+  attWorkers = [w, ...attWorkers];
+  emit();
+}
+export function patchAttWorker(id: string, patch: Partial<AttWorker>) {
+  attWorkers = attWorkers.map((w) => (w.id === id ? { ...w, ...patch } : w));
+  emit();
+}
+/** 在册 ⇄ 已离场（离场后不进考勤矩阵与人工成本） */
+export function toggleAttWorker(id: string) {
+  attWorkers = attWorkers.map((w) => (w.id === id ? { ...w, status: w.status === '在册' ? '已离场' : '在册' } : w));
+  emit();
+}
+/**
+ * 派工：把人员改派到另一个项目。
+ * 只改 proj 并追加一条留痕 —— 人员档案不重建，历史考勤（marks）原样保留。
+ */
+export function dispatchAttWorker(id: string, toProjId: string, note: string, by = '蓝峰') {
+  attWorkers = attWorkers.map((w) => (w.id === id
+    ? { ...w, proj: toProjId, dispatches: [{ at: TODAY, fromProjId: w.proj, toProjId, by, note }, ...w.dispatches] }
+    : w));
+  emit();
+}
+/** 整表更新（考勤矩阵保存时批量写回） */
+export function updateAttWorkers(updater: (list: AttWorker[]) => AttWorker[]) {
+  attWorkers = updater(attWorkers);
+  emit();
+}
+
+/**
+ * 导入某月考勤（覆盖式：只覆盖本次导入到的人 + 该月，其余月份与他人不受影响）。
+ *
+ * @param ym       考勤月 'YYYY-MM'
+ * @param rows     每人该月的逐日符号
+ * @param projId   目标项目；为空则不动项目归属
+ * @param dispatch 是否把「当前项目 ≠ 目标项目」的人一并派工过去（会写派工留痕）
+ *
+ * ⚠️ 只覆盖不合并：文件里空格 = 未在现场，若做合并就无法表达「把 √ 改回空」，
+ *    现场重报一张表时会出现旧符号残留。覆盖语义与「重新导入整月」的用法一致。
+ */
+export function importAttMonth(
+  ym: string,
+  rows: { workerId: string; marks: Record<number, string> }[],
+  projId = '',
+  dispatch = false,
+  by = '蓝峰',
+) {
+  const map = new Map(rows.map((r) => [r.workerId, r.marks]));
+  attWorkers = attWorkers.map((w) => {
+    const marks = map.get(w.id);
+    if (!marks) return w;
+    const next: AttWorker = { ...w, marksByMonth: { ...w.marksByMonth, [ym]: marks } };
+    if (dispatch && projId && w.proj !== projId) {
+      next.proj = projId;
+      next.dispatches = [{ at: TODAY, fromProjId: w.proj, toProjId: projId, by, note: `${ym} 考勤导入派工` }, ...w.dispatches];
+    }
+    return next;
+  });
+  emit();
+}
+
 /** 演示重置（便于反复演示原型） */
 export function resetStore() {
   /* 深拷贝：contracts / projects / quotes / bids 均含嵌套数组（installments / logs / lines / workItems），
@@ -780,6 +1021,9 @@ export function resetStore() {
   quotes = JSON.parse(JSON.stringify(QUOTES));
   bids = JSON.parse(JSON.stringify(BIDS));
   items = ITEMS.map((i) => ({ ...i }));
+  certs = JSON.parse(JSON.stringify(CERTS));
+  attTeams = ATT_TEAM_SEED.map((t) => ({ ...t }));
+  attWorkers = JSON.parse(JSON.stringify(ATT_WORKERS_SEED));
   /* 证书占用改归属是就地改写，按种子快照还原（保持数组引用不变，读取方零改写） */
   CERT_OCCUPANCY.splice(0, CERT_OCCUPANCY.length, ...CERT_OCCUPANCY_SEED.map((o) => ({ ...o })));
   /* 消防产品身份标识：号段采录账 + 流向账，同为就地数组，按种子快照还原 */
