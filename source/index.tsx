@@ -26,6 +26,7 @@ import BidPage from './pages/BidPage';
 import BidDetailPage from './pages/BidDetailPage';
 import CertPage from './pages/CertPage';
 import DocPage from './pages/DocPage';
+import HazardPage from './pages/HazardPage';
 import ContractPage from './pages/ContractPage';
 import ContractNewPage from './pages/ContractNewPage';
 import ContractDetailPage from './pages/ContractDetailPage';
@@ -37,6 +38,7 @@ import ApprovalPage from './pages/ApprovalPage';
 import SupplierPage from './pages/SupplierPage';
 import MaterialPage from './pages/MaterialPage';
 import InvoicePage from './pages/InvoicePage';
+import FundPage from './pages/FundPage';
 import SettingsPage from './pages/SettingsPage';
 
 const ROUTE = defineHashPageRoute(
@@ -60,6 +62,8 @@ const ROUTE = defineHashPageRoute(
 const FIXED_PAGES = new Set([
   'customer', 'opp', 'quote', 'bid', 'cert', 'doc',
   'approval', 'supplier',
+  /* 2026-09-29 两新实体页同为列表型视口锁定 */
+  'hazard', 'fund',
   /* 物料域 5 个路由都是列表型视口锁定：物料主数据（含旧链接 material-kit）已把「套件与配置」
      并进「物料与服务」成为**一张列表**，行数不变（套件与配置本就是它的子集），
      仍是「表体吃满剩余高度 + 卡内局部滚动 + 分页脚常驻卡底」的列表页。 */
@@ -111,6 +115,7 @@ export default function NuoanCloud6() {
       case 'bid-detail': return <BidDetailPage go={go} role={role} nav={nav} />;
       case 'cert': return <CertPage go={go} role={role} nav={nav} />;
       case 'doc': return <DocPage go={go} role={role} nav={nav} />;
+      case 'hazard': return <HazardPage go={go} role={role} nav={nav} />;
       case 'contract': return <ContractPage go={go} role={role} nav={nav} />;
       case 'contract-new': return <ContractNewPage go={go} role={role} nav={nav} />;
       case 'contract-detail': return <ContractDetailPage go={go} role={role} nav={nav} />;
@@ -121,6 +126,7 @@ export default function NuoanCloud6() {
       case 'approval': return <ApprovalPage go={go} role={role} nav={nav} />;
       case 'supplier': return <SupplierPage go={go} role={role} nav={nav} />;
       case 'invoice': return <InvoicePage go={go} role={role} nav={nav} />;
+      case 'fund': return <FundPage go={go} role={role} nav={nav} />;
       case 'settings': return <SettingsPage go={go} role={role} nav={nav} />;
       default: return <DashboardPage go={go} role={role} nav={nav} />;
     }

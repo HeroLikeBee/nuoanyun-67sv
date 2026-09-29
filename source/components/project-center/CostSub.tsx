@@ -116,7 +116,7 @@ export default function CostSub({ C }: { C: PjCtx }) {
   return (
     <>
       {/* 目标 vs 实际一行摘要（成本域自身口径，详细资金链在「资金台账」） */}
-      <PjSection title={<><Ico n="chart" size={16} /> 成本总览</>}>
+      <PjSection title={<>成本总览</>}>
         <div className="nc-stat4">
           {[
             { k: '目标成本', v: C.PLAN_SUM, n: budgetNote },
@@ -353,7 +353,7 @@ export default function CostSub({ C }: { C: PjCtx }) {
             C.toast(`已引用主数据「${regName}」登记成本 ${regAmt.toLocaleString()} 元（演示态，留痕不写入台账）`);
             setRegOpen(false);
           }}>保存登记</Btn></>}>
-        <Field label="选择物料 / 服务 / 套件" note="按类型分组（物料 / 服务 / 套件）；选中后自动带出下列字段，仍可手填覆盖">
+        <Field label="选择物料 / 服务 / 软件 / 套件" note="按类型分组（物料 / 服务 / 软件 / 套件）；选中后自动带出下列字段，仍可手填覆盖">
           <ItemPicker value={regCode} onChange={pickRegItem} clearLabel="手填（不引用主数据）"
             placeholder="从物料主数据选择…" />
         </Field>

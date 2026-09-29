@@ -15,7 +15,7 @@ import {
   type BillBasis, type ProjPoint, type QuoteScopeKey, type SrvRate, type WbQuote,
 } from '../components/data';
 import type { Quote, QuoteLine } from '../components/data';
-import { addQuote, consumePendingOppQuote, getFocus, getItems, getQuote, getQuotes, nextApprovalNo, patchQuote, pushApproval, setBizStatus, setFocus, setPendingQuote, snapshotQuoteVersion, subscribeStore } from '../components/store';
+import { addQuote, consumePendingOppQuote, getFocus, getItems, getQuote, nextApprovalNo, nextQuoteNo, patchQuote, pushApproval, setBizStatus, setFocus, setPendingQuote, snapshotQuoteVersion, subscribeStore } from '../components/store';
 import { Ico } from '../components/icons';
 import { EditDiffTable, buildEditDiff, type DiffLineView, type EditChange } from '../components/quoteEditDiff';
 import { ExportButton, ExportDialog, useExport, getUserName, type ExportField } from '../components/export';
@@ -114,15 +114,6 @@ const QUOTE_RECOG_FIELDS: RecognitionField[] = [
  * ------------------------------------------------------------------ */
 /** 批量调价的下拉取值：科目 key（或 __all 表示整体调价） */
 type BatchScope = QuoteScopeKey | '__all';
-
-/** 报价单号：BJ + 6 位流水（取现有最大流水 + 1） */
-const nextQuoteNo = () => {
-  const max = getQuotes()
-    .filter((q) => /^BJ\d{6}$/.test(q.id))
-    .map((q) => Number(q.id.slice(2)))
-    .reduce((a, b) => Math.max(a, b), 0);
-  return `BJ${String(max + 1).padStart(6, '0')}`;
-};
 
 /** 生成报价审批单（提交审批 → 审批中心可见，形成正向闭环） */
 const makeQuoteApproval = (ref: string, ver: string, obj: string, amt: number, level: string) => ({
@@ -252,7 +243,7 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
   const [nqCust, setNqCust] = useState('');
   const [nqType, setNqType] = useState('改造');
   const [matCat, setMatCat] = useState<BatchScope>('__all');
-  /** 选料抽屉的类型筛选：物料 / 服务 / 套件（默认全部类型） */
+  /** 选料抽屉的类型筛选：物料 / 服务 / 软件 / 套件（默认全部类型） */
   const [matTy, setMatTy] = useState('全部类型');
   /** 项目面积（㎡）：工程费单方造价的分母，落到 Quote.area 供报价详情 / 历史参照使用 */
   const [area, setArea] = useState(0);
@@ -320,7 +311,7 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
      修复两处缺陷：① 原先只读 data.ts 常量 MATERIALS，物料页新维护的物料选不到、停用的物料照样能选；
      ② 原先「目录」筛选拿物料分类码（m21）去比报价目录名（消防水），永远筛不出结果。 */
   const matCandidates = useMemo(() => {
-    /* 三类主数据全部可选：物料按含税采购价、服务按人工构成、套件按配置展开计价。
+    /* 四类主数据全部可选：物料按含税采购价、服务按人工构成、软件按参考价、套件按配置展开计价。
        修复缺陷：原先白名单只放「物料」，报价 8 目录里的「服务费」格永远只能靠手输
        自定义行 —— 维保 / 检测 / 深化设计等服务型主数据维护了却选不到，即「物料与服务没对应」。 */
     const active = getItems().filter((m) => m.status === '启用' && (matTy === '全部类型' || m.ty === matTy));
@@ -699,7 +690,7 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
       /**
        * 套件带入的两种粒度（用户在用料清单里按套件切换）：
        *   whole  整包行 —— 一行 = 一个套件，取配置展开成本自动合计，保留 kitCode + recipeVer 身份；
-       *   expand 展开 —— 按当前生效配置逐行摊平为物料 / 服务。
+       *   expand 展开 —— 按当前生效配置逐行摊平为物料 / 服务 / 软件。
        * 此前无论用户选哪种都只走 expand，套件身份退化为备注里的一句文本，
        * 既不能按套整包报价，也无法回溯这行从哪个套件、哪个配置版本来的。
        */
@@ -1335,7 +1326,7 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
       </Card>
 
       {/* ===== 从物料库添加 ===== */}
-      <Drawer open={addOpen} onClose={() => setAddOpen(false)} width={1040} title="从物料库添加" sub="物料 / 服务 / 套件三类同表；编码 / 规格 / 单位 / 报价目录 / 成本参考价自动带出，目录列只读锁定"
+      <Drawer open={addOpen} onClose={() => setAddOpen(false)} width={1040} title="从物料库添加" sub="物料 / 服务 / 软件 / 套件四类同表；编码 / 规格 / 单位 / 报价目录 / 成本参考价自动带出，目录列只读锁定"
         foot={<><Btn onClick={() => setAddOpen(false)}>取消</Btn><Btn kind="primary" onClick={addFromMat}>添加 {matPick.length || 0} 条</Btn></>}>
         <div className="nc-toolbar">
           <SearchInput value={matKw} onChange={setMatKw} placeholder="名称 / 编码 / 规格" width={240} />
@@ -1457,7 +1448,7 @@ export default function QuoteEditPage({ go, role, nav }: { go: (p: string) => vo
                           style={{ width: 168 }}
                           value={kitMode[k.code] ?? 'expand'}
                           onChange={(e) => setKitMode((m) => ({ ...m, [k.code]: e.target.value as 'expand' | 'whole' }))}
-                          title="整包：报价明细生成 1 行套件（保留套件编码与配置版本）；展开：按配置逐条生成物料 / 服务行"
+                          title="整包：报价明细生成 1 行套件（保留套件编码与配置版本）；展开：按配置逐条生成物料 / 服务 / 软件行"
                         >
                           <option value="expand">展开为物料明细</option>
                           <option value="whole">作为套件整包（1 行）</option>

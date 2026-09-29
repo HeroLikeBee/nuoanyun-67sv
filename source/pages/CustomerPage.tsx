@@ -113,6 +113,10 @@ export default function CustomerPage({ go, role, nav }: { go: (p: string) => voi
   const [fSource, setFSource] = useState('自主开发');
   const [fStatus, setFStatus] = useState('潜在');
   const [fIndustry, setFIndustry] = useState('商业综合体');
+  const [fLegalRep, setFLegalRep] = useState('');
+  const [fAddress, setFAddress] = useState('');
+  const [fBank, setFBank] = useState('');
+  const [fBankAcct, setFBankAcct] = useState('');
   const [fNote, setFNote] = useState('');
   const [errs, setErrs] = useState<Record<string, string>>({});
   const [dupTip, setDupTip] = useState('');
@@ -130,6 +134,10 @@ export default function CustomerPage({ go, role, nav }: { go: (p: string) => voi
     setFRegion(c?.region || '昆明'); setFGrade(c?.grade || 'C'); setFSource(c?.source || '自主开发');
     setFStatus(c?.status === '成交' ? '成交' : c?.status || '潜在');
     setFIndustry(c?.industry || '商业综合体'); setFNote(c?.note || '');
+    setFLegalRep((c as { legalRep?: string } | null)?.legalRep || '');
+    setFAddress((c as { address?: string } | null)?.address || '');
+    setFBank((c as { bank?: string } | null)?.bank || '');
+    setFBankAcct((c as { bankAcct?: string } | null)?.bankAcct || '');
     setErrs({}); setDupTip(''); setEditOpen(true);
   };
 
@@ -469,6 +477,10 @@ export default function CustomerPage({ go, role, nav }: { go: (p: string) => voi
               { k: '联系电话', v: <span className="num">{detail.fullPhone}（完整可拨号）</span> },
               { k: '区域', v: detail.region },
               { k: '行业标签', v: detail.industry },
+              { k: '法定代表人', v: detail.legalRep || '—' },
+              { k: '开户行', v: detail.bank || '—' },
+              { k: '银行账号', v: <span className="num">{detail.bankAcct || '—'}</span> },
+              { k: '注册地址', v: detail.address || '—' },
               { k: '客户来源', v: detail.source },
               { k: '归属人', v: detail.owner },
               { k: '建档时间', v: detail.since },
@@ -639,6 +651,18 @@ export default function CustomerPage({ go, role, nav }: { go: (p: string) => voi
             <select className="nc-select" value={fIndustry} onChange={(e) => setFIndustry(e.target.value)}>
               {CUST_INDUSTRIES.map((s) => <option key={s}>{s}</option>)}
             </select>
+          </Field>
+          <Field label="法定代表人" note="签约主体法定代表人，用于合同「相对方信息」">
+            <input className="nc-input" value={fLegalRep} onChange={(e) => setFLegalRep(e.target.value)} placeholder="如 李建成" />
+          </Field>
+          <Field label="开户行" note="对方对公账户开户银行">
+            <input className="nc-input" value={fBank} onChange={(e) => setFBank(e.target.value)} placeholder="如 中国建设银行昆明西山区支行" />
+          </Field>
+          <Field label="银行账号" span={2} note="对公银行账号，用于合同相对方信息与收付款">
+            <input className="nc-input num" value={fBankAcct} onChange={(e) => setFBankAcct(e.target.value)} placeholder="如 5300 1234 5678 9000 1122" />
+          </Field>
+          <Field label="注册地址" span={2} note="工商注册地址，用于合同抬头与发票">
+            <input className="nc-input" value={fAddress} onChange={(e) => setFAddress(e.target.value)} placeholder="如 云南省昆明市西山区前兴路 888 号" />
           </Field>
           <Field label="备注" span={2} note="决策链 / 合作偏好">
             <textarea className="nc-textarea" value={fNote} onChange={(e) => setFNote(e.target.value)} placeholder="如 决策链：区域总 → 工程部 → 招采" />

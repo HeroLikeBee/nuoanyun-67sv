@@ -1,22 +1,23 @@
 // 合同详情（独立路由页）—— 列表行点击跳转 #page=contract-detail&id=xxx，内容区全屏打开
 // 由原「合同详情抽屉」迁移而来：去掉右侧抽屉遮罩 / 定宽 aside / 关闭按钮，改为页内面包屑 + 返回列表
-// 结构对齐：面包屑 / 页头（编号 + 状态 + 类型 + 操作区）/ 5 张统计卡 / Tab / 主体 / 页脚
-// ★ 合同文件页（Tab「文档」）= 基础信息 + 电子合同纸面正文 + AI 审查侧栏（零切换，三者同屏）
-//   电子合同：条款正文按合同类型套用模板 → 变量插值；电子签章完成即「已签署」并生成签署栏 + 印章 + 防伪水印
-//   AI 融入电子合同：AI 不再单独占 Tab，而是作为纸面右侧审查栏，与条款双向定位（角标 ↔ 风险项）
-// 两套“从属”表达，勿混淆：
-//   ① 真实合同族（写入台账，见 data.ts）：主合同 + 价格/服务补充 + 框架执行单，靠 contractRole + parentId 挂载；
-//   ② 工作量拆分视图（本页 buildSubs，不写台账、不产生新合同）：主合同按工作量/分期拆成 -01/-02 只读视图，可下钻后返回。
+// 六 Tab 结构（2026-09-28 口径）：①详细信息（状态轴/基本信息/相对方/产品明细/款项明细快照/关联项目）
+//   ②收付款计划（期次执行跟踪 · 方向感知 · 一键补平）③开票管理（INVOICES 蓝/红子页签 · 按合同过滤只读）
+//   ④收付款记录（回款登记流水 + 付款单记录）⑤合同核算（执行额勾稽/结算/收支汇总/不含税与税额/执行额拆解）
+//   ⑥合同变更（变更与签证唯一发起入口 + 变更发起时 AI 审核）
+// 降级出 Tab：AI 审核（向导提交前 + 变更发起时）、电子签（头部动作位弹层 + 列表行内保留）、
+//   合同文件（电子合同正文 + 附件分类 + 借阅记录 → 头部「合同文件」弹层）、操作日志 → 头部「操作记录」弹层
+// 从属表达（唯一）：真实合同族（写入台账，见 data.ts）—— 主合同 + 价格/服务补充 + 框架执行单，靠 contractRole + parentId 挂载。
 // 勾稽：合同总额 = Σ明细行；已收款 = Σ收款计划实收；质保金 = 结算总额 × 3% 上限；实收只来自回款登记
 // 收款红字冲销一笔仅一次 · 付款超限硬拦截 · 政府 / 部队四件套
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Banner, Btn, ChainBar, Check, Code, ConfirmModal, EntityLink, Field, KvGrid, Money, Modal, Op, OpSep, Progress, Tabs, Tag, Timeline, Tip, useToast, pressProps,} from '../components/ui';
 import {
-  CONTRACTS, CONTRACT_STATUS_TONE, CONTRACT_TERMINATE_TYPES, CUSTOMERS, PROJECTS,
+  BIDS, CONTRACTS, CONTRACT_STATUS_TONE, CONTRACT_TERMINATE_TYPES, CUSTOMERS, INVOICES, OPPS, PROJECTS,
   SIGN_LOCATE_MODES, SIGN_ORDERS, SIGN_SEAL_TYPES, canSeeMoney, contractOverdue, contractOverpay, fmt, fmtWan, normContractStatus, signStatusOf, TODAY,
+  openPayOf, paidOf, paidPctOf,
 } from '../components/data';
-import type { Installment, SignConfig, SignParty } from '../components/data';
+import type { Installment, PaymentOrder, SignConfig, SignParty } from '../components/data';
 import {
   getSignConfig, patchContract, saveSignConfig, setBizStatus, setPendingExec, setPendingProject, setPendingSupplement,
   signOneParty, startSign, subscribeStore, withdrawSign,
@@ -36,12 +37,49 @@ const moneyTxt = (v: number, role: string, wan?: boolean) =>
   canSeeMoney(role) ? (wan ? fmtWan(v) : fmt(v)) : '—';
 
 const PARTY_B = '诺盾博达消防科技有限公司';
+/** 人民币大写（原型级：整数元；跨节补零按低位节 <1000 判定，如 100500 → 壹拾万零伍佰） */
+function amtCN(n: number): string {
+  const D = '零壹贰叁肆伍陆柒捌玖';
+  const U = ['', '拾', '佰', '仟'];
+  const S = ['', '万', '亿'];
+  const four = (x: number): string => {
+    const parts: string[] = [];
+    for (let i = 3; i >= 0; i--) {
+      const d = Math.floor(x / 10 ** i) % 10;
+      if (d) parts.push(D[d] + U[i]);
+      else if (parts.length && !parts[parts.length - 1].endsWith('零')) parts.push('零');
+    }
+    const j = parts.join('');
+    return j.endsWith('零') ? j.slice(0, -1) : j;
+  };
+  const v = Math.round(Math.abs(n));
+  if (v === 0) return '零元整';
+  let out = ''; let sec = 0; let rest = v; let lowVal = 0;
+  while (rest > 0) {
+    const p = rest % 10000;
+    rest = Math.floor(rest / 10000);
+    if (p) {
+      const seg = four(p) + S[sec];
+      out = out ? seg + (lowVal < 1000 ? '零' : '') + out : seg;
+      lowVal = p;
+    }
+    sec++;
+  }
+  return `人民币${out}元整`;
+}
 /** 按主体名称反查客户档案（用于「相对方」穿透到客户详情） */
 const custOf = (name: string) => CUSTOMERS.find((x) => x.name === name);
 /** 状态色调：与列表页 / 驾驶舱共用 data.ts 的唯一事实源 */
 const ST_TONE = CONTRACT_STATUS_TONE;
 const TYPE_TONE: Record<string, 'blue' | 'orange' | 'purple' | 'green'> = {
   销售合同: 'blue', 采购合同: 'orange', 框架协议: 'purple', 维护保养合同: 'green',
+};
+/** 落地 / 旧键 → 六 Tab 映射（模块级：initialTab 与 mainTab 共用同一份，防止两处真相漂移） */
+const LAND_TAB: Record<string, string> = {
+  info: 'info', doc: 'info', plan: 'plan', money: 'plan',
+  invoice: 'invoice', records: 'records', pay: 'records',
+  accounting: 'accounting', sub: 'accounting', change: 'change',
+  appr: 'info', list: 'info', proj: 'info',
 };
 /** 签署方状态色调（CON-02） */
 const PARTY_TONE: Record<string, 'gray' | 'orange' | 'green' | 'red'> = {
@@ -81,13 +119,14 @@ type PlanRow = { no: number; node: string; plan: number; actual: number; status:
 type ProjRow = { code: string; name: string; owner: string; status: string; stype: string };
 type LogRow = { time: string; warn?: boolean; text: React.ReactNode };
 type CView = {
-  code: string; name: string; status: string; stype: string; isSub: boolean;
-  parentCode?: string; parentName?: string;
+  code: string; name: string; status: string; stype: string;
   total: number; spent: number;
   /** 框架协议额度（仅框架协议主视图有；普通合同为空，金额一律取 total） */
   limitAmt?: number;
-  partyA: string; sign: string; end: string; start: string; warranty: number;
+  partyA: string; sign: string; eff: string; end: string; start: string; warranty: number;
   place: string; owner: string; contact: string; phone: string; industry: string; region: string;
+  /* 相对方（对方主体）工商 / 银行信息 —— 派生自客户档案，只读 */
+  legalRep: string; address: string; bank: string; bankAcct: string;
   details: DetailRow[]; plans: PlanRow[]; files: FileGroups; projects: ProjRow[]; logs: LogRow[];
 };
 
@@ -206,7 +245,7 @@ const PLAN_TPL: [string, number][] = [
 ];
 /**
  * 收款计划：**优先用合同自带的收款期次**（`Contract.installments`，来自签约时约定的收款节点）。
- * 无期次数据（如框架协议、工作量拆分视图）时才按 30/40/27/3 模板套算：
+ * 无期次数据（如框架协议）时才按 30/40/27/3 模板套算：
  * 计划额末期兜底差额、质保金封顶法定 3%；实收按已收总额逐期填充 → 出现「部分收款」态。
  */
 function buildPlans(total: number, recv: number, sign: string, end: string, inst?: Installment[]): PlanRow[] {
@@ -275,19 +314,26 @@ function buildFiles(c: C, subSuffix?: string): FileGroups {
 function buildMain(c: C, role: string): CView {
   const period = `${c.start} ~ ${c.end}`;
   const proj = PROJECTS.find((p) => p.id === c.project);
+  /* 相对方工商 / 银行信息取自客户档案（无档案时以合同主体名兜底，避免出现空白） */
+  const cust = custOf(c.party);
+  const placeTxt = c.project ? '按项目现场实施地点执行' : '按分项约定地点执行';
   return {
     code: c.id, name: c.name, status: normContractStatus(c.status),
     stype: (['已续签', '已终止'].includes(normContractStatus(c.status)) ? 'done'
       : normContractStatus(c.status) === '履约中' ? 'processing' : 'pending') as 'done' | 'processing' | 'pending',
-    isSub: false,
     total: c.execAmt, spent: Math.round(c.execAmt * 0.14),
     ...(c.type === '框架协议' ? { limitAmt: c.amt } : {}),
-    partyA: c.party, sign: c.sign, start: c.start, end: c.end, warranty: 12,
-    place: c.project ? '按项目现场实施地点执行' : '按分项约定地点执行',
-    owner: c.owner, contact: '王芳', phone: '138-0000-8888',
+    partyA: c.party, sign: c.sign, eff: c.effectiveDate || c.sign, start: c.start, end: c.end, warranty: 12,
+    place: placeTxt,
+    owner: c.owner,
+    contact: cust?.contact ?? '王芳', phone: cust?.fullPhone ?? '138-0000-8888',
     industry: guessIndustry(c), region: guessRegion(c),
+    legalRep: cust?.legalRep ?? '—',
+    address: cust?.address ?? placeTxt,
+    bank: cust?.bank ?? '—',
+    bankAcct: cust?.bankAcct ?? '—',
     details: buildDetails(c.execAmt, period),
-    plans: buildPlans(c.execAmt, c.recv, c.sign, c.end, c.installments),
+    plans: buildPlans(c.execAmt, c.type === '采购合同' ? paidOf(c) : c.recv, c.sign, c.end, c.installments),
     files: buildFiles(c),
     projects: c.project ? [{ code: c.project, name: proj ? proj.name : c.project, owner: c.owner, status: '进行中', stype: 'processing' }] : [],
     logs: [
@@ -299,83 +345,26 @@ function buildMain(c: C, role: string): CView {
   };
 }
 
-/** 拆分定义：工作量拆分单的一行（「＋ 发起拆分」弹窗填写生成） */
-type SplitDef = { suf: string; sname: string; type: string; total: number; status: string; stype: string; owner: string };
-
-/** 工作量拆分视图：按拆分定义生成只读视图对象（-01/-02…），合计即拆分单金额，余款由主合同直接执行。
- *  这些视图不写入合同台账、不产生新合同（真正的补充协议 / 框架执行单见 data.ts 的 contractRole + parentId）。 */
-function buildSubViews(c: C, role: string, defs: SplitDef[]): CView[] {
-  return defs.map((d) => {
-    const total = d.total;
-    const recv = Math.round(total * (d.stype === 'done' ? 1 : 0.62));
-    const start = d.stype === 'done' ? addDays(c.start, 20) : c.start;
-    const end = d.stype === 'done' ? addDays(c.end, -60) : c.end;
-    return {
-      code: `${c.id}${d.suf}`, name: `${c.name}（${d.sname}）`, status: d.status, stype: d.stype, isSub: true,
-      parentCode: c.id, parentName: c.name,
-      total, spent: Math.round(total * 0.14),
-      partyA: c.party, sign: c.sign, start, end, warranty: 12,
-      place: c.party, owner: d.owner, contact: '王芳', phone: '138-0000-8888',
-      industry: guessIndustry(c), region: guessRegion(c),
-      details: [{ no: 1, biz: `${d.type}服务`, period: `${start} ~ ${end}`, amount: total, dir: '收入', remark: d.stype === 'done' ? '已交付并验收通过' : '按主合同拆分执行' }],
-      plans: buildPlans(total, recv, c.sign, end),
-      files: {
-        quote: [{ name: `${d.sname}分项报价.xlsx`, by: d.owner, date: c.sign, size: '92 KB', type: 'XLS', color: '#69b1ff' }],
-        safety: d.stype === 'done' ? [] : [{ name: `${d.sname}安全交底记录.pdf`, by: d.owner, date: start, size: '800 KB', type: 'PDF', color: '#ff7875' }],
-        award: [],
-      },
-      projects: c.project
-        ? [{ code: `${c.project}${d.suf.replace('-', '')}`, name: `${c.name}（${d.sname}）项目`, owner: d.owner, status: d.status === '已完成' ? '已完成' : '进行中', stype: d.stype }]
-        : [],
-      logs: [
-        { time: `${c.sign} 15:12`, text: <><b>{c.owner}</b> 创建工作量拆分视图（按主合同 <b>{c.id}</b> 工作量拆分，不产生新合同），金额 <Money v={total} role={role} /></> },
-        { time: `${start} 09:00`, warn: true, text: <>期1款 <b><Money v={Math.round(total * 0.3)} role={role} /></b> 到账</> },
-        ...(d.stype === 'done' ? [{ time: `${end} 16:40`, text: <><b>{d.owner}</b> 交付《{d.type}报告》，状态变更为 <Tag tone="green">已完成</Tag></> }] : []),
-      ],
-    };
-  });
-}
-
-/** 默认拆分视图（未发起拆分时展示）：主合同按工作量/分期拆为 -01/-02，合计约占总额 65%，余款由主合同直接执行 */
-function buildSubs(c: C, role: string): CView[] {
-  /* 框架协议不按额度做工作量拆分（额度 ≠ 已执行），其下真实执行单由详情组件单独从台账查询展示 */
-  if (c.type === '采购合同' || c.type === '框架协议') return [];
-  return buildSubViews(c, role, [
-    { suf: '-01', sname: '一期主体', type: '消防工程', total: Math.round(c.execAmt * 0.5), status: '履约中', stype: 'processing', owner: c.owner },
-    { suf: '-02', sname: '二期 / 检测', type: '检测', total: Math.round(c.execAmt * 0.15), status: '已完成', stype: 'done', owner: '王磊' },
-  ]);
-}
-
-/* ============================ 基础信息 13 字段 ============================ */
+/* ============================ 基础信息字段（相对方信息独立成卡，见渲染区） ============================ */
 type FieldDef = {
-  k: string; label: string; type: 'input' | 'date' | 'warranty' | 'ref' | 'chip';
-  span?: 2; anchor?: boolean; optional?: boolean; num?: boolean; blue?: boolean;
+  k: string; label: string; type: 'input' | 'date' | 'warranty';
+  span?: 2; anchor?: boolean; optional?: boolean;
 };
 const FIELDS: FieldDef[] = [
   { k: 'name', label: '合同名称', type: 'input', span: 2 },
-  { k: 'partyA', label: '发包方', type: 'input' },
-  { k: 'partyB', label: '承包方', type: 'input' },
-  { k: 'signDate', label: '签约日期', type: 'date', anchor: true },
-  { k: 'endDate', label: '到期日', type: 'date', anchor: true },
+  { k: 'signDate', label: '签署日期', type: 'date', anchor: true },
+  { k: 'endDate', label: '合同结束日期', type: 'date', anchor: true },
+  { k: 'effDate', label: '合同生效日期', type: 'date' },
   { k: 'startDate', label: '开工日期', type: 'date', optional: true },
   { k: 'warranty', label: '质保期', type: 'warranty' },
   { k: 'place', label: '实施地点', type: 'input', span: 2 },
   { k: 'owner', label: '负责人', type: 'input' },
-  { k: 'contact', label: '发包方联系人', type: 'ref', num: false },
-  { k: 'phone', label: '联系电话', type: 'ref', num: true },
-  { k: 'industry', label: '行业', type: 'chip' },
-  { k: 'region', label: '地区', type: 'chip', blue: true },
 ];
 const FIELD_LABEL: Record<string, string> = {
-  name: '合同名称', partyA: '发包方', partyB: '承包方', signDate: '签约日期', endDate: '到期日',
+  name: '合同名称', signDate: '签署日期', endDate: '合同结束日期', effDate: '合同生效日期',
   startDate: '开工日期', warranty: '质保期', place: '实施地点', owner: '负责人',
 };
 
-const PAYMENTS = [
-  { id: 'PF000031', name: '消防设备采购付款（报警系统）', party: '云南××消防设备有限公司', amt: 258000, type: '采购付款', status: '审批中', date: '2026-09-21', check: '已付 + 本次 ≤ 执行金额 × 100% ✓' },
-  { id: 'PF000028', name: '劳务分包进度款（第一期）', party: '昆明××建筑劳务有限公司', amt: 180000, type: '分包付款', status: '已付款', date: '2026-09-10', check: '校验通过' },
-  { id: 'PF000025', name: '安全文明施工措施费', party: '昆明××建筑劳务有限公司', amt: 46000, type: '费用付款', status: '已付款', date: '2026-09-05', check: '校验通过' },
-];
 const CHANGES = [
   { id: 'BG000009', name: '设计变更（增机房气体灭火）', amt: 80000, status: '审批中', date: '2026-09-22', reason: '发包方要求机房增设七氟丙烷灭火系统' },
   { id: 'BG000004', name: '工程量签证（管道增加 68 米）', amt: 32000, status: '已生效', date: '2026-09-14', reason: '现场实际走向调整，经监理确认' },
@@ -403,13 +392,32 @@ export default function ContractDetailPage({ go, role, nav }: { go: (p: string) 
   }, [focusId, rowsTick]);
   /* 状态覆盖层：与列表同源（审批回写 → 归一化），避免列表显示「已签约」而详情仍是旧值 */
   const c: C | null = hit ? { ...hit, status: normContractStatus(getBizStatus(hit.id, hit.status)) } : null;
-  /* 落地 Tab：调用方 setFocusTab('contract-detail', t)，消费一次即清除；默认合同文件 */
-  const [initialTab] = useState(() => consumeFocusTab('contract-detail') || 'doc');
+  /* 落地目标：调用方 setFocusTab('contract-detail', t)，消费一次即清除；默认「详细信息」。
+     Tab 键直接落地；头部动作键（sign/attach/borrow/doc/log）落地 info 并自动打开对应弹层 */
+  const [landing] = useState(() => consumeFocusTab('contract-detail') || 'info');
+  const initialTab = LAND_TAB[landing] || 'info';
   /* 抽屉动作 onClose 在页内语义 = 返回合同列表 */
   const onClose = () => go('contract');
   const [tab, setTab] = useState(initialTab);
-  const [view, setView] = useState<'main' | 'sub'>('main');
-  const [subIdx, setSubIdx] = useState(0);
+  const [autoPanel, setAutoPanel] = useState<string | null>(() =>
+    landing === 'sign' ? 'sign'
+      : (landing === 'doc' || landing === 'attach' || landing === 'borrow') ? 'files'
+      : landing === 'log' ? 'logs' : null);
+  /* 头部弹层（降级出 Tab 的承载面）：合同文件（正文/附件/借阅）· 操作记录 · 电子签 */
+  const [fileOpen, setFileOpen] = useState(false);
+  const [fileSub, setFileSub] = useState<'attach' | 'borrow'>('attach');
+  const [logsOpen, setLogsOpen] = useState(false);
+  const [signOpen, setSignOpen] = useState(false);
+  /* 开票管理：蓝票 / 红票 子页签 */
+  const [invSub, setInvSub] = useState<'blue' | 'red'>('blue');
+  /* 变更发起时 AI 审核（changeOpen 弹窗内） */
+  const [chgAi, setChgAi] = useState<'idle' | 'running' | 'done'>('idle');
+  const openPanel = (p: string) => {
+    if (p === 'sign') setSignOpen(true);
+    else if (p === 'files') { setFileSub('attach'); setFileOpen(true); }
+    else if (p === 'logs') setLogsOpen(true);
+  };
+  useEffect(() => { if (autoPanel) { openPanel(autoPanel); setAutoPanel(null); } /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [autoPanel]);
 
   /* 覆盖层：回款登记 / 基础信息编辑 / 附件增删 / 追加日志 */
   const [recvOv, setRecvOv] = useState<{ key: string; actuals: number[] } | null>(null);
@@ -417,10 +425,6 @@ export default function ContractDetailPage({ go, role, nav }: { go: (p: string) 
   const [fileDel, setFileDel] = useState<string[]>([]);
   const [fileAdd, setFileAdd] = useState<{ key: string; g: FileKey; f: FileItem }[]>([]);
   const [extraLogs, setExtraLogs] = useState<{ key: string; row: LogRow }[]>([]);
-  /* 工作量拆分（发起流程）：splitPlans=已发起的拆分单（null=未发起，走默认视图）；弹窗草稿行 */
-  const [splitPlans, setSplitPlans] = useState<SplitDef[] | null>(null);
-  const [splitOpen, setSplitOpen] = useState(false);
-  const [splitDraft, setSplitDraft] = useState<{ sname: string; type: string; amt: string }[]>([]);
 
   const [edit, setEdit] = useState(false);
   const [draft, setDraft] = useState<Record<string, string>>({});
@@ -428,7 +432,7 @@ export default function ContractDetailPage({ go, role, nav }: { go: (p: string) 
   const [payRow, setPayRow] = useState<PlanRow | null>(null);
   const [delFile, setDelFile] = useState<{ g: FileKey; i: number; name: string } | null>(null);
   const [rebutOpen, setRebuttal] = useState<PlanRow | null>(null);
-  const [payOpen, setPayOpen] = useState<null | typeof PAYMENTS[number]>(null);
+  const [payOpen, setPayOpen] = useState<PaymentOrder | null>(null);
   const [changeOpen, setChangeOpen] = useState(false);
   const [settleOpen, setSettleOpen] = useState(false);
   const [termOpen, setTermOpen] = useState(false);
@@ -485,9 +489,8 @@ export default function ContractDetailPage({ go, role, nav }: { go: (p: string) 
   const [addH, setAddH] = useState('');
   const [addT, setAddT] = useState('');
 
-  const subs = useMemo(() => (c ? (splitPlans ? buildSubViews(c, role, splitPlans) : buildSubs(c, role)) : []), [c, role, splitPlans]);
   const mainV = useMemo(() => (c ? buildMain(c, role) : null), [c, role]);
-  const base: CView | null = view === 'sub' ? subs[subIdx] ?? null : mainV;
+  const base: CView | null = mainV;
 
   /* 应用覆盖层 → 当前视图 */
   const cur: CView | null = useMemo(() => {
@@ -500,6 +503,7 @@ export default function ContractDetailPage({ go, role, nav }: { go: (p: string) 
         name: v.name ?? out.name,
         partyA: v.partyA ?? out.partyA,
         sign: v.signDate ?? out.sign,
+        eff: v.effDate ?? out.eff,
         end: v.endDate ?? out.end,
         start: v.startDate ?? out.start,
         warranty: Number(v.warranty ?? out.warranty),
@@ -529,13 +533,13 @@ export default function ContractDetailPage({ go, role, nav }: { go: (p: string) 
 
   /* 切换合同（nav 脉冲）或从列表指定落地 Tab 时，重置视图 / 覆盖层 / 草稿 */
   useEffect(() => {
-    setTab(initialTab); setView('main'); setSubIdx(0); setEdit(false); setSpecial(false);
+    setTab(initialTab); setEdit(false); setSpecial(false);
     setRecvOv(null); setEditOv(null); setFileDel([]); setFileAdd([]); setExtraLogs([]);
     setDraft({}); setErrs({}); setPayRow(null); setDelFile(null); setRebuttal(null);
     // nav 进依赖：同一详情页反复下钻不同合同也要重新落地
   }, [c?.id, nav, initialTab]);
 
-  /* 电子合同正文：随「主合同 / 工作量拆分视图」与合同类型重建；AI 审查结果同步重置 */
+  /* 电子合同正文：随合同类型重建；AI 审查结果同步重置 */
   useEffect(() => {
     if (!cur || !c) { setClauses([]); setRisks([]); setScanned(false); return; }
     setClauses(buildClauses(cur, c.type, taxOf(c.type), freqOf(c), cur.warranty, role));
@@ -576,33 +580,6 @@ export default function ContractDetailPage({ go, role, nav }: { go: (p: string) 
   }
 
   const pushLog = (row: LogRow) => setExtraLogs((l) => [{ key: cur.code, row }, ...l]);
-
-  /* ---- 工作量拆分：发起流程（弹窗草稿 → 校验勾稽 → 生成拆分单 + 操作留痕） ---- */
-  const openSplit = () => {
-    if (!c) return;
-    const total = c.execAmt || c.amt || 0;
-    setSplitDraft([
-      { sname: '一期主体', type: '消防工程', amt: String(Math.round(total * 0.5)) },
-      { sname: '二期 / 检测', type: '检测', amt: String(Math.round(total * 0.15)) },
-    ]);
-    setSplitOpen(true);
-  };
-  const confirmSplit = () => {
-    if (!c) return;
-    const total = c.execAmt || c.amt || 0;
-    const rows = splitDraft.map((r) => ({ ...r, amt: Number(r.amt) || 0 }));
-    const sum = rows.reduce((a, r) => a + r.amt, 0);
-    if (!rows.length || rows.some((r) => r.amt <= 0)) { toast('每份拆分金额需大于 0'); return; }
-    if (sum > total) { toast('拆分合计超出主合同总额，请调减金额'); return; }
-    const defs: SplitDef[] = rows.map((r, i) => ({
-      suf: `-0${i + 1}`, sname: r.sname || `拆分项${i + 1}`, type: r.type, total: r.amt,
-      status: i === 0 ? '履约中' : '待执行', stype: 'processing', owner: c.owner,
-    }));
-    setSplitPlans(defs);
-    setSplitOpen(false);
-    pushLog({ time: TODAY, text: <><b>{c.owner}</b> 发起工作量拆分：{defs.length} 份，合计 <Money v={sum} role={role} />（占总额 {Math.round(sum / total * 100)}%），余款由主合同直接执行</> });
-    toast(`已发起拆分：${defs.length} 份 · 合计 ${(sum / 10000).toFixed(2)} 万（余款由主合同执行）`);
-  };
 
   /* ---- 电子签动作（CON-02）：全部落 store，不留假闭环 ---- */
   const doSaveSignCfg = () => {
@@ -663,6 +640,20 @@ export default function ContractDetailPage({ go, role, nav }: { go: (p: string) 
   const dLeft = Math.round((new Date(cur.end).getTime() - new Date(TODAY).getTime()) / 86400000);
   const isGov = c.party.includes('医院') || c.party.includes('政府') || c.party.includes('管理局');
   const isPurchase = c.type === '采购合同';
+  /* 关联链路（只读）：关联投标取中标投标单外键；关联商机优先取合同自带 oppId，其次由投标单回溯 */
+  const relBidId = c.bidId;
+  const relOppId = c.oppId || (relBidId ? BIDS.find((b) => b.id === relBidId)?.opp : undefined);
+  const relBid = relBidId ? BIDS.find((b) => b.id === relBidId) : undefined;
+  const relOpp = relOppId ? OPPS.find((o) => o.id === relOppId) : undefined;
+  /* 六 Tab 派生：方向（采购=付款语义）/ 发票按合同过滤（蓝=正常+作废，红=已红字冲销）/ 回款登记流水 */
+  const payDir = isPurchase;
+  const invRows = INVOICES.filter((v) => v.contract === c.id);
+  const invBlue = invRows.filter((v) => v.status !== '已红字冲销');
+  const invRed = invRows.filter((v) => v.status === '已红字冲销');
+  const recvFlow = cur.plans.filter((p) => p.actual > 0);
+  const stTxt = (s: string) => (payDir ? s.replace(/收款/g, '付款') : s);
+  /* 付款单挂在本合同上（原先是一份模块级常量，任何采购合同打开都看到同样 3 张，张冠李戴） */
+  const payOrders = c.payOrders ?? [];
   const isFramework = c.type === '框架协议';
   /* 框架协议的真实执行单：parentId 指向本协议（不按额度伪造拆分）；点击进入执行单合同详情独立页 */
   const execOrders = useMemo(() => (isFramework ? getContracts().filter((k) => k.parentId === c.id) : []), [isFramework, c]);
@@ -680,62 +671,62 @@ export default function ContractDetailPage({ go, role, nav }: { go: (p: string) 
   /** 电子签状态（CON-02）：未登记 signStatus 的合同视为「未发起」 */
   const signSt = signStatusOf(c);
 
-  /* ---- 问题条（点击跳转到对应 Tab） ---- */
+  /* ---- 问题条（点击跳转到对应 Tab 或打开头部弹层） ---- */
   const issues: { tone: string; text: string; tab: string }[] = [];
   /* 逾期指向「首个未收齐的期次」而非写死 plans[1]：期次数随合同而异（单期合同只有 1 行） */
   const firstOpen = cur.plans.find((p) => p.stype !== 'done');
-  if (contractOverpay(c)) issues.push({ tone: 'is-red', text: ' 超付预警：累计已付已接近执行金额上限，继续付款将被硬拦截', tab: 'pay' });
-  if (contractOverdue(c) && firstOpen) issues.push({ tone: 'is-red', text: `${firstOpen.node} 已收 ${moneyTxt(firstOpen.actual, role, true)} / 应收 ${moneyTxt(firstOpen.plan, role, true)}，差额 ${moneyTxt(firstOpen.plan - firstOpen.actual, role, true)} · 逾期风险`, tab: 'money' });
-  if (cSt === '待审批') issues.push({ tone: 'is-orange', text: ' 待审批：该合同尚未完成审批流转，请到「审批中心」处理', tab: 'appr' });
+  if (contractOverpay(c)) issues.push({ tone: 'is-red', text: ' 超付预警：累计已付已接近执行金额上限，继续付款将被硬拦截', tab: 'records' });
+  if (contractOverdue(c) && firstOpen) issues.push({ tone: 'is-red', text: `${firstOpen.node} 已收 ${moneyTxt(firstOpen.actual, role, true)} / 应收 ${moneyTxt(firstOpen.plan, role, true)}，差额 ${moneyTxt(firstOpen.plan - firstOpen.actual, role, true)} · 逾期风险`, tab: 'plan' });
+  if (cSt === '待审批') issues.push({ tone: 'is-orange', text: ' 待审批：该合同尚未完成审批流转，请到「审批中心」处理', tab: 'info' });
   if (signSt === '签署中') issues.push({ tone: 'is-orange', text: ' 电子签进行中：尚有签署方未完成签署，全部完成后合同方可转「已签约」', tab: 'sign' });
-  if (signSt === '已签' && cSt === '待审批') issues.push({ tone: 'is-gold', text: ' 电子签已完成：合同可转「已签约」（在「电子签」页签确认）', tab: 'sign' });
+  if (signSt === '已签' && cSt === '待审批') issues.push({ tone: 'is-gold', text: ' 电子签已完成：合同可转「已签约」（在头部「电子签」弹层确认）', tab: 'sign' });
   if (c.type === '框架协议') {
     if (usedPct >= 80) {
-      issues.push({ tone: 'is-orange', text: ` 框架协议：执行单累计执行金额已达框架额度 ${usedPct}%，超出须签补充协议提高额度`, tab: 'sub' });
+      issues.push({ tone: 'is-orange', text: ` 框架协议：执行单累计执行金额已达框架额度 ${usedPct}%，超出须签补充协议提高额度`, tab: 'accounting' });
     } else {
-      issues.push({ tone: 'is-gold', text: ` 框架协议：额度 ${moneyTxt(c.amt, role)}，已执行 ${moneyTxt(usedExec, role)}（${usedPct}%），剩余可用 ${moneyTxt(Math.max(c.amt - usedExec, 0), role)}；单笔执行单 ≥50 万须财务复核`, tab: 'sub' });
+      issues.push({ tone: 'is-gold', text: ` 框架协议：额度 ${moneyTxt(c.amt, role)}，已执行 ${moneyTxt(usedExec, role)}（${usedPct}%），剩余可用 ${moneyTxt(Math.max(c.amt - usedExec, 0), role)}；单笔执行单 ≥50 万须财务复核`, tab: 'accounting' });
     }
   }
-  if (contractOverdue(c) || contractOverpay(c)) issues.push({ tone: 'is-orange', text: ' AI 审查命中「违约金 30%」高风险条款，建议复核（见「合同文件」电子合同右栏）', tab: 'doc' });
+  if (contractOverdue(c) || contractOverpay(c)) issues.push({ tone: 'is-orange', text: ' AI 审查命中「违约金 30%」高风险条款，建议复核（见头部「合同文件」电子合同右栏）', tab: 'doc' });
   if (isGov) issues.push({ tone: 'is-gold', text: ' 政府 / 部队项目：安全 / 廉政 / 农民工工资 / 技术协议四件套须齐备', tab: 'attach' });
 
-  /* ---- Tab（采购合同无工作量拆分；拆分视图下不显示该 Tab） ----
-     对齐参考：原「概览 / AI 审查」两 Tab 合并为「合同文件」——基础信息 + 电子合同纸面 + AI 审查侧栏同屏零切换 */
+  /* ---- 六 Tab（2026-09-28 口径）：采购合同方向感知为付款语义；执行单并入「合同核算」 ---- */
   const tabs = [
-    { key: 'doc', label: '合同文件' },
-    { key: 'list', label: '合同明细', cnt: cur.details.length },
-    ...(view === 'main' && (isFramework ? execOrders.length : subs.length)
-      ? [{ key: 'sub', label: isFramework ? '执行单' : '工作量拆分', cnt: isFramework ? execOrders.length : subs.length }]
-      : []),
-    isPurchase
-      ? { key: 'money', label: '付款记录', cnt: PAYMENTS.length }
-      : { key: 'money', label: '收款计划', cnt: cur.plans.length },
-    ...(isPurchase ? [] : [{ key: 'pay', label: '付款与请款', cnt: PAYMENTS.length }]),
-    { key: 'change', label: '变更与签证', cnt: CHANGES.length },
-    { key: 'attach', label: '附件', cnt: GROUPS.reduce((a, [g]) => a + cur.files[g].length, 0) },
-    { key: 'proj', label: '关联项目', cnt: cur.projects.length },
-    { key: 'appr', label: '审批流转' },
-    { key: 'sign', label: '电子签' },
-    { key: 'borrow', label: '借阅记录', cnt: 2 },
-    { key: 'log', label: '操作日志', cnt: cur.logs.length },
+    { key: 'info', label: '详细信息' },
+    { key: 'plan', label: payDir ? '付款计划' : '收款计划', cnt: cur.plans.length },
+    { key: 'invoice', label: '开票管理', cnt: invRows.length },
+    { key: 'records', label: payDir ? '付款记录' : '收款记录', cnt: recvFlow.length + payOrders.length },
+    { key: 'accounting', label: '合同核算' },
+    { key: 'change', label: '合同变更', cnt: CHANGES.length },
   ];
+  /* ---- 旧键映射：外部跳转沿用旧 Tab key（doc/money/list/pay/sign/change/attach/appr/sub/log/borrow）----
+     Tab 键直接落地；头部动作键（sign/attach/borrow/doc/log）由 openIssueTab 打开对应弹层。映射表 = 模块级 LAND_TAB */
+  const mainTab = LAND_TAB[tab] || 'info';
+  const openIssueTab = (t: string) => {
+    if (t === 'sign' || t === 'attach' || t === 'doc' || t === 'log' || t === 'borrow') {
+      if (t === 'attach') setFileSub('attach');
+      if (t === 'borrow') setFileSub('borrow');
+      setAutoPanel(t === 'sign' ? 'sign' : t === 'log' ? 'logs' : 'files');
+    } else {
+      setTab(LAND_TAB[t] || 'info');
+    }
+  };
 
-  /* ---- 基础信息取值（编辑态 / 查看态） ---- */
+  /* ---- 基础信息取值（编辑态 / 查看态；相对方信息为只读子区块，不进本表单） ---- */
   const vals: Record<string, string> = edit
     ? draft
     : {
-      name: cur.name, partyA: cur.partyA, partyB: PARTY_B,
-      signDate: cur.sign, endDate: cur.end, startDate: cur.start, warranty: String(cur.warranty),
-      place: cur.place, owner: cur.owner, contact: cur.contact, phone: cur.phone,
-      industry: cur.industry, region: cur.region,
+      name: cur.name,
+      signDate: cur.sign, endDate: cur.end, effDate: cur.eff || cur.sign, startDate: cur.start, warranty: String(cur.warranty),
+      place: cur.place, owner: cur.owner,
     };
   const setV = (k: string, v: string) => setDraft((d) => ({ ...d, [k]: v }));
 
   const startEdit = () => {
     if (cur.stype === 'done') { toast('该合同已完成，字段已锁定，如需修改请走变更流程'); return; }
     setDraft({
-      name: cur.name, partyA: cur.partyA, partyB: PARTY_B,
-      signDate: cur.sign, endDate: cur.end, startDate: cur.start, warranty: String(cur.warranty),
+      name: cur.name,
+      signDate: cur.sign, endDate: cur.end, effDate: cur.eff || cur.sign, startDate: cur.start, warranty: String(cur.warranty),
       place: cur.place, owner: cur.owner,
     });
     setErrs({});
@@ -745,21 +736,22 @@ export default function ContractDetailPage({ go, role, nav }: { go: (p: string) 
   /** 校验：到期 > 签约；开工 ⊆ [签约, 到期] */
   const saveEdit = () => {
     const e: Record<string, string> = {};
-    const s = draft.signDate, en = draft.endDate, st = draft.startDate;
-    if (!s) e.signDate = '请选择签约日期';
-    if (!en) e.endDate = '请选择到期日';
-    else if (s && en <= s) e.endDate = '到期日必须晚于签约日期';
+    const s = draft.signDate, en = draft.endDate, st = draft.startDate, ef = draft.effDate;
+    if (!s) e.signDate = '请选择签署日期';
+    if (!en) e.endDate = '请选择合同结束日期';
+    else if (s && en <= s) e.endDate = '合同结束日期必须晚于签署日期';
+    if (ef && en && ef > en) e.effDate = '生效日期不能晚于合同结束日期';
     if (st) {
-      if (st < s) e.startDate = '开工日期不能早于签约日期';
-      else if (st > en) e.startDate = '开工日期不能晚于到期日';
+      if (st < s) e.startDate = '开工日期不能早于签署日期';
+      else if (st > en) e.startDate = '开工日期不能晚于合同结束日期';
     }
     setErrs(e);
     if (Object.keys(e).length) { toast('请先修正标红的校验错误'); return; }
 
-    const o = { name: cur.name, partyA: cur.partyA, signDate: cur.sign, endDate: cur.end, startDate: cur.start, warranty: String(cur.warranty), place: cur.place, owner: cur.owner };
+    const o = { name: cur.name, signDate: cur.sign, endDate: cur.end, effDate: cur.eff || cur.sign, startDate: cur.start, warranty: String(cur.warranty), place: cur.place, owner: cur.owner };
     const changes: string[] = [];
     const anchors: string[] = [];
-    (['name', 'partyA', 'signDate', 'endDate', 'startDate', 'warranty', 'place', 'owner'] as const).forEach((k) => {
+    (['name', 'signDate', 'endDate', 'effDate', 'startDate', 'warranty', 'place', 'owner'] as const).forEach((k) => {
       const nv = draft[k] ?? o[k];
       if (String(nv) !== String(o[k])) {
         const ov = k === 'warranty' ? `${o[k]} 个月` : o[k] || '空';
@@ -775,24 +767,23 @@ export default function ContractDetailPage({ go, role, nav }: { go: (p: string) 
     toast('保存成功' + (anchors.length ? `（${anchors.join('、')}变更已生成变更单）` : ''));
   };
 
-  /* ---- 逐期登记回款 ---- */
+  /* ---- 逐期登记收/付款 + 一键补平 ---- */
   const confirmPay = () => {
     if (!payRow) return;
     const actuals = cur.plans.map((p) => (p.no === payRow.no ? p.plan : p.actual));
     setRecvOv({ key: cur.code, actuals });
     const sum = actuals.reduce((a, b) => a + b, 0);
-    pushLog({ time: nowStamp(), warn: true, text: <>期{payRow.no}款 <b><Money v={payRow.plan} role={role} /></b> 到账（回款登记），累计实收 <Money v={sum} role={role} /></> });
-    toast('回款登记成功 · 已收款 / 未收款已联动更新');
+    pushLog({ time: nowStamp(), warn: true, text: <>期{payRow.no}款 <b><Money v={payRow.plan} role={role} /></b> {payDir ? '付款登记完成' : '到账（回款登记）'}，累计{payDir ? '已付' : '实收'} <Money v={sum} role={role} /></> });
+    toast(payDir ? '付款登记成功 · 已付 / 待付已联动更新' : '回款登记成功 · 已收款 / 未收款已联动更新');
     setPayRow(null);
   };
-
-  const gotoSub = (i: number) => {
-    setSubIdx(i); setView('sub'); setTab('doc'); setEdit(false);
-    toast(`已打开工作量拆分视图：${subs[i].code}（只读，不产生新合同）`);
-  };
-  const backMain = () => {
-    setView('main'); setTab('doc'); setEdit(false);
-    toast(`已返回主合同：${c.id}`);
+  const fillAll = () => {
+    if (!cur.plans.some((p) => p.actual < p.plan)) { toast('所有期次均已收齐，无需补平'); return; }
+    const actuals = cur.plans.map((p) => p.plan);
+    setRecvOv({ key: cur.code, actuals });
+    const sum = actuals.reduce((a, b) => a + b, 0);
+    pushLog({ time: nowStamp(), warn: true, text: <>{payDir ? '付款' : '回款'}一键补平：全部 {cur.plans.length} 期补至计划额，累计 <Money v={sum} role={role} /></> });
+    toast(`已一键补平 ${cur.plans.length} 期 · ${payDir ? '已付' : '实收'}与计划对齐`);
   };
 
   return (
@@ -811,25 +802,13 @@ export default function ContractDetailPage({ go, role, nav }: { go: (p: string) 
             <span className="nc-d2-id">{cur.code}</span>
             <Tag tone={ST_TONE[cur.status] ?? 'gray'}>{cur.status}</Tag>
             <Tag tone={TYPE_TONE[c.type] ?? 'gray'}>{c.type}</Tag>
-            {cur.isSub && <Tag tone="purple">工作量拆分</Tag>}
             {dLeft < 30 && <Tag tone="red">剩余 {dLeft} 天</Tag>}
             <span className="spacer" />
             <Btn kind="primary" onClick={onClose} title="返回合同列表">← 返回列表</Btn>
-            {cur.isSub && <Btn onClick={backMain}>← 返回主合同</Btn>}
           </div>
           <div className="nc-d2-name">{cur.name}</div>
-          {/* 头部只留身份与时间；金额与收款进度一律由下方 5 张统计卡承载，不在此重复 */}
-          <div className="nc-d2-sub">
-            {cur.isSub && <span>工作量拆分自 <a className="nc-link" onClick={backMain}>{cur.parentCode}</a> {cur.parentName}（视图，不产生新合同）</span>}
-            {!cur.isSub && <span>相对方 {go ? <EntityLink target="customer" id={custOf(c.party)?.id} go={go} title="下钻到客户档案">{c.party}</EntityLink> : c.party}</span>}
-            <span>负责人 {cur.owner}</span>
-            {/* 上游来源单据（投标 → 合同 / 报价 → 合同）：按外键反查，修复前这两个字段落了库却没有出口 */}
-            {c.bidId && <span>中标依据 {go ? <EntityLink target="bid" id={c.bidId} go={go} title="下钻到中标投标单">{c.bidId}</EntityLink> : c.bidId}</span>}
-            {c.quoteId && <span>来源报价 {go ? <EntityLink target="quote-detail" id={c.quoteId} go={go} title="下钻到来源报价单">{c.quoteId}</EntityLink> : c.quoteId}</span>}
-            {c.project && <span>关联项目 {go ? <EntityLink target="project-center" id={c.project} go={go} title="下钻到项目详情">{c.project}</EntityLink> : c.project}</span>}
-            <span>工期 {cur.start} → {cur.end}</span>
-            <span>签约 {cur.sign}</span>
-          </div>
+          {/* 头部只留名称与状态；负责人 / 工期 / 签约由「基本信息」卡承载，相对方信息独立成卡，
+              金额与收款进度由下方 5 张统计卡承载，均不在头部重复 */}
         </div>
 
         {/* ---------- 问题条 ---------- */}
@@ -910,375 +889,421 @@ export default function ContractDetailPage({ go, role, nav }: { go: (p: string) 
           )}
         </div>
 
-        {/* ---------- 操作区 ---------- */}
-        <div className="nc-d2-actions">
-          {isPurchase
-            ? <><Btn kind="primary" onClick={() => setPayOpen(PAYMENTS[0])}>请款 / 付款</Btn><Btn onClick={() => setChangeOpen(true)}>变更签证</Btn><Btn onClick={() => setSettleOpen(true)}>结算</Btn></>
-            : (isTerminal
-              ? <>{(cur.projects?.length ?? 0) > 0 ? <Btn kind="primary" onClick={() => { setFocus('project-center', cur.projects![0].code); go('project-center'); }}>查看项目</Btn> : null}</>
-              : <>{(cur.projects?.length ?? 0) > 0
-                  ? <Btn kind="primary" onClick={() => { setFocus('project-center', cur.projects![0].code); go('project-center'); }}>查看项目</Btn>
-                  : <Btn kind="primary" onClick={() => { setPendingProject({ contractId: cur.code }); go('project-new'); }} title="以本合同为来源创建项目（自动带入合同要素并生成合同交底卡）">创建项目</Btn>}
-                <Btn onClick={() => setChangeOpen(true)}>变更 / 签证</Btn>
-                <Btn onClick={() => { setTab('money'); toast('请在「收款计划」中逐期登记收款'); }}>登记收款</Btn>
-                {c.status === '履约中' ? <Btn onClick={() => setSettleOpen(true)}>结算</Btn> : null}</>)}
-          <Btn onClick={() => setActOpen(true)}>更多操作 ⋯</Btn>
-        </div>
-
         {/* ---------- Tab ---------- */}
         <div className="nc-d2-tabs">
-          <Tabs items={tabs} value={tab} onChange={setTab} />
+          <Tabs items={tabs} value={mainTab} onChange={setTab} />
         </div>
 
         {/* ---------- 主体 ---------- */}
         <div className="nc-d2-body">
-          {tab === 'doc' && (
+          {mainTab === 'info' && (
             <>
-              {/* 编辑按钮并入小节标题行（与项目详情「基本信息」卡头一致），不再单独占一行 */}
-              <div className="nc-sec-title">
-                基础信息
-                {!edit && <Btn size="sm" onClick={startEdit}><Ico n="edit" size={16} /> 编辑</Btn>}
-              </div>
-              {edit && (
-                <div className="nc-editbar">
-                  <b><Ico n="edit" size={16} /> 正在编辑基础信息</b>
-                  <span className="nc-editbar-hint"><Ico n="lock" size={16} /> 联系人 / 电话来自客户档案，行业 / 地区为客户标签，均不可在此修改 · 签约 / 到期日为日期锚点，变更将生成变更单</span>
-                  <Btn size="sm" kind="primary" onClick={saveEdit}>保存</Btn>
-                  <Btn size="sm" onClick={() => { setEdit(false); toast('已取消编辑'); }}>取消</Btn>
+              <div className="nc-modcard">
+              {/* 审批路由（原「审批流转」子页签收编为详细信息子块；状态轴移入本模块，置于标题之下） */}
+                <div className="nc-sec-title">审批路由</div>
+                <ChainBar nodes={CHAIN_OF(cSt).map((s, i, arr) => {
+                  const ci = arr.indexOf(cSt);
+                  const state = cSt === '已终止' && i === arr.length - 1
+                    ? 'rejected'
+                    : i < ci ? 'done' : i === ci ? 'cur' : 'todo';
+                  return { label: s, state: state as 'done' | 'cur' | 'todo' | 'rejected' };
+                })} />
+                <KvGrid cols={2} rows={[
+                  { k: '当前节点', v: cSt === '待审批' ? <Tag tone="orange">待我审批</Tag> : <Tag tone="green">已完成</Tag> },
+                  { k: '路由规则', v: c.execAmt >= 2000000 ? '≥200 万 → 总经理' : c.execAmt >= 500000 ? '50–200 万 → 分管副总' : '<50 万 → 部门负责人' },
+                  { k: '发起人', v: cur.owner },
+                  { k: '提交时间', v: cur.sign },
+                ]} />
                 </div>
-              )}
 
-              {edit ? (
-                <div className="nc-form-grid-4">
-                  {FIELDS.map((f) => {
-                    if (f.type === 'ref') {
-                      return (
-                        <Field key={f.k} label={f.label}>
-                          <input className="nc-input is-locked" value={vals[f.k] ?? ''} readOnly />
-                          <div className="nc-footnote"><Ico n="lock" size={16} /> 来自客户档案 · {go ? <EntityLink target="customer" id={custOf(c.party)?.id} go={go} title="下钻到客户档案">去客户档案修改</EntityLink> : <a onClick={() => toast('跳转客户档案：' + c.party + '（演示）')}>去客户档案修改</a>}</div>
-                        </Field>
-                      );
-                    }
-                    if (f.type === 'chip') {
-                      return (
-                        <Field key={f.k} label={f.label}>
-                          <input className="nc-input is-locked" value={vals[f.k] ?? ''} readOnly />
-                          <div className="nc-footnote"><Ico n="lock" size={16} /> 客户属性标签</div>
-                        </Field>
-                      );
-                    }
-                    if (f.type === 'warranty') {
-                      return (
-                        <Field key={f.k} label={f.label}>
-                          <select className="nc-input" value={vals[f.k] ?? '12'} onChange={(e) => setV(f.k, e.target.value)}>
-                            {[3, 6, 12, 24].map((m) => <option key={m} value={m}>{m} 个月</option>)}
-                          </select>
-                          <div className="nc-footnote">质保到期日（派生）：<b className="num">{addMonths(vals.endDate ?? cur.end, Number(vals.warranty ?? cur.warranty))}</b></div>
-                        </Field>
-                      );
-                    }
-                    if (f.type === 'date') {
-                      return (
-                        <Field key={f.k} label={f.label + (f.optional ? '（选填）' : '')} req={!f.optional} err={errs[f.k]}>
-                          <input className="nc-input num" type="date" value={vals[f.k] ?? ''} onChange={(e) => setV(f.k, e.target.value)} />
-                          {f.anchor && <div className="nc-footnote"><Ico n="clock" size={16} /> 日期锚点 · 变更需走变更流程</div>}
-                        </Field>
-                      );
-                    }
-                    return (
-                      <Field key={f.k} label={f.label} span={f.span}>
-                        <input className="nc-input" value={vals[f.k] ?? ''} onChange={(e) => setV(f.k, e.target.value)} />
-                      </Field>
-                    );
-                  })}
+              <div className="nc-modcard">
+              {/* 基本信息（编辑 / 查看两态；关联商机 / 关联投标为只读链路字段；相对方信息独立成卡） */}
+                <div className="nc-sec-title">
+                  基本信息
+                  {!edit && <Btn size="sm" onClick={startEdit}><Ico n="edit" size={16} /> 编辑</Btn>}
                 </div>
-              ) : (
-                <div className="nc-desc-grid">
-                  {FIELDS.map((f) => {
-                    let v: React.ReactNode = vals[f.k] || <span style={{ color: 'var(--ink-3)' }}>—（未填）</span>;
-                    if (f.k === 'partyA' && go) v = <><EntityLink target="customer" id={custOf(cur.partyA)?.id} go={go} title="下钻到客户档案">{vals[f.k]}</EntityLink><span className="nc-refbadge">来自客户档案</span></>;
-                    else if (f.type === 'ref') v = <>{vals[f.k]}<span className="nc-refbadge">来自客户档案</span></>;
-                    else if (f.type === 'chip') v = <span className={`nc-chip${f.blue ? ' is-blue' : ''}`}>{vals[f.k]}</span>;
-                    else if (f.type === 'warranty') v = (
-                      <>{vals[f.k]} 个月<div className="nc-derived">质保到期日 <b>{addMonths(cur.end, cur.warranty)}</b>（自动计算，不可编辑）</div></>
-                    );
-                    else if (f.type === 'date') v = <span className="num">{vals[f.k]}</span>;
-                    return (
-                      <div key={f.k} className={`nc-desc-item${f.span ? ' nc-desc-2' : ''}`}>
-                        <div className="nc-desc-label">{f.label}</div>
-                        <div className="nc-desc-value">{v}</div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-
-              {isGov && (
-                <>
-                  <div className="nc-sec-title">政府 / 部队四件套（硬拦截 · 缺一不可）</div>
-                  <div className="nc-check-grid">
-                    {['安全协议', '廉政协议', '农民工工资支付协议', '技术协议'].map((n) => (
-                      <div key={n} className="nc-check-cell is-ok"><Ico n="check" size={16} /> {n}<span className="nc-cell-sub">已归档（{cur.sign}）</span></div>
-                    ))}
+                {edit && (
+                  <div className="nc-editbar">
+                    <b><Ico n="edit" size={16} /> 正在编辑基础信息</b>
+                    <span className="nc-editbar-hint"><Ico n="lock" size={16} /> 联系人 / 电话来自客户档案，行业 / 地区为客户标签，均不可在此修改 · 签约 / 到期日为日期锚点，变更将生成变更单</span>
+                    <Btn size="sm" kind="primary" onClick={saveEdit}>保存</Btn>
+                    <Btn size="sm" onClick={() => { setEdit(false); toast('已取消编辑'); }}>取消</Btn>
                   </div>
-                </>
-              )}
+                )}
 
+                {edit ? (
+                  <div className="nc-form-grid-4">
+                    {FIELDS.map((f) => {
+                      if (f.type === 'warranty') {
+                        return (
+                          <Field key={f.k} label={f.label}>
+                            <select className="nc-input" value={vals[f.k] ?? '12'} onChange={(e) => setV(f.k, e.target.value)}>
+                              {[3, 6, 12, 24].map((m) => <option key={m} value={m}>{m} 个月</option>)}
+                            </select>
+                            <div className="nc-footnote">质保到期日（派生）：<b className="num">{addMonths(vals.endDate ?? cur.end, Number(vals.warranty ?? cur.warranty))}</b></div>
+                          </Field>
+                        );
+                      }
+                      if (f.type === 'date') {
+                        return (
+                          <Field key={f.k} label={f.label + (f.optional ? '（选填）' : '')} req={!f.optional} err={errs[f.k]}>
+                            <input className="nc-input num" type="date" value={vals[f.k] ?? ''} onChange={(e) => setV(f.k, e.target.value)} />
+                            {f.anchor && <div className="nc-footnote"><Ico n="clock" size={16} /> 日期锚点 · 变更需走变更流程</div>}
+                          </Field>
+                        );
+                      }
+                      return (
+                        <Field key={f.k} label={f.label} span={f.span}>
+                          <input className="nc-input" value={vals[f.k] ?? ''} onChange={(e) => setV(f.k, e.target.value)} />
+                        </Field>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="nc-desc-grid">
+                    {FIELDS.map((f) => {
+                      let v: React.ReactNode = vals[f.k] || <span style={{ color: 'var(--ink-3)' }}>—（未填）</span>;
+                      if (f.type === 'warranty') v = (
+                        <>{vals[f.k]} 个月<div className="nc-derived">质保到期日 <b>{addMonths(cur.end, cur.warranty)}</b>（自动计算，不可编辑）</div></>
+                      );
+                      else if (f.type === 'date') v = <span className="num">{vals[f.k]}</span>;
+                      return (
+                        <div key={f.k} className={`nc-desc-item${f.span ? ' nc-desc-2' : ''}`}>
+                          <div className="nc-desc-label">{f.label}</div>
+                          <div className="nc-desc-value">{v}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* 关联商机 / 关联投标（只读 · 链路反查，点击弹出只读预览可查看详情；无来源时显示空态） */}
+                <div className="nc-desc-grid is-3" style={{ marginTop: 16 }}>
+                  <div className="nc-desc-item">
+                    <div className="nc-desc-label">关联商机</div>
+                    <div className="nc-desc-value">
+                      {relOpp ? (
+                        <>
+                          {go
+                            ? <EntityLink target="opp" id={relOpp.id} go={go} title="点击查看商机详情">{relOpp.id}</EntityLink>
+                            : relOpp.id}
+                          <div className="nc-cell-sub">{relOpp.name}</div>
+                          <div className="nc-cell-sub">{relOpp.stage} · {relOpp.status} · {relOpp.owner}</div>
+                        </>
+                      ) : <span style={{ color: 'var(--ink-3)' }}>—（无）</span>}
+                    </div>
+                  </div>
+                  <div className="nc-desc-item">
+                    <div className="nc-desc-label">关联投标</div>
+                    <div className="nc-desc-value">
+                      {relBid ? (
+                        <>
+                          {go
+                            ? <EntityLink target="bid" id={relBid.id} go={go} title="点击查看投标单详情">{relBid.id}</EntityLink>
+                            : relBid.id}
+                          <div className="nc-cell-sub">{relBid.name}</div>
+                          <div className="nc-cell-sub">{relBid.stage} · {relBid.owner}</div>
+                        </>
+                      ) : <span style={{ color: 'var(--ink-3)' }}>—（无）</span>}
+                    </div>
+                  </div>
+                </div>
+
+                {isGov && (
+                  <>
+                    <div className="nc-ledhd" style={{ marginTop: 16 }}>政府 / 部队四件套（硬拦截 · 缺一不可）</div>
+                    <div className="nc-check-grid">
+                      {['安全协议', '廉政协议', '农民工工资支付协议', '技术协议'].map((n) => (
+                        <div key={n} className="nc-check-cell is-ok"><Ico n="check" size={16} /> {n}<span className="nc-cell-sub">已归档（{cur.sign}）</span></div>
+                      ))}
+                    </div>
+                  </>
+                )}
+
+                </div>
+
+              <div className="nc-modcard">
+              {/* 相对方信息（客户档案派生字段 · 独立卡片 · 只读不可编辑）3 列 × 2 行 */}
+                <div className="nc-sec-title">相对方信息</div>
+                <div className="nc-desc-grid is-3">
+                  <div className="nc-desc-item">
+                    <div className="nc-desc-label">{payDir ? '供应商名称' : '客户名称'}</div>
+                    <div className="nc-desc-value">
+                      {go ? <><EntityLink target="customer" id={custOf(cur.partyA)?.id} go={go} title="下钻到客户档案">{cur.partyA}</EntityLink><span className="nc-refbadge">来自客户档案</span></> : cur.partyA}
+                    </div>
+                  </div>
+                  <div className="nc-desc-item">
+                    <div className="nc-desc-label">对方法定代表人</div>
+                    <div className="nc-desc-value">{cur.legalRep}<span className="nc-refbadge">来自客户档案</span></div>
+                  </div>
+                  <div className="nc-desc-item">
+                    <div className="nc-desc-label">对方电话</div>
+                    <div className="nc-desc-value"><span className="num">{cur.contact} {cur.phone}</span><span className="nc-refbadge">来自客户档案</span></div>
+                  </div>
+                  <div className="nc-desc-item">
+                    <div className="nc-desc-label">对方地址</div>
+                    <div className="nc-desc-value">{cur.address}<span className="nc-refbadge">来自客户档案</span></div>
+                  </div>
+                  <div className="nc-desc-item">
+                    <div className="nc-desc-label">对方开户行</div>
+                    <div className="nc-desc-value">{cur.bank}<span className="nc-refbadge">来自客户档案</span></div>
+                  </div>
+                  <div className="nc-desc-item">
+                    <div className="nc-desc-label">对方银行账号</div>
+                    <div className="nc-desc-value"><span className="num">{cur.bankAcct}</span><span className="nc-refbadge">来自客户档案</span></div>
+                  </div>
+                </div>
+                </div>
+
+              <div className="nc-modcard">
               {/* ============ 电子合同（纸面正文）+ AI 审查（右栏）· 零切换同屏 ============ */}
-              <div className="nc-sec-title">电子合同</div>
-              <div className="nc-docbar">
-                <span className="nc-docver"><Ico n="file" size={14} /> {cur.code} 电子合同正文</span>
-                <Tag tone="gray">文档 v{docVer}</Tag>
-                <Tag tone={cur.sign ? 'green' : 'orange'} pill>{cur.sign ? `已签署 ${cur.sign}` : '待签署'}</Tag>
-                <span className="nc-toolbar-sp" />
-                <Btn onClick={() => {
-                  if (cur.stype === 'done') { toast('该合同已完成，正文已锁定（终态不可修订）'); return; }
-                  setAddH(''); setAddT(''); setAddOpen(true);
-                }}>＋ 追加条款</Btn>
-                <ExportButton onClick={exportApi.trigger} />
-                <Btn kind="primary" onClick={() => {
-                  const rs = scanClauses(clauses);
-                  setRisks(rs); setScanned(true); setHlClause(null);
-                  pushLog({ time: nowStamp(), text: <>AI 审查（v{docVer}）：命中 {rs.length} 项风险条款</> });
-                  toast(rs.length ? `AI 审查完成 · 发现 ${rs.length} 项风险` : 'AI 审查完成 · 未发现风险');
-                }}>
-                  <Ico n="robot" size={16} /> {scanned && risks.length ? '重新审查' : 'AI 审查'}
-                </Btn>
-              </div>
-              <div className="nc-dnote">
-                电子合同正文按合同类型套用标准条款模板，签署后同步生成签署栏、电子印章与防伪水印；
-                正文修订 / 追加条款将令文档版本 +1 并自动触发 AI 重扫。
-              </div>
+                <div className="nc-sec-title">电子合同</div>
+                <div className="nc-docbar">
+                  <span className="nc-docver"><Ico n="file" size={14} /> {cur.code} 电子合同正文</span>
+                  <Tag tone="gray">文档 v{docVer}</Tag>
+                  <Tag tone={cur.sign ? 'green' : 'orange'} pill>{cur.sign ? `已签署 ${cur.sign}` : '待签署'}</Tag>
+                  <span className="nc-toolbar-sp" />
+                  <Btn onClick={() => {
+                    if (cur.stype === 'done') { toast('该合同已完成，正文已锁定（终态不可修订）'); return; }
+                    setAddH(''); setAddT(''); setAddOpen(true);
+                  }}>＋ 追加条款</Btn>
+                  <ExportButton onClick={exportApi.trigger} />
+                  <Btn kind="primary" onClick={() => {
+                    const rs = scanClauses(clauses);
+                    setRisks(rs); setScanned(true); setHlClause(null);
+                    pushLog({ time: nowStamp(), text: <>AI 审查（v{docVer}）：命中 {rs.length} 项风险条款</> });
+                    toast(rs.length ? `AI 审查完成 · 发现 ${rs.length} 项风险` : 'AI 审查完成 · 未发现风险');
+                  }}>
+                    <Ico n="robot" size={16} /> {scanned && risks.length ? '重新审查' : 'AI 审查'}
+                  </Btn>
+                  <Btn onClick={() => {
+                    if (cur.stype === 'done') { toast('该合同已完成，正文已锁定（终态不可修订）'); return; }
+                    if (!clauses.length) { toast('暂无可修改的条款'); return; }
+                    const cl = hlClause ? clauses.find((x) => x.id === hlClause) : clauses[0];
+                    if (!cl) { toast('暂无可修改的条款'); return; }
+                    setHlClause(cl.id);
+                    setClauseText(cl.t); setClauseEdit(cl);
+                  }}><Ico n="edit" size={16} /> 修改</Btn>
+                </div>
 
-              <div className="nc-paper-layout">
-                {/* ---- 左：纸面 ---- */}
-                <div className="nc-paper">
-                  <div className="nc-paper-title">{cur.name}</div>
-                  <div className="nc-paper-meta">
-                    <span>编号：{cur.code}</span>
-                    <span>甲方：{cur.partyA}</span>
-                    <span>乙方：{PARTY_B}</span>
-                    <span>{isFramework ? '框架额度：' : '金额：'}<Money v={cur.limitAmt ?? cur.total} role={role} /></span>
+                <div className="nc-paper-layout">
+                  {/* ---- 左：纸面 ---- */}
+                  <div className="nc-paper">
+                    <div className="nc-paper-title">{cur.name}</div>
+                    <div className="nc-paper-meta">
+                      <span>编号：{cur.code}</span>
+                      <span>甲方：{cur.partyA}</span>
+                      <span>乙方：{PARTY_B}</span>
+                      <span>{isFramework ? '框架额度：' : '金额：'}<Money v={cur.limitAmt ?? cur.total} role={role} /></span>
+                    </div>
+                    {clauses.map((cl) => {
+                      const rs = risks.filter((r) => r.clauseId === cl.id);
+                      return (
+                        <div
+                          key={cl.id}
+                          className={`nc-paper-clause${hlClause === cl.id ? ' is-hl' : ''}`}
+                          onClick={() => setHlClause(cl.id)}
+                          onDoubleClick={() => {
+                            if (cur.stype === 'done') { toast('该合同已完成，正文已锁定（终态不可修订）'); return; }
+                            setClauseText(cl.t); setClauseEdit(cl);
+                          }}
+                        >
+                          <span className="nc-cl-no">{cl.h}</span>
+                          {cl.t}
+                          {cl.dirty && <Tag tone="gold">已修订</Tag>}
+                          {rs.length > 0 && (
+                            <span className="nc-ai-pin">
+                              {rs.map((r) => (
+                                <button
+                                  key={r.id}
+                                  className={`nc-ai-flag ${r.level === '高' ? 'is-h' : r.level === '中' ? 'is-m' : 'is-l'}`}
+                                  title={`${r.dim}：${r.sug}`}
+                                  onClick={(e) => { e.stopPropagation(); setFlashRisk(r.id); toast(`已定位风险项「${r.dim}」`); }}
+                                >{r.level}</button>
+                              ))}
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
+                    <div className="nc-paper-sign">
+                      <div className="nc-paper-sign-cell">甲方（盖章）：{cur.partyA}<b>{cur.sign ? `已签署 ${cur.sign}` : '（待签）'}</b></div>
+                      <div className="nc-paper-sign-cell">乙方（盖章）：{PARTY_B}<b>{cur.sign ? `已签署 ${cur.sign}` : '（待签）'}</b></div>
+                    </div>
+                    {cur.sign && <div className="nc-paper-seal">诺盾博达<br />合同专用章</div>}
+                    <div className="nc-paper-wm">
+                      {Array.from({ length: 5 }, (_, i) => (
+                        <span key={i} style={{ top: `${8 + i * 18}%`, left: `${(i % 2) * 40 + 6}%` }}>内部资料 · {cur.owner} · {TODAY}</span>
+                      ))}
+                    </div>
                   </div>
-                  {clauses.map((cl) => {
-                    const rs = risks.filter((r) => r.clauseId === cl.id);
-                    return (
-                      <div
-                        key={cl.id}
-                        className={`nc-paper-clause${hlClause === cl.id ? ' is-hl' : ''}`}
-                        onClick={() => setHlClause(cl.id)}
-                        onDoubleClick={() => {
-                          if (cur.stype === 'done') { toast('该合同已完成，正文已锁定（终态不可修订）'); return; }
-                          setClauseText(cl.t); setClauseEdit(cl);
-                        }}
-                      >
-                        <span className="nc-cl-no">{cl.h}</span>
-                        {cl.t}
-                        {cl.dirty && <Tag tone="gold">已修订</Tag>}
-                        {rs.length > 0 && (
-                          <span className="nc-ai-pin">
-                            {rs.map((r) => (
-                              <button
-                                key={r.id}
-                                className={`nc-ai-flag ${r.level === '高' ? 'is-h' : r.level === '中' ? 'is-m' : 'is-l'}`}
-                                title={`${r.dim}：${r.sug}`}
-                                onClick={(e) => { e.stopPropagation(); setFlashRisk(r.id); toast(`已定位风险项「${r.dim}」`); }}
-                              >{r.level}</button>
-                            ))}
-                          </span>
-                        )}
+
+                  {/* ---- 右：AI 审查（融入电子合同） ---- */}
+                  <div className="nc-ai-side">
+                    <div className="nc-ai-side-hd">
+                      <b><Ico n="robot" size={16} /> AI 审查</b>
+                      {risks.length > 0 && <Tag tone={risks.some((r) => r.st === '待确认') ? 'red' : 'green'} pill>
+                        {risks.some((r) => r.st === '待确认') ? `${risks.filter((r) => r.st === '待确认').length} 项待确认` : '全部已处理'}
+                      </Tag>}
+                    </div>
+                    <div className="nc-ai-side-tip">点击风险项 → 定位左侧条款；条款右侧角标 → 回看此处。<br />条款正文双击可直接修改。</div>
+                    {!scanned && (
+                      <div className="nc-ai-empty">
+                        尚未审查<br />
+                        <Btn size="sm" kind="primary" onClick={() => {
+                          const rs = scanClauses(clauses);
+                          setRisks(rs); setScanned(true);
+                          pushLog({ time: nowStamp(), text: <>AI 审查（v{docVer}）：命中 {rs.length} 项风险条款</> });
+                          toast(rs.length ? `发现 ${rs.length} 项风险` : '未发现风险');
+                        }}>发起审查</Btn>
                       </div>
-                    );
-                  })}
-                  <div className="nc-paper-sign">
-                    <div className="nc-paper-sign-cell">甲方（盖章）：{cur.partyA}<b>{cur.sign ? `已签署 ${cur.sign}` : '（待签）'}</b></div>
-                    <div className="nc-paper-sign-cell">乙方（盖章）：{PARTY_B}<b>{cur.sign ? `已签署 ${cur.sign}` : '（待签）'}</b></div>
-                  </div>
-                  {cur.sign && <div className="nc-paper-seal">诺盾博达<br />合同专用章</div>}
-                  <div className="nc-paper-wm">
-                    {Array.from({ length: 5 }, (_, i) => (
-                      <span key={i} style={{ top: `${8 + i * 18}%`, left: `${(i % 2) * 40 + 6}%` }}>内部资料 · {cur.owner} · {TODAY}</span>
+                    )}
+                    {scanned && risks.length === 0 && (
+                      <div className="nc-ai-empty"><Ico n="check" size={16} /> 未发现风险条款</div>
+                    )}
+                    {risks.map((r) => (
+                      <div
+                        key={r.id}
+                        className={`nc-ai-item${flashRisk === r.id ? ' is-flash' : ''}`}
+                        onClick={() => { setHlClause(r.clauseId); toast(`已定位到「${r.dim}」条款`); }}
+                      >
+                        <div className="nc-ai-h">
+                          <Tag tone={r.level === '高' ? 'red' : r.level === '中' ? 'orange' : 'blue'}>{r.level}风险</Tag>
+                          <b>{r.dim}</b>
+                        </div>
+                        <div className="nc-ai-quote">「{r.quote}」</div>
+                        <div className="nc-ai-sug">{r.sug}</div>
+                        <div className="nc-ai-foot" onClick={(e) => e.stopPropagation()}>
+                          {r.st === '待确认' ? (
+                            <>
+                              <Btn size="sm" onClick={() => {
+                                setRisks((l) => l.map((x) => x.id === r.id ? { ...x, st: '已确认' } : x));
+                                pushLog({ time: nowStamp(), text: <>AI 风险「{r.dim}」已确认</> });
+                                toast('已确认该风险');
+                              }}>确认</Btn>
+                              <Op onClick={() => {
+                                setRisks((l) => l.map((x) => x.id === r.id ? { ...x, st: '已忽略' } : x));
+                                toast('已忽略该风险');
+                              }}>忽略</Op>
+                            </>
+                          ) : <Tag tone={r.st === '已确认' ? 'orange' : 'gray'} pill>{r.st}</Tag>}
+                          <a className="nc-ai-loc" onClick={() => {
+                            if (cur.stype === 'done') { toast('该合同已完成，正文已锁定（终态不可修订）'); return; }
+                            const cl = clauses.find((x) => x.id === r.clauseId);
+                            if (!cl) { toast('未找到对应条款'); return; }
+                            setHlClause(cl.id);
+                            setClauseText(cl.t); setClauseEdit(cl);
+                          }}>修改</a>
+                        </div>
+                      </div>
                     ))}
                   </div>
                 </div>
-
-                {/* ---- 右：AI 审查（融入电子合同） ---- */}
-                <div className="nc-ai-side">
-                  <div className="nc-ai-side-hd">
-                    <b><Ico n="robot" size={16} /> AI 审查</b>
-                    {risks.length > 0 && <Tag tone={risks.some((r) => r.st === '待确认') ? 'red' : 'green'} pill>
-                      {risks.some((r) => r.st === '待确认') ? `${risks.filter((r) => r.st === '待确认').length} 项待确认` : '全部已处理'}
-                    </Tag>}
-                  </div>
-                  <div className="nc-ai-side-tip">点击风险项 → 定位左侧条款；条款右侧角标 → 回看此处。</div>
-                  {!scanned && (
-                    <div className="nc-ai-empty">
-                      尚未审查<br />
-                      <Btn size="sm" kind="primary" onClick={() => {
-                        const rs = scanClauses(clauses);
-                        setRisks(rs); setScanned(true);
-                        pushLog({ time: nowStamp(), text: <>AI 审查（v{docVer}）：命中 {rs.length} 项风险条款</> });
-                        toast(rs.length ? `发现 ${rs.length} 项风险` : '未发现风险');
-                      }}>发起审查</Btn>
-                    </div>
-                  )}
-                  {scanned && risks.length === 0 && (
-                    <div className="nc-ai-empty"><Ico n="check" size={16} /> 未发现风险条款</div>
-                  )}
-                  {risks.map((r) => (
-                    <div
-                      key={r.id}
-                      className={`nc-ai-item${flashRisk === r.id ? ' is-flash' : ''}`}
-                      onClick={() => { setHlClause(r.clauseId); toast(`已定位到「${r.dim}」条款`); }}
-                    >
-                      <div className="nc-ai-h">
-                        <Tag tone={r.level === '高' ? 'red' : r.level === '中' ? 'orange' : 'blue'}>{r.level}风险</Tag>
-                        <b>{r.dim}</b>
-                      </div>
-                      <div className="nc-ai-quote">「{r.quote}」</div>
-                      <div className="nc-ai-sug">{r.sug}</div>
-                      <div className="nc-ai-foot" onClick={(e) => e.stopPropagation()}>
-                        {r.st === '待确认' ? (
-                          <>
-                            <Btn size="sm" onClick={() => {
-                              setRisks((l) => l.map((x) => x.id === r.id ? { ...x, st: '已确认' } : x));
-                              pushLog({ time: nowStamp(), text: <>AI 风险「{r.dim}」已确认</> });
-                              toast('已确认该风险');
-                            }}>确认</Btn>
-                            <Op onClick={() => {
-                              setRisks((l) => l.map((x) => x.id === r.id ? { ...x, st: '已忽略' } : x));
-                              toast('已忽略该风险');
-                            }}>忽略</Op>
-                          </>
-                        ) : <Tag tone={r.st === '已确认' ? 'orange' : 'gray'} pill>{r.st}</Tag>}
-                        <a className="nc-ai-loc" onClick={() => setHlClause(r.clauseId)}>定位 ›</a>
-                      </div>
-                    </div>
-                  ))}
                 </div>
-              </div>
+
+              <div className="nc-modcard">
+              {/* 产品明细（原「合同明细」归并） */}
+                <div className="nc-sec-title">产品明细</div>
+                <table className="nc-tbl" style={{ minWidth: 820 }}>
+                  <thead><tr>
+                    <th style={{ width: 56 }} className="is-num">序号</th><th>业务类型</th>
+                    <th style={{ width: 200 }} className="is-num">服务周期</th><th style={{ width: 130 }} className="is-num">金额</th>
+                    <th style={{ width: 90 }}>财务方向</th><th>备注</th>
+                  </tr></thead>
+                  <tbody>
+                    {cur.details.map((d) => (
+                      <tr key={d.no}>
+                        <td className="is-num" style={{ color: 'var(--ink-3)' }}>{d.no}</td>
+                        <td><a className="nc-link" onClick={() => toast('已定位业务类型「' + d.biz + '」')}>{d.biz}</a></td>
+                        <td className="is-num num" style={{ color: 'var(--ink-2)' }}>{d.period}</td>
+                        <td className="is-num"><b className="num"><Money v={d.amount} role={role} /></b></td>
+                        <td><Tag tone={payDir ? 'orange' : 'green'}>{payDir ? '支出' : d.dir}</Tag></td>
+                        <td style={{ color: 'var(--ink-2)' }}>{d.remark}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot><tr className="nc-tbl-sum">
+                    <td colSpan={3}>合计（{cur.details.length} 项）</td>
+                    <td className="is-num"><b className="num"><Money v={total} role={role} /></b></td>
+                    <td><Tag tone={payDir ? 'orange' : 'green'}>100%</Tag></td><td />
+                  </tr></tfoot>
+                </table>
+                </div>
+
+              <div className="nc-modcard">
+              {/* 款项明细 = 签订约定期次结构快照（只读；执行跟踪见「收付款计划」Tab） */}
+                <div className="nc-sec-title">款项明细</div>
+                <div className="nc-listhint" style={{ marginBottom: 6 }}>
+                  <span>签订时约定的{payDir ? '付款' : '收款'}期次结构<Tip w={360} text="本表为签约时约定的期次结构快照，只读；实收实付 / 状态 / 逾期的执行跟踪见「收付款计划」。两表同源分账：约定快照不随执行改写。" /></span>
+                  {!c.installments?.length && <span style={{ marginLeft: 12, color: 'var(--ink-3)' }}>本合同未登记约定期次，以下按 30 / 40 / 27 / 3 标准结构推算。</span>}
+                </div>
+                <table className="nc-tbl" style={{ minWidth: 820 }}>
+                  <thead><tr>
+                    <th style={{ width: 56 }} className="is-num">期数</th><th>期次约定</th>
+                    <th style={{ width: 100 }} className="is-num">约定比例</th>
+                    <th style={{ width: 140 }} className="is-num">约定金额</th>
+                    <th style={{ width: 120 }} className="is-num">约定日期</th><th>金额大写</th>
+                  </tr></thead>
+                  <tbody>
+                    {cur.plans.map((r) => (
+                      <tr key={r.no}>
+                        <td className="is-num">{r.no}</td>
+                        <td>{r.node}</td>
+                        <td className="is-num num">{planSum ? Math.round(r.plan / planSum * 100) : 0}%</td>
+                        <td className="is-num"><b className="num"><Money v={r.plan} role={role} /></b></td>
+                        <td className="is-num num">{r.date}</td>
+                        <td style={{ color: 'var(--ink-2)' }}>{amtCN(r.plan)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot><tr className="nc-tbl-sum">
+                    <td colSpan={3}>合计</td>
+                    <td className="is-num"><b className="num"><Money v={planSum} role={role} /></b></td>
+                    <td />
+                    <td style={{ fontWeight: 400 }}>{amtCN(planSum)}</td>
+                  </tr></tfoot>
+                </table>
+                </div>
+
+              <div className="nc-modcard">
+              {/* 关联项目 */}
+                <div className="nc-sec-title">关联项目</div>
+                {cur.projects.length === 0
+                  ? <div className="nc-empty-mini">框架协议暂无直接关联项目，按执行单工作量挂接（执行单见「合同核算」执行额拆解）</div>
+                  : (
+                    <table className="nc-tbl" style={{ minWidth: 720 }}>
+                      <thead><tr><th style={{ width: 160 }}>项目编号</th><th>项目名称</th><th style={{ width: 120 }}>负责人</th><th style={{ width: 110 }}>状态</th></tr></thead>
+                      <tbody>
+                        {cur.projects.map((p) => (
+                          <tr key={p.code}>
+                            <td>{go ? <EntityLink target="project-center" id={p.code} go={go} strong title="下钻到项目详情">{p.code}</EntityLink> : <span className="num">{p.code}</span>}</td>
+                            <td>{p.name}</td>
+                            <td>{p.owner}</td>
+                            <td><Tag tone={STYPE_TONE[p.stype] ?? 'gray'}>{p.status}</Tag></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+
             </>
           )}
 
-          {tab === 'list' && (
+          {mainTab === 'plan' && (
             <>
-              <div className="nc-sec-title">合同明细行</div>
-              <table className="nc-tbl" style={{ minWidth: 820 }}>
-                <thead><tr>
-                  <th style={{ width: 56 }} className="is-num">序号</th><th>业务类型</th>
-                  <th style={{ width: 200 }} className="is-num">服务周期</th><th style={{ width: 130 }} className="is-num">金额</th>
-                  <th style={{ width: 90 }}>财务方向</th><th>备注</th>
-                </tr></thead>
-                <tbody>
-                  {cur.details.map((d) => (
-                    <tr key={d.no}>
-                      <td className="is-num" style={{ color: 'var(--ink-3)' }}>{d.no}</td>
-                      <td><a className="nc-link" onClick={() => toast('已定位业务类型「' + d.biz + '」')}>{d.biz}</a></td>
-                      <td className="is-num num" style={{ color: 'var(--ink-2)' }}>{d.period}</td>
-                      <td className="is-num"><b className="num"><Money v={d.amount} role={role} /></b></td>
-                      <td><Tag tone="green">{d.dir}</Tag></td>
-                      <td style={{ color: 'var(--ink-2)' }}>{d.remark}</td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot><tr className="nc-tbl-sum">
-                  <td colSpan={3}>合计（{cur.details.length} 项）</td>
-                  <td className="is-num"><b className="num"><Money v={total} role={role} /></b></td>
-                  <td><Tag tone="green">100%</Tag></td><td />
-                </tr></tfoot>
-              </table>
-            </>
-          )}
-
-          {tab === 'sub' && view === 'main' && !isFramework && (
-            <>
-              <div className="nc-sec-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span>工作量拆分</span>
-                <Btn size="sm" kind="primary" onClick={openSplit}><Ico n="plus" size={14} /> 发起拆分</Btn>
-              </div>
-              <div className="nc-subbar">
-                <Ico n="package" size={14} /> {splitPlans
-                  ? <>已发起拆分单 {splitPlans.length} 份，合计 {<Money v={splitPlans.reduce((a, d) => a + d.total, 0)} role={role} />}（占总额 {Math.round(splitPlans.reduce((a, d) => a + d.total, 0) / total * 100)}%）；余款由主合同直接执行。视图不写入台账、不产生新合同，点击行可下钻查看。</>
-                  : <>主合同按工作量/分期拆分为只读视图（默认建议 -01 一期主体 / -02 二期·检测，合计约占总额 65%），余款由主合同直接执行。点击「＋ 发起拆分」按实际工作量 / 分期登记拆分单（不产生新合同）。</>}
-              </div>
-              <table className="nc-tbl" style={{ minWidth: 860 }}>
-                <thead><tr>
-                  <th style={{ width: 170 }}>拆分编号</th><th>拆分项名称</th>
-                  <th style={{ width: 90 }}>类型</th><th style={{ width: 130 }} className="is-num">金额</th>
-                  <th style={{ width: 100 }}>状态</th><th style={{ width: 90 }}>操作</th>
-                </tr></thead>
-                <tbody>
-                  {subs.map((s, i) => (
-                    <tr key={s.code} className="nc-subrow" onClick={() => gotoSub(i)}>
-                      <td><a className="nc-link num">{s.code}</a></td>
-                      <td>{s.name}</td>
-                      <td><Tag tone="gray">{s.details[0]?.biz ?? '—'}</Tag></td>
-                      <td className="is-num"><b className="num"><Money v={s.total} role={role} /></b></td>
-                      <td><Tag tone={STYPE_TONE[s.stype] ?? 'gray'}>{s.status}</Tag></td>
-                      <td><div className="nc-ops"><Op onClick={() => gotoSub(i)}>查看</Op></div></td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot><tr className="nc-tbl-sum">
-                  <td colSpan={3}>合计（工作量拆分）</td>
-                  <td className="is-num"><b className="num">{<Money v={subs.reduce((a, s) => a + s.total, 0)} role={role} />}</b></td>
-                  <td colSpan={2} style={{ fontWeight: 400, color: 'var(--ink-3)' }}>
-                    占总额 {Math.round(subs.reduce((a, s) => a + s.total, 0) / total * 100)}% · 余款由主合同直接执行
-                  </td>
-                </tr></tfoot>
-              </table>
-            </>
-          )}
-
-          {tab === 'sub' && view === 'main' && isFramework && (
-            <>
-              <div className="nc-sec-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span>执行单</span>
-                <Btn size="sm" kind="primary" onClick={() => { setPendingExec({ contractId: c.id }); go('contract-new'); }}><Ico n="plus" size={14} /> 新增执行单</Btn>
-              </div>
-              <div className="nc-subbar">
-                <Ico n="package" size={14} /> 框架额度 <b className="num">{<Money v={c.amt} role={role} />}</b>，已签执行单 {execOrders.length} 份、累计执行 {<Money v={usedExec} role={role} />}（占额度 {usedPct}%）；单笔 ≥50 万元须财务复核，累计超出额度须先签补充协议。点击「＋ 新增执行单」进入新建合同向导（自动挂载本框架协议），点击行进入执行单详情。
-              </div>
-              <table className="nc-tbl" style={{ minWidth: 860 }}>
-                <thead><tr>
-                  <th style={{ width: 170 }}>执行单编号</th><th>执行单名称</th>
-                  <th style={{ width: 90 }}>类型</th><th style={{ width: 130 }} className="is-num">执行金额</th>
-                  <th style={{ width: 100 }}>状态</th><th style={{ width: 90 }}>操作</th>
-                </tr></thead>
-                <tbody>
-                  {execOrders.map((k) => (
-                    <tr key={k.id} className="nc-subrow" onClick={() => openExecOrder(k.id)}>
-                      <td><a className="nc-link num">{k.id}</a></td>
-                      <td>{k.name}</td>
-                      <td><Tag tone="gray">{k.type}</Tag></td>
-                      <td className="is-num"><b className="num"><Money v={k.execAmt} role={role} /></b></td>
-                      <td><Tag tone={k.status === '履约中' ? 'green' : k.status === '已签约' ? 'blue' : 'gray'}>{k.status}</Tag></td>
-                      <td><div className="nc-ops"><Op onClick={() => openExecOrder(k.id)}>详情</Op></div></td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot><tr className="nc-tbl-sum">
-                  <td colSpan={3}>累计已执行 / 框架额度</td>
-                  <td className="is-num"><b className="num">{<Money v={usedExec} role={role} />} / {<Money v={c.amt} role={role} />}</b></td>
-                  <td colSpan={2} style={{ fontWeight: 400, color: 'var(--ink-3)' }}>
-                    占额度 {usedPct}% · 超出须签补充协议
-                  </td>
-                </tr></tfoot>
-              </table>
-            </>
-          )}
-
-          {tab === 'money' && !isPurchase && (
-            <>
-              <div className="nc-toolbar">
-                <span className="nc-listhint">收款计划<Tip w={360} text="实收来自回款登记，不可在计划中直接修改 · 登记后首笔触发「履约中」· 红字冲销一笔仅一次。" /></span>
-                <span className="nc-toolbar-sp" />
-                <Btn size="sm" onClick={() => toast('已新增收款期次')}>＋ 新增期次</Btn>
+              <div className="nc-modcard">
+              <div className="nc-sec-title">
+                {payDir ? '付款计划' : '收款计划'}
+                <span className="nc-sec-title-ops">
+                  <Btn size="sm" onClick={() => toast(`已新增${payDir ? '付款' : '收款'}期次`)}>＋ 新增期次</Btn>
+                  <Btn size="sm" kind="primary" onClick={fillAll}>一键补平</Btn>
+                </span>
               </div>
               <table className="nc-tbl" style={{ minWidth: 1000 }}>
                 <thead><tr>
-                  <th style={{ width: 56 }} className="is-num">期数</th><th>收款节点</th>
-                  <th style={{ width: 130 }} className="is-num">计划金额</th><th style={{ width: 150 }} className="is-num">实收金额</th>
+                  <th style={{ width: 56 }} className="is-num">期数</th><th>{payDir ? '付款节点' : '收款节点'}</th>
+                  <th style={{ width: 130 }} className="is-num">计划金额</th><th style={{ width: 150 }} className="is-num">{payDir ? '实付金额' : '实收金额'}</th>
                   <th style={{ width: 100 }}>状态</th><th style={{ width: 110 }} className="is-num">计划日期</th><th style={{ width: 170 }}>操作</th>
                 </tr></thead>
                 <tbody>
@@ -1294,13 +1319,12 @@ export default function ContractDetailPage({ go, role, nav }: { go: (p: string) 
                           {r.actual === 0
                             ? <span style={{ color: 'var(--ink-3)' }}>—</span>
                             : <b className="num" style={partial ? { color: 'var(--c-warning-deep)' } : undefined}><Money v={r.actual} role={role} /></b>}
-                          {partial && <span className="nc-cell-sub">（待收 <Money v={r.plan - r.actual} role={role} />）</span>}
+                          {partial && <span className="nc-cell-sub">（{payDir ? '待付' : '待收'} <Money v={r.plan - r.actual} role={role} />）</span>}
                         </td>
-                        <td><Tag tone={STYPE_TONE[r.stype]}>{r.status}</Tag></td>
+                        <td><Tag tone={STYPE_TONE[r.stype]}>{stTxt(r.status)}</Tag></td>
                         <td className="is-num num">{r.date}</td>
                         <td><div className="nc-ops">
-                          {canPay && <><Op onClick={() => setPayRow(r)} title="登记该期实收">登记收款</Op><OpSep /></>}
-                          {!!r.actual && <><Op danger onClick={() => setRebuttal(r)}>红字冲销</Op><OpSep /></>}
+                          {canPay && <><Op onClick={() => setPayRow(r)} title={payDir ? '登记该期实付' : '登记该期实收'}>{payDir ? '登记付款' : '登记收款'}</Op><OpSep /></>}
                           <Op onClick={() => toast('已修改期次')}>编辑</Op>
                         </div></td>
                       </tr>
@@ -1312,23 +1336,143 @@ export default function ContractDetailPage({ go, role, nav }: { go: (p: string) 
                   <td className="is-num"><b className="num"><Money v={planSum} role={role} /></b></td>
                   <td className="is-num"><b className="num" style={{ color: 'var(--c-success-deep)' }}><Money v={received} role={role} /></b></td>
                   <td colSpan={3} style={{ fontWeight: 400, color: 'var(--ink-3)' }}>
-                    实收来自回款登记 · 已收 {doneN} 期整{partN ? ` + ${partN} 期部分` : ''}，累计 <Money v={received} role={role} />（{planSum ? Math.round(received / planSum * 100) : 0}%）
+                    {payDir ? '实付' : '实收'}来自{payDir ? '付款' : '回款'}登记 · 已{payDir ? '付' : '收'} {doneN} 期整{partN ? ` + ${partN} 期部分` : ''}，累计 <Money v={received} role={role} />（{planSum ? Math.round(received / planSum * 100) : 0}%）
                   </td>
                 </tr></tfoot>
               </table>
-              {contractOverdue(c) && firstOpen && <div className="nc-warnbox is-danger"><Ico n="ban" size={16} /> {firstOpen.node} 应收 <Money v={firstOpen.plan} role={role} />，已收 <Money v={firstOpen.actual} role={role} />，差额 <b><Money v={firstOpen.plan - firstOpen.actual} role={role} /></b>；驾驶舱「逾期应收」已联动。</div>}
+              </div>
             </>
           )}
 
-          {(tab === 'pay' || (tab === 'money' && isPurchase)) && (
+          {mainTab === 'invoice' && (
             <>
-              <div className="nc-listhint">
+              <div className="nc-modcard">
+              <div className="nc-sec-title">
+                开票记录
+                <span className="nc-sec-title-ops">
+                  {([['blue', '蓝票（正常销项）'], ['red', '红票（红字冲销）']] as const).map(([k, l]) => (
+                    <span key={k} className={`nc-fchip${invSub === k ? ' is-on' : ''}`} onClick={() => setInvSub(k)}>{l}</span>
+                  ))}
+                </span>
+              </div>
+              <div className="nc-listhint" style={{ marginBottom: 6 }}>
+                <span>按本合同过滤的只读内嵌视图，开票 / 冲销操作在发票管理办理<Tip w={340} text="与「财务 · 发票管理」双向同源；此处只读消费，不重复开票入口。" /></span>
+              </div>
+              {invSub === 'blue' && (
+                invBlue.length === 0
+                  ? <div className="nc-empty-mini">本合同暂无蓝票记录</div>
+                  : (
+                    <table className="nc-tbl" style={{ minWidth: 900 }}>
+                      <thead><tr>
+                        <th style={{ width: 110 }}>发票号</th><th style={{ width: 140 }}>类型</th><th style={{ width: 110 }}>开票日期</th>
+                        <th>购买方</th><th style={{ width: 120 }} className="is-num">金额</th><th style={{ width: 70 }} className="is-num">税率</th>
+                        <th style={{ width: 110 }} className="is-num">税额</th><th style={{ width: 130 }} className="is-num">价税合计</th><th style={{ width: 110 }}>状态</th>
+                      </tr></thead>
+                      <tbody>
+                        {invBlue.map((v) => (
+                          <tr key={v.id}>
+                            <td><Code>{v.id}</Code></td>
+                            <td>{v.type}</td>
+                            <td className="is-num num">{v.date}</td>
+                            <td className="nc-ellip" title={v.buyer}>{v.buyer}</td>
+                            <td className="is-num"><Money v={v.amt} role={role} /></td>
+                            <td className="is-num num">{v.taxRate}%</td>
+                            <td className="is-num"><Money v={v.tax} role={role} /></td>
+                            <td className="is-num"><b className="num"><Money v={v.total} role={role} /></b></td>
+                            <td><Tag tone={v.status === '正常' ? 'green' : 'gray'}>{v.status}</Tag></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot><tr className="nc-tbl-sum">
+                        <td colSpan={4}>合计（{invBlue.length} 张）</td>
+                        <td className="is-num"><b className="num"><Money v={invBlue.reduce((a, v) => a + v.amt, 0)} role={role} /></b></td>
+                        <td />
+                        <td className="is-num"><Money v={invBlue.reduce((a, v) => a + v.tax, 0)} role={role} /></td>
+                        <td className="is-num"><b className="num"><Money v={invBlue.reduce((a, v) => a + v.total, 0)} role={role} /></b></td>
+                        <td />
+                      </tr></tfoot>
+                    </table>
+                  )
+              )}
+              {invSub === 'red' && (
+                invRed.length === 0
+                  ? <div className="nc-empty-mini">本合同暂无红字冲销记录（红冲一笔仅一次，冲销后原蓝票只读）</div>
+                  : (
+                    <table className="nc-tbl" style={{ minWidth: 900 }}>
+                      <thead><tr>
+                        <th style={{ width: 110 }}>原发票号</th><th style={{ width: 140 }}>类型</th><th style={{ width: 110 }}>开票日期</th>
+                        <th>购买方</th><th style={{ width: 130 }} className="is-num">冲销金额</th><th style={{ width: 130 }} className="is-num">税额</th><th style={{ width: 110 }}>状态</th>
+                      </tr></thead>
+                      <tbody>
+                        {invRed.map((v) => (
+                          <tr key={v.id}>
+                            <td><Code>{v.id}</Code></td>
+                            <td>{v.type}</td>
+                            <td className="is-num num">{v.date}</td>
+                            <td className="nc-ellip" title={v.buyer}>{v.buyer}</td>
+                            <td className="is-num"><b className="num" style={{ color: 'var(--c-danger-deep)' }}><Money v={-v.amt} role={role} /></b></td>
+                            <td className="is-num"><Money v={-v.tax} role={role} /></td>
+                            <td><Tag tone="red">已红字冲销</Tag></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )
+              )}
+              </div>
+            </>
+          )}
+
+          {mainTab === 'records' && (
+            <>
+              {/* 回款登记流水（与②计划期次分离：这里只列实际发生的登记） */}
+              <div className="nc-modcard">
+              <div className="nc-sec-title">{payDir ? '付款登记流水' : '回款登记流水'}</div>
+              <div className="nc-listhint" style={{ marginBottom: 6 }}>
+                <span>实际{payDir ? '付款' : '回款'}记录，与「{payDir ? '付款计划' : '收款计划'}」的期次跟踪分离<Tip w={320} text="本表只列实际发生的登记动作（含部分收付与红字冲销）；计划口径的完成度见「收付款计划」。" /></span>
+              </div>
+              {recvFlow.length === 0
+                ? <div className="nc-empty-mini">暂无{payDir ? '付款' : '回款'}登记记录{payDir ? '' : ' · 可在「收款计划」逐期登记'}</div>
+                : (
+                  <table className="nc-tbl" style={{ minWidth: 820 }}>
+                    <thead><tr>
+                      <th style={{ width: 56 }} className="is-num">期数</th><th>期次</th>
+                      <th style={{ width: 140 }} className="is-num">登记金额</th><th style={{ width: 110 }} className="is-num">登记日期</th><th style={{ width: 100 }}>状态</th><th>操作</th>
+                    </tr></thead>
+                    <tbody>
+                      {recvFlow.map((r) => (
+                        <tr key={r.no}>
+                          <td className="is-num">{r.no}</td>
+                          <td>{r.node}</td>
+                          <td className="is-num"><b className="num" style={r.actual < r.plan ? { color: 'var(--c-warning-deep)' } : undefined}><Money v={r.actual} role={role} /></b>{r.actual < r.plan && <span className="nc-cell-sub">（部分{payDir ? '付' : '收'}款）</span>}</td>
+                          <td className="is-num num">{r.date}</td>
+                          <td><Tag tone={STYPE_TONE[r.stype]}>{stTxt(r.status)}</Tag></td>
+                          <td><Op danger onClick={() => setRebuttal(r)}>{payDir ? '付款红字冲销' : '红字冲销'}</Op></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot><tr className="nc-tbl-sum">
+                      <td colSpan={2}>累计</td>
+                      <td className="is-num"><b className="num" style={{ color: 'var(--c-success-deep)' }}><Money v={received} role={role} /></b></td>
+                      <td colSpan={3} />
+                    </tr></tfoot>
+                  </table>
+                )}
+              </div>
+
+              {/* 付款单记录（采购方向的实际付款单据；销售合同一般为空） */}
+              <div className="nc-modcard">
+              <div className="nc-sec-title">付款单记录</div>
+              <div className="nc-listhint" style={{ marginBottom: 6 }}>
                 <span>付款校验<Tip w={380} text="付款超限硬拦截：已付 + 本次 > 执行金额 × 比例上限 → 硬拦截 + 校验明细；特批开关填理由放行并留痕。无关联合同付款固定路由老板审批。" /></span>
               </div>
               <table className="nc-tbl" style={{ minWidth: 1000 }}>
                 <thead><tr><th style={{ width: 110 }}>付款单号</th><th>事由</th><th style={{ width: 200 }}>相对方</th><th style={{ width: 90 }}>类型</th><th style={{ width: 120 }} className="is-num">金额</th><th style={{ width: 90 }}>状态</th><th style={{ width: 200 }}>校验 / 操作</th></tr></thead>
                 <tbody>
-                  {PAYMENTS.map((p) => (
+                  {payOrders.length === 0 && (
+                    <tr><td colSpan={7} style={{ fontWeight: 400, color: 'var(--ink-3)' }}>本合同暂无付款单</td></tr>
+                  )}
+                  {payOrders.map((p) => (
                     <tr key={p.id}>
                       <td><Code>{p.id}</Code></td><td>{p.name}</td><td className="nc-ellip" title={p.party}>{p.party}</td>
                       <td><Tag tone="orange">{p.type}</Tag></td>
@@ -1342,254 +1486,175 @@ export default function ContractDetailPage({ go, role, nav }: { go: (p: string) 
                     </tr>
                   ))}
                 </tbody>
+                <tfoot><tr className="nc-tbl-sum">
+                  <td colSpan={4}>合计</td>
+                  <td className="is-num"><b className="num" style={{ color: 'var(--c-success-deep)' }}><Money v={paidOf(c)} role={role} /></b></td>
+                  <td colSpan={2} style={{ fontWeight: 400, color: 'var(--ink-3)' }}>
+                    已付来自付款登记 · 累计已付 <Money v={paidOf(c)} role={role} />（{paidPctOf(c)}%）· 待付 <Money v={openPayOf(c)} role={role} />
+                  </td>
+                </tr></tfoot>
               </table>
-            </>
-          )}
-
-          {tab === 'change' && (
-            <>
-              <div className="nc-toolbar"><span className="nc-listhint">变更记录<Tip text="任何变更留痕：记录用户 / 时间 / 内容 / 原因，不可覆盖删除。" /></span><span className="nc-toolbar-sp" /><Btn onClick={() => setSupOpen(true)}>＋ 发起补充协议</Btn><Btn kind="primary" onClick={() => setChangeOpen(true)}>＋ 新增变更</Btn></div>
-              {/* 变更与补充：主合同下挂载的价格调整类补充协议及其生效凭证（补充协议签署 → 关联变更单自动生效 → 执行额刷新） */}
-              {CONTRACTS.filter((s) => s.parentId === c.id && (s.contractRole === 'supplement_price' || s.contractRole === 'supplement_service')).length > 0 && (
-                <div style={{ marginBottom: 10 }}>
-                  <div className="nc-listhint" style={{ marginBottom: 6 }}>变更与补充（补充协议 · 已生效计入执行额）</div>
-                  <table className="nc-tbl" style={{ minWidth: 880 }}>
-                    <thead><tr><th style={{ width: 130 }}>补充协议编号</th><th>类型</th><th style={{ width: 110 }} className="is-num">增量</th><th>生效凭证</th><th style={{ width: 90 }}>状态</th></tr></thead>
-                    <tbody>
-                      {CONTRACTS.filter((s) => s.parentId === c.id && (s.contractRole === 'supplement_price' || s.contractRole === 'supplement_service')).map((s) => (
-                        <tr key={s.id}>
-                          <td><Code>{s.id}</Code></td>
-                          <td>{s.contractRole === 'supplement_price' ? '价格调整补充协议' : '新增服务补充协议'}</td>
-                          <td className="is-num"><b className="num">+{fmtWan(s.amt)}</b></td>
-                          <td className="nc-cell-sub">补充协议 {s.id} 已签署 → 关联变更单自动生效 · 执行额已刷新</td>
-                          <td><Tag tone="green">已生效</Tag></td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-              <table className="nc-tbl" style={{ minWidth: 880 }}>
-                <thead><tr><th style={{ width: 110 }}>变更单号</th><th>变更内容</th><th style={{ width: 120 }} className="is-num">金额</th><th style={{ width: 90 }}>状态</th><th style={{ width: 110 }} className="is-num">日期</th><th style={{ width: 80 }}>操作</th></tr></thead>
-                <tbody>
-                  {CHANGES.map((x) => (
-                    <tr key={x.id}>
-                      <td><Code>{x.id}</Code></td>
-                      <td><span className="nc-ellip" title={x.reason || undefined}>{x.name}</span></td>
-                      <td className="is-num"><b className="num"><Money v={x.amt} role={role} /></b></td>
-                      <td><Tag tone={x.status === '已生效' ? 'green' : 'blue'}>{x.status}</Tag></td>
-                      <td className="is-num">{x.date}</td>
-                      <td><Op onClick={() => toast('已查看变更详情')}>详情</Op></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </>
-          )}
-
-          {tab === 'attach' && (
-            <>
-              <div className="nc-listhint">
-                <span>附件归集<Tip text="附件按分类归集，与「文档中心」双向同源（任一入口上传 / 删除实时同步）。" /></span>
               </div>
-              {GROUPS.map(([g, label]) => {
-                const list = cur.files[g];
-                return (
-                  <div key={g} className="nc-fgroup">
-                    <div className="nc-fg-head">
-                      <span className="nc-fg-title">{label}</span>
-                      <span className="nc-fg-count">{list.length} 个文件</span>
-                      <span className="nc-fg-ops"><Btn size="sm" onClick={() => {
-                        setFileAdd((a) => [...a, { key: cur.code, g, f: { name: '现场核验记录-新上传.jpg', by: '管理员', date: TODAY, size: '3.1 MB', type: 'JPG', color: '#b37feb' } }]);
-                        pushLog({ time: nowStamp(), text: <>管理员 上传附件「现场核验记录-新上传.jpg」</> });
-                        toast('上传成功（模拟）');
-                      }}>＋ 上传</Btn></span>
-                    </div>
-                    {list.length === 0
-                      ? <div className="nc-empty-mini">暂无文件，点击右上角「上传」</div>
-                      : list.map((f, i) => (
-                        <div key={`${g}-${i}`} className="nc-file-item">
-                          <span className="nc-file-ico" style={{ background: f.color }}>{f.type}</span>
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div className="nc-file-name">{f.name}</div>
-                            <div className="nc-file-meta">{f.by} 上传于 {f.date}</div>
-                          </div>
-                          <span className="nc-file-size">{f.size}</span>
-                          <span className="nc-file-ops">
-                            <Op onClick={() => toast('打开预览：' + f.name + '（演示）')}>查看</Op>
-                            <Op danger onClick={() => setDelFile({ g, i, name: f.name })}>删除</Op>
-                          </span>
-                        </div>
-                      ))}
-                  </div>
-                );
-              })}
             </>
           )}
 
-          {tab === 'proj' && (
+          {mainTab === 'accounting' && (
             <>
-              <div className="nc-sec-title">关联项目</div>
-              {cur.projects.length === 0
-                ? <div className="nc-empty-mini">框架协议暂无直接关联项目，按执行单工作量挂接</div>
-                : (
-                  <table className="nc-tbl" style={{ minWidth: 720 }}>
-                    <thead><tr><th style={{ width: 160 }}>项目编号</th><th>项目名称</th><th style={{ width: 120 }}>负责人</th><th style={{ width: 110 }}>状态</th></tr></thead>
-                    <tbody>
-                      {cur.projects.map((p) => (
-                        <tr key={p.code}>
-                          <td>{go ? <EntityLink target="project-center" id={p.code} go={go} strong title="下钻到项目详情">{p.code}</EntityLink> : <span className="num">{p.code}</span>}</td>
-                          <td>{p.name}</td>
-                          <td>{p.owner}</td>
-                          <td><Tag tone={STYPE_TONE[p.stype] ?? 'gray'}>{p.status}</Tag></td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-            </>
-          )}
-
-          {tab === 'appr' && (
-            <>
-              <ChainBar nodes={CHAIN_OF(cSt).map((s, i, arr) => {
-                const ci = arr.indexOf(cSt);
-                const state = cSt === '已终止' && i === arr.length - 1
-                  ? 'rejected'
-                  : i < ci ? 'done' : i === ci ? 'cur' : 'todo';
-                return { label: s, state: state as 'done' | 'cur' | 'todo' | 'rejected' };
-              })} />
-              <div className="nc-sec-title">审批路由（按金额自动分派）</div>
+              {/* 执行额勾稽：合同含税额 + 已生效变更 = 执行额 */}
+              <div className="nc-modcard">
+              <div className="nc-sec-title">执行额勾稽</div>
               <KvGrid cols={2} rows={[
-                { k: '当前节点', v: cSt === '待审批' ? <Tag tone="orange">待我审批</Tag> : <Tag tone="green">已完成</Tag> },
-                { k: '路由规则', v: c.execAmt >= 2000000 ? '≥200 万 → 总经理' : c.execAmt >= 500000 ? '50–200 万 → 分管副总' : '<50 万 → 部门负责人' },
-                { k: '发起人', v: cur.owner },
-                { k: '提交时间', v: cur.sign },
+                { k: '合同含税金额（签约）', v: <Money v={c.amt} role={role} /> },
+                { k: '已生效变更（净额）', v: <b className="num" style={{ color: c.execAmt - c.amt >= 0 ? 'var(--c-success-deep)' : 'var(--c-danger-deep)' }}><Money v={c.execAmt - c.amt} role={role} /></b> },
+                { k: '执行金额（含税）', v: <b className="num"><Money v={c.execAmt} role={role} /></b> },
+                { k: '税率口径', v: <Tag tone="blue">{taxOf(c.type)}%（{c.type === '采购合同' ? '货物' : c.type === '维护保养合同' ? '服务' : '工程'}）</Tag> },
               ]} />
-              <div className="nc-dnote">付款类审批另按「已付 + 本次 ≤ 执行金额 × 比例上限」硬校验；超限须走特批并留痕。</div>
+              <div className="nc-dnote">执行金额 = 合同含税金额 + 已生效变更；审批中变更不计入执行额，生效后自动刷新（{CHANGES.filter((x) => x.status !== '已生效').length} 笔审批中）。</div>
+              </div>
+
+              {/* 结算 */}
+              <div className="nc-modcard">
+              <div className="nc-sec-title">
+                结算
+                {cSt === '履约中' && <span className="nc-sec-title-ops"><Btn size="sm" kind="primary" onClick={() => setSettleOpen(true)}>发起结算</Btn></span>}
+              </div>
+              <KvGrid cols={2} rows={[
+                { k: '结算状态', v: <Tag tone="gray">未发起{cSt === '履约中' ? '（履约中可发起）' : ''}</Tag> },
+                { k: '结算依据', v: '执行金额 / 质保金留存，与项目侧 M10 结算同源' },
+              ]} />
+              </div>
+
+              {/* 收支汇总（进度与差额口径，绝对值见顶部统计卡） */}
+              <div className="nc-modcard">
+              <div className="nc-sec-title">收支汇总</div>
+              <KvGrid cols={2} rows={[
+                { k: payDir ? '应付进度' : '应收进度', v: <div style={{ maxWidth: 320 }}><div className="nc-stat5-row"><span>{planSum ? Math.round(received / planSum * 100) : 0}%</span><b className="num" style={{ color: 'var(--c-success-deep)' }}>{payDir ? '已付' : '已收'} / {payDir ? '应付' : '应收'}</b></div><Progress value={planSum ? Math.round(received / planSum * 100) : 0} tone={payDir ? 'orange' : 'green'} /></div> },
+                { k: payDir ? '待付差额' : '未收差额', v: <b className="num" style={{ color: 'var(--c-warning-deep)' }}><Money v={Math.max(planSum - received, 0)} role={role} /></b> },
+                { k: '质保金留存', v: <><Money v={retention} role={role} /><span className="nc-cell-sub">（结算总额 {RETENTION_PCT}% 上限 · 质保期满结清）</span></> },
+                { k: '不含税收入与税额', v: <><Money v={Math.round(c.execAmt / (1 + taxOf(c.type) / 100))} role={role} /><span className="nc-cell-sub">（不含税）+ 税额 <Money v={c.execAmt - Math.round(c.execAmt / (1 + taxOf(c.type) / 100))} role={role} /></span></> },
+              ]} />
+              <div className="nc-dnote">不含税收入 = 执行金额 ÷（1 + {taxOf(c.type)}%）；金额绝对值以顶部统计卡为唯一出处，本页只做勾稽与差额。</div>
+              </div>
+
+              {/* 执行额拆解 · 执行单（框架协议专用，真实落台账） */}
+              {isFramework && (
+                <div className="nc-modcard">
+                <>
+                  <div className="nc-sec-title">
+                    执行额拆解 · 执行单
+                    <span className="nc-sec-title-ops">
+                      <Btn size="sm" kind="primary" onClick={() => { setPendingExec({ contractId: c.id }); go('contract-new'); }}><Ico n="plus" size={14} /> 新增执行单</Btn>
+                    </span>
+                  </div>
+                  <div className="nc-subbar">
+                    <Ico n="package" size={14} /> 框架额度 <b className="num">{<Money v={c.amt} role={role} />}</b>，已签执行单 {execOrders.length} 份、累计执行 {<Money v={usedExec} role={role} />}（占额度 {usedPct}%）；单笔 ≥50 万元须财务复核，累计超出额度须先签补充协议。点击「＋ 新增执行单」进入新建合同向导（自动挂载本框架协议），点击行进入执行单详情。
+                  </div>
+                  <table className="nc-tbl" style={{ minWidth: 860 }}>
+                    <thead><tr>
+                      <th style={{ width: 170 }}>执行单编号</th><th>执行单名称</th>
+                      <th style={{ width: 90 }}>类型</th><th style={{ width: 130 }} className="is-num">执行金额</th>
+                      <th style={{ width: 100 }}>状态</th><th style={{ width: 90 }}>操作</th>
+                    </tr></thead>
+                    <tbody>
+                      {execOrders.map((k) => (
+                        <tr key={k.id} className="nc-subrow" onClick={() => openExecOrder(k.id)}>
+                          <td><a className="nc-link num">{k.id}</a></td>
+                          <td>{k.name}</td>
+                          <td><Tag tone="gray">{k.type}</Tag></td>
+                          <td className="is-num"><b className="num"><Money v={k.execAmt} role={role} /></b></td>
+                          <td><Tag tone={k.status === '履约中' ? 'green' : k.status === '已签约' ? 'blue' : 'gray'}>{k.status}</Tag></td>
+                          <td><div className="nc-ops"><Op onClick={() => openExecOrder(k.id)}>详情</Op></div></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot><tr className="nc-tbl-sum">
+                      <td colSpan={3}>累计已执行 / 框架额度</td>
+                      <td className="is-num"><b className="num">{<Money v={usedExec} role={role} />} / {<Money v={c.amt} role={role} />}</b></td>
+                      <td colSpan={2} style={{ fontWeight: 400, color: 'var(--ink-3)' }}>
+                        占额度 {usedPct}% · 超出须签补充协议
+                      </td>
+                    </tr></tfoot>
+                  </table>
+                </>
+                </div>
+              )}
             </>
           )}
 
-          {tab === 'sign' && (
+          {mainTab === 'change' && (
             <>
-              {/* ① 电子签概览 */}
-              <div className="nc-stat4">
-                <div className="nc-stat4-cell">电子签状态<b>{signSt}</b></div>
-                <div className="nc-stat4-cell">签署方<b className="num">{signParties.length}</b></div>
-                <div className="nc-stat4-cell">已签<b className="num">{signSignedN}</b></div>
-                <div className="nc-stat4-cell">待签 / 撤回<b className="num">{Math.max(signParties.length - signSignedN, 0)}</b></div>
-              </div>
-              {signSt === '已签' && cSt === '待审批' && (
-                <Banner tone="ok" actions={<Btn size="sm" kind="primary" onClick={() => { patchContract(c.id, { status: '已签约' }); setBizStatus(c.id, '已签约'); toast(`${c.id} 电子签已完成 · 合同转「已签约」`); }}>确认签约</Btn>}>
-                  电子签已全部完成（{signSignedN}/{signParties.length} 方已签）—— 合同可转「已签约」。
-                </Banner>
-              )}
-              {signSt === '签署中' && (
-                <Banner tone="warn">
-                  电子签进行中：尚有 {Math.max(signParties.length - signSignedN, 0)} 方未完成签署，全部完成后合同方可转「已签约」。
-                </Banner>
-              )}
-
-              {/* ② 落签地配置 */}
-              <div className="nc-sec-title" style={{ marginTop: 16 }}>
-                落签地配置
-                <span> <Tip w={340} text="第三方电子签已对接完成，本页只做落签地 / 签署位置配置与签署链留痕。落签地支持按关键字定位（如「甲方盖章处」）或按坐标定位（如 x:120 y:860）；每一方可独立设置签章类型（公章 / 个人章）与骑缝章开关。落签位置未配置时不允许发起签署。" /></span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', margin: '4px 0 10px' }}>
-                <span className="nc-cell-sub">签署顺序</span>
-                <div className="nc-seg">
-                  {SIGN_ORDERS.map((o) => (
-                    <button key={o} className={`nc-seg-btn${signDraft?.order === o ? ' is-on' : ''}`} onClick={() => setSignDraft((d) => (d ? { ...d, order: o } : d))}>{o}</button>
-                  ))}
+              <div className="nc-modcard">
+                <div className="nc-sec-title">
+                  变更记录
+                  <span className="nc-sec-title-ops">
+                    <Btn size="sm" onClick={() => setSupOpen(true)}>＋ 发起补充协议</Btn>
+                    <Btn size="sm" kind="primary" onClick={() => setChangeOpen(true)}>＋ 新增变更</Btn>
+                  </span>
                 </div>
-                <span style={{ flex: 1 }} />
-                <Btn size="sm" onClick={applySignTpl}>套用标准双签模板</Btn>
-                <Btn size="sm" onClick={addSignParty}>+ 签署方</Btn>
-                <Btn size="sm" kind="primary" onClick={doSaveSignCfg}>保存落签地配置</Btn>
-              </div>
-              {signParties.length ? (
-                <table className="nc-tbl" style={{ minWidth: 900 }}>
-                  <thead>
-                    <tr>
-                      <th>签署方</th>
-                      <th style={{ width: 58 }}>身份</th>
-                      <th style={{ width: 78 }}>签章类型</th>
-                      <th style={{ width: 76 }}>骑缝章</th>
-                      <th style={{ width: 110 }}>定位方式</th>
-                      <th>落签位置</th>
-                      <th style={{ width: 78 }}>状态</th>
-                      <th style={{ width: 128 }} className="is-num">签署时间</th>
-                      <th style={{ width: 108 }}>操作</th>
-                    </tr>
-                  </thead>
+                <div className="nc-listhint" style={{ marginBottom: 10 }}>
+                  <span>任何变更留痕：记录用户 / 时间 / 内容 / 原因，不可覆盖删除<Tip text="变更单生效后回写执行额；补充协议签署 → 关联变更单自动生效 → 执行额刷新。" /></span>
+                </div>
+                {/* 变更与补充：主合同下挂载的价格调整类补充协议及其生效凭证（补充协议签署 → 关联变更单自动生效 → 执行额刷新） */}
+                {CONTRACTS.filter((s) => s.parentId === c.id && (s.contractRole === 'supplement_price' || s.contractRole === 'supplement_service')).length > 0 && (
+                  <div style={{ marginBottom: 16 }}>
+                    <div className="nc-ledhd" style={{ marginTop: 12 }}>变更与补充（补充协议 · 已生效计入执行额）</div>
+                    <table className="nc-tbl" style={{ minWidth: 880 }}>
+                      <thead><tr><th style={{ width: 130 }}>补充协议编号</th><th>类型</th><th style={{ width: 110 }} className="is-num">增量</th><th>生效凭证</th><th style={{ width: 90 }}>状态</th></tr></thead>
+                      <tbody>
+                        {CONTRACTS.filter((s) => s.parentId === c.id && (s.contractRole === 'supplement_price' || s.contractRole === 'supplement_service')).map((s) => (
+                          <tr key={s.id}>
+                            <td><Code>{s.id}</Code></td>
+                            <td>{s.contractRole === 'supplement_price' ? '价格调整补充协议' : '新增服务补充协议'}</td>
+                            <td className="is-num"><b className="num">+{fmtWan(s.amt)}</b></td>
+                            <td className="nc-cell-sub">补充协议 {s.id} 已签署 → 关联变更单自动生效 · 执行额已刷新</td>
+                            <td><Tag tone="green">已生效</Tag></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                <table className="nc-tbl" style={{ minWidth: 880 }}>
+                  <thead><tr><th style={{ width: 110 }}>变更单号</th><th>变更内容</th><th style={{ width: 120 }} className="is-num">金额</th><th style={{ width: 90 }}>状态</th><th style={{ width: 110 }} className="is-num">日期</th><th style={{ width: 80 }}>操作</th></tr></thead>
                   <tbody>
-                    {signParties.map((p, i) => (
-                      <tr key={`${p.name}-${i}`}>
-                        <td>{p.name || <span className="nc-v-red">未命名签署方</span>}</td>
-                        <td><Tag tone={p.side === '我方' ? 'blue' : 'purple'}>{p.side}</Tag></td>
-                        <td>{p.seal}</td>
-                        <td>{p.across ? '已开启' : '—'}</td>
-                        <td>{p.locateMode}</td>
-                        <td>{p.anchor ? <span className="num">{p.anchor}</span> : <span className="nc-v-red">未配置落签位置</span>}</td>
-                        <td><Tag tone={PARTY_TONE[p.st] ?? 'gray'}>{p.st}</Tag></td>
-                        <td className="is-num num">{p.at ?? '—'}</td>
-                        <td>
-                          <span className="nc-ops">
-                            <Op onClick={() => setAnchorIdx(i)}>落签地</Op>
-                            {p.st === '待签署' && <><OpSep /><Op onClick={() => doSignOne(p.name)} title="模拟第三方电子签回调：登记该方签署时间戳与 IP">登记签署</Op></>}
-                          </span>
-                        </td>
+                    {CHANGES.map((x) => (
+                      <tr key={x.id}>
+                        <td><Code>{x.id}</Code></td>
+                        <td><span className="nc-ellip" title={x.reason || undefined}>{x.name}</span></td>
+                        <td className="is-num"><b className="num"><Money v={x.amt} role={role} /></b></td>
+                        <td><Tag tone={x.status === '已生效' ? 'green' : 'blue'}>{x.status}</Tag></td>
+                        <td className="is-num">{x.date}</td>
+                        <td><Op onClick={() => toast('已查看变更详情')}>详情</Op></td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
-              ) : (
-                <div className="nc-empty-mini">/ 尚未配置签署方 · 可「套用标准双签模板」或「+ 签署方」后保存，再发起签署</div>
-              )}
-
-              {/* ③ 签署动作 */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
-                <Btn size="sm" kind="primary" onClick={doStartSign} disabled={signSt === '签署中' || signSt === '已签'}>发起签署</Btn>
-                <Btn size="sm" danger onClick={() => setWithdrawOpen(true)} disabled={signSt !== '签署中'}>撤回签署</Btn>
-                <span style={{ flex: 1 }} />
-                <span className="nc-cell-sub">签署链进度 {signSignedN}/{signParties.length} 方已签</span>
               </div>
-
-              {/* ④ 签署链 */}
-              <div className="nc-sec-title" style={{ marginTop: 16 }}>签署链</div>
-              {signChain.length
-                ? <Timeline items={signChain} />
-                : <div className="nc-empty-mini">/ 尚未发起签署 · 发起后逐方记录签署时间戳与 IP</div>}
             </>
           )}
 
-          {tab === 'borrow' && (
-            <table className="nc-tbl" style={{ minWidth: 700 }}>
-              <thead><tr><th style={{ width: 110 }}>借阅单号</th><th>借阅人</th><th style={{ width: 110 }}>申请时间</th><th style={{ width: 110 }}>归还时间</th><th style={{ width: 90 }}>状态</th></tr></thead>
-              <tbody>
-                <tr><td><Code>JY000017</Code></td><td>行政</td><td>2026-09-17</td><td>2026-09-18</td><td><Tag tone="green">已归还</Tag></td></tr>
-                <tr><td><Code>JY000021</Code></td><td>赵薇</td><td>2026-09-20</td><td>—</td><td><Tag tone="blue">借阅中</Tag></td></tr>
-              </tbody>
-            </table>
-          )}
-
-          {tab === 'log' && (
-            <Timeline items={cur.logs.map((l) => ({
-              date: l.time,
-              text: l.text,
-              tone: (l.warn ? 'ok' : 'gray') as 'ok' | 'gray',
-            }))} />
-          )}
+          {/* 附件归集 / 借阅记录（→ 头部「合同文件」弹层）、电子签（→ 头部「电子签」弹层）、
+              操作日志（→ 头部「操作记录」弹层）已降级出 Tab，见文件尾弹层区 */}
         </div>
 
-        {/* ---------- 页脚 ---------- */}
+        {/* ---------- 页脚（底部悬浮栏：原独立操作区已并入；高频动作靠右凸显，低频入口收进「更多操作」） ---------- */}
         <div className="nc-d2-foot">
           {cSt === '待审批' && (
             <span className="nc-cell-sub"><Ico n="help" size={14} /> 该合同待审批 —— 审批操作统一在「审批中心」处理，审批通过后状态自动回写本页（此处只读展示流转）。</span>
           )}
           <span className="spacer" />
-          {/* 编辑入「基础信息」小节标题、更多操作在操作区、收款进度在统计卡 —— 页脚不再重复这三处 */}
-          <Btn onClick={onClose}>关闭</Btn>
+          {isPurchase
+            ? <><Btn kind="primary" onClick={() => setPayOpen(payOrders[0] ?? null)}>请款 / 付款</Btn><Btn onClick={() => setChangeOpen(true)}>变更签证</Btn><Btn onClick={() => setSettleOpen(true)}>结算</Btn></>
+            : (isTerminal
+              ? null
+              : <>{(cur.projects?.length ?? 0) === 0
+                  && <Btn kind="primary" onClick={() => { setPendingProject({ contractId: cur.code }); go('project-new'); }} title="以本合同为来源创建项目（自动带入合同要素并生成合同交底卡）">创建项目</Btn>}
+                <Btn onClick={() => setChangeOpen(true)}>变更 / 签证</Btn>
+                <Btn onClick={() => { setTab('plan'); toast(`请在「${payDir ? '付款计划' : '收款计划'}」中逐期登记`); }}>{payDir ? '登记付款' : '登记收款'}</Btn>
+                {c.status === '履约中' ? <Btn onClick={() => setSettleOpen(true)}>结算</Btn> : null}</>)}
+          <Btn onClick={() => setActOpen(true)}>更多操作 ⋯</Btn>
+          {/* 电子签（随签署状态提示）/ 合同文件（正文+附件+借阅）/ 操作记录已收进「更多操作」弹层；
+              编辑入「基础信息」小节标题、收款进度在统计卡 —— 页脚不再重复 */}
         </div>
       </div>
 
@@ -1603,7 +1668,7 @@ export default function ContractDetailPage({ go, role, nav }: { go: (p: string) 
         </div>
       </Modal>
 
-      {/* ============ 电子合同 · 修订条款（双击纸面条款进入） ============ */}
+      {/* ============ 电子合同 · 修订条款（双击纸面条款 / 点「修改」进入） ============ */}
       <Modal
         open={!!clauseEdit} onClose={() => setClauseEdit(null)} width={480} title={`修订条款 · ${clauseEdit?.h ?? ''}`}
         foot={<><Btn onClick={() => setClauseEdit(null)}>取消</Btn><Btn kind="primary" onClick={() => {
@@ -1618,6 +1683,16 @@ export default function ContractDetailPage({ go, role, nav }: { go: (p: string) 
           setClauseEdit(null);
           toast(`已保存 · 文档版本升至 v${docVer + 1}，AI 审查结论已失效，请重新审查`);
         }}>保存并重新生成</Btn></>}>
+        <Field label="选择条款">
+          <select className="nc-input" value={clauseEdit?.id ?? ''} onChange={(e) => {
+            const cl = clauses.find((x) => x.id === e.target.value);
+            if (!cl) return;
+            setHlClause(cl.id);
+            setClauseText(cl.t); setClauseEdit(cl);
+          }}>
+            {clauses.map((x) => <option key={x.id} value={x.id}>{x.h}</option>)}
+          </select>
+        </Field>
         <Field label="条款正文">
           <textarea className="nc-input" style={{ minHeight: 120, lineHeight: 1.8 }} value={clauseText} onChange={(e) => setClauseText(e.target.value)} />
         </Field>
@@ -1706,35 +1781,29 @@ export default function ContractDetailPage({ go, role, nav }: { go: (p: string) 
           <Field label="变更原因" req span={2}><textarea className="nc-input" rows={3} placeholder="记录用户 / 时间 / 内容 / 原因，不可覆盖删除" /></Field>
           <Field label="发包方确认函" span={2} note="政府 / 部队项目建议上传书面确认"><input className="nc-input" type="file" /></Field>
         </div>
-      </Modal>
-
-      {/* ============ 发起工作量拆分（只读视图 · 不产生新合同） ============ */}
-      <Modal
-        open={splitOpen} onClose={() => setSplitOpen(false)} width={560} title="发起工作量拆分"
-        foot={<><Btn onClick={() => setSplitOpen(false)}>取消</Btn><Btn kind="primary" onClick={confirmSplit}>发起拆分</Btn></>}>
-        <Banner tone="info">按工作量 / 分期拆分为若干执行份（只读视图，不写入台账、不产生新合同），合计不超过主合同总额，余款由主合同直接执行。</Banner>
-        <div style={{ fontSize: 13, lineHeight: 1.8, marginBottom: 8 }}>
-          主合同总额 <b className="num"><Money v={c ? c.execAmt || c.amt || 0 : 0} role={role} /></b>
-          {'　'}已填 {splitDraft.length} 份，合计 <b className="num">{splitDraft.reduce((a, r) => a + (Number(r.amt) || 0), 0).toLocaleString()}</b> 元
-          （占总额 {c && (c.execAmt || c.amt || 0) ? Math.round(splitDraft.reduce((a, r) => a + (Number(r.amt) || 0), 0) / (c.execAmt || c.amt || 0) * 100) : 0}%）
+        {/* AI 审核（2026-09-28 确认挂载点）：变更发起时审查，与新建向导提交前同模式 */}
+        <div className="nc-editbar" style={{ marginTop: 12 }}>
+          <b><Ico n="robot" size={16} /> AI 变更审核</b>
+          <Btn size="sm" kind="primary" disabled={chgAi === 'running'} onClick={() => {
+            if (chgAi !== 'idle') { setChgAi('idle'); return; }
+            setChgAi('running');
+            setTimeout(() => setChgAi('done'), 1200);
+          }}>
+            {chgAi === 'running' ? 'AI 审核中…' : chgAi === 'done' ? '重新审核' : '发起 AI 审核'}
+          </Btn>
         </div>
-        <table className="nc-tbl" style={{ minWidth: 480 }}>
-          <thead><tr><th style={{ width: 190 }}>拆分项名称</th><th style={{ width: 120 }}>类型</th><th>金额（元）</th><th style={{ width: 40 }}></th></tr></thead>
-          <tbody>
-            {splitDraft.map((r, i) => (
-              <tr key={i}>
-                <td><input className="nc-input" value={r.sname} onChange={(e) => setSplitDraft((p) => p.map((x, j) => (j === i ? { ...x, sname: e.target.value } : x)))} placeholder="如：一期主体" /></td>
-                <td><select className="nc-cell-in" value={r.type} onChange={(e) => setSplitDraft((p) => p.map((x, j) => (j === i ? { ...x, type: e.target.value } : x)))}>{['消防工程', '检测', '维保服务', '软件平台'].map((t) => <option key={t}>{t}</option>)}</select></td>
-                <td><input className="nc-input is-num" value={r.amt} onChange={(e) => setSplitDraft((p) => p.map((x, j) => (j === i ? { ...x, amt: e.target.value } : x)))} placeholder="金额" /></td>
-                <td><Op onClick={() => setSplitDraft((p) => p.filter((_, j) => j !== i))}>删除</Op></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <div style={{ marginTop: 8 }}>
-          <Btn size="sm" onClick={() => setSplitDraft((p) => [...p, { sname: `拆分项${p.length + 1}`, type: '消防工程', amt: '' }])} disabled={splitDraft.length >= 5}>＋ 增加一行</Btn>
-          <span className="nc-cell-sub" style={{ marginLeft: 12 }}>最多 5 份；拆分后余款由主合同直接执行，可配合收款期次逐期对应。</span>
-        </div>
+        {chgAi === 'idle' && <div className="nc-cell-sub" style={{ marginTop: 6 }}>提交变更前建议先跑一次 AI 审核：变更依据 / 金额勾稽 / 执行额影响三类检查，结果仅供参考，不替代人工复核。</div>}
+        {chgAi === 'running' && <div style={{ marginTop: 8 }}><Banner tone="info">AI 正在通读变更内容，比对合同金额勾稽与执行额影响…</Banner></div>}
+        {chgAi === 'done' && (
+          <div style={{ marginTop: 8 }}>
+            <Banner tone="ok"><Ico n="checkCircle" size={16} /> <b>AI 审核完成：未发现硬性风险</b> —— 结论仅供提交前参考。</Banner>
+            <ol className="nc-olist">
+              <li>变更依据：变更类型与内容描述匹配，未见与主合同条款冲突。</li>
+              <li>金额勾稽：变更金额计入执行额后，Σ期次计划与执行额保持同口径。</li>
+              <li>执行额影响：生效后执行额、{payDir ? '付款' : '收款'}期次将联动刷新；审批流按金额分档自动分派。</li>
+            </ol>
+          </div>
+        )}
       </Modal>
 
       {/* ============ 结算 ============ */}
@@ -1760,6 +1829,10 @@ export default function ContractDetailPage({ go, role, nav }: { go: (p: string) 
           {!isTerminal && <button className="nc-oplist-item" onClick={() => { setTermType('中止'); setTermOpen(true); setActOpen(false); }}>终止<small>需填原因，走审批</small></button>}
           {!isTerminal && <button className="nc-oplist-item" onClick={() => { setTermType('中止'); setTermOpen(true); setActOpen(false); }}>中止<small>临时停工，落「已终止」</small></button>}
           {!isTerminal && <button className="nc-oplist-item" onClick={() => { setTermType('解除'); setTermOpen(true); setActOpen(false); }}>解除<small>不可恢复，落「已终止」</small></button>}
+          {/* 原页脚低频入口收编：电子签（随签署状态提示）/ 合同文件 / 操作记录 */}
+          <button className="nc-oplist-item" onClick={() => { setSignOpen(true); setActOpen(false); }}>电子签<small>落签地配置 · 发起签署 · 签署链留痕{signSt === '未发起' ? '' : ` · 当前 ${signSt}`}</small></button>
+          <button className="nc-oplist-item" onClick={() => { setFileSub('attach'); setFileOpen(true); setActOpen(false); }}>合同文件<small>附件分类 / 借阅记录（电子合同正文见「详细信息」）</small></button>
+          <button className="nc-oplist-item" onClick={() => { setLogsOpen(true); setActOpen(false); }}>操作记录<small>操作留痕，不可覆盖删除</small></button>
           <button className="nc-oplist-item is-danger" onClick={() => { toast('作废需管理员权限，已提交申请'); setActOpen(false); }}>作废<small>仅草稿可作废</small></button>
         </div>
       </Modal>
@@ -1825,6 +1898,164 @@ export default function ContractDetailPage({ go, role, nav }: { go: (p: string) 
           </Field>
           <Field label="终止原因" req span={2}><textarea className="nc-input" rows={3} /></Field>
         </div>
+      </Modal>
+
+      {/* ============ 头部弹层 · 合同文件（附件分类 + 借阅记录；正文在「详细信息」Tab） ============ */}
+      <Modal open={fileOpen} onClose={() => setFileOpen(false)} width={860} title={`合同文件 · ${cur.code}`}>
+        <div className="nc-toolbar" style={{ marginBottom: 12 }}>
+          {([['attach', '附件分类'], ['borrow', '借阅记录']] as const).map(([k, l]) => (
+            <span key={k} className={`nc-fchip${fileSub === k ? ' is-on' : ''}`} onClick={() => setFileSub(k)}>{l}</span>
+          ))}
+        </div>
+        {fileSub === 'attach' && (
+          <>
+            <div className="nc-listhint">
+              <span>附件归集<Tip text="附件按分类归集，与「文档中心」双向同源（任一入口上传 / 删除实时同步）。" /></span>
+            </div>
+            {GROUPS.map(([g, label]) => {
+              const list = cur.files[g];
+              return (
+                <div key={g} className="nc-fgroup">
+                  <div className="nc-fg-head">
+                    <span className="nc-fg-title">{label}</span>
+                    <span className="nc-fg-count">{list.length} 个文件</span>
+                    <span className="nc-fg-ops"><Btn size="sm" onClick={() => {
+                      setFileAdd((a) => [...a, { key: cur.code, g, f: { name: '现场核验记录-新上传.jpg', by: '管理员', date: TODAY, size: '3.1 MB', type: 'JPG', color: '#b37feb' } }]);
+                      pushLog({ time: nowStamp(), text: <>管理员 上传附件「现场核验记录-新上传.jpg」</> });
+                      toast('上传成功（模拟）');
+                    }}>＋ 上传</Btn></span>
+                  </div>
+                  {list.length === 0
+                    ? <div className="nc-empty-mini">暂无文件，点击右上角「上传」</div>
+                    : list.map((f, i) => (
+                      <div key={`${g}-${i}`} className="nc-file-item">
+                        <span className="nc-file-ico" style={{ background: f.color }}>{f.type}</span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div className="nc-file-name">{f.name}</div>
+                          <div className="nc-file-meta">{f.by} 上传于 {f.date}</div>
+                        </div>
+                        <span className="nc-file-size">{f.size}</span>
+                        <span className="nc-file-ops">
+                          <Op onClick={() => toast('打开预览：' + f.name + '（演示）')}>查看</Op>
+                          <Op danger onClick={() => setDelFile({ g, i, name: f.name })}>删除</Op>
+                        </span>
+                      </div>
+                    ))}
+                </div>
+              );
+            })}
+          </>
+        )}
+        {fileSub === 'borrow' && (
+          <table className="nc-tbl" style={{ minWidth: 700 }}>
+            <thead><tr><th style={{ width: 110 }}>借阅单号</th><th>借阅人</th><th style={{ width: 110 }}>申请时间</th><th style={{ width: 110 }}>归还时间</th><th style={{ width: 90 }}>状态</th></tr></thead>
+            <tbody>
+              <tr><td><Code>JY000017</Code></td><td>行政</td><td>2026-09-17</td><td>2026-09-18</td><td><Tag tone="green">已归还</Tag></td></tr>
+              <tr><td><Code>JY000021</Code></td><td>赵薇</td><td>2026-09-20</td><td>—</td><td><Tag tone="blue">借阅中</Tag></td></tr>
+            </tbody>
+          </table>
+        )}
+      </Modal>
+
+      {/* ============ 头部弹层 · 操作记录（原「操作日志」Tab） ============ */}
+      <Modal open={logsOpen} onClose={() => setLogsOpen(false)} width={640} title={`操作记录 · ${cur.code}`}>
+        <Timeline items={cur.logs.map((l) => ({
+          date: l.time,
+          text: l.text,
+          tone: (l.warn ? 'ok' : 'gray') as 'ok' | 'gray',
+        }))} />
+      </Modal>
+
+      {/* ============ 头部弹层 · 电子签（CON-02，原 doc 组「电子签」子页签整体迁入） ============ */}
+      <Modal open={signOpen} onClose={() => setSignOpen(false)} width={960} title={`电子签 · ${cur.code}`}>
+        {/* ① 电子签概览 */}
+        <div className="nc-stat4">
+          <div className="nc-stat4-cell">电子签状态<b>{signSt}</b></div>
+          <div className="nc-stat4-cell">签署方<b className="num">{signParties.length}</b></div>
+          <div className="nc-stat4-cell">已签<b className="num">{signSignedN}</b></div>
+          <div className="nc-stat4-cell">待签 / 撤回<b className="num">{Math.max(signParties.length - signSignedN, 0)}</b></div>
+        </div>
+        {signSt === '已签' && cSt === '待审批' && (
+          <Banner tone="ok" actions={<Btn size="sm" kind="primary" onClick={() => { patchContract(c.id, { status: '已签约' }); setBizStatus(c.id, '已签约'); toast(`${c.id} 电子签已完成 · 合同转「已签约」`); }}>确认签约</Btn>}>
+            电子签已全部完成（{signSignedN}/{signParties.length} 方已签）—— 合同可转「已签约」。
+          </Banner>
+        )}
+        {signSt === '签署中' && (
+          <Banner tone="warn">
+            电子签进行中：尚有 {Math.max(signParties.length - signSignedN, 0)} 方未完成签署，全部完成后合同方可转「已签约」。
+          </Banner>
+        )}
+
+        {/* ② 落签地配置 */}
+        <div className="nc-sec-title" style={{ marginTop: 16 }}>
+          落签地配置
+          <span> <Tip w={340} text="第三方电子签已对接完成，本页只做落签地 / 签署位置配置与签署链留痕。落签地支持按关键字定位（如「甲方盖章处」）或按坐标定位（如 x:120 y:860）；每一方可独立设置签章类型（公章 / 个人章）与骑缝章开关。落签位置未配置时不允许发起签署。" /></span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', margin: '4px 0 10px' }}>
+          <span className="nc-cell-sub">签署顺序</span>
+          <div className="nc-seg">
+            {SIGN_ORDERS.map((o) => (
+              <button key={o} className={`nc-seg-btn${signDraft?.order === o ? ' is-on' : ''}`} onClick={() => setSignDraft((d) => (d ? { ...d, order: o } : d))}>{o}</button>
+            ))}
+          </div>
+          <span style={{ flex: 1 }} />
+          <Btn size="sm" onClick={applySignTpl}>套用标准双签模板</Btn>
+          <Btn size="sm" onClick={addSignParty}>+ 签署方</Btn>
+          <Btn size="sm" kind="primary" onClick={doSaveSignCfg}>保存落签地配置</Btn>
+        </div>
+        {signParties.length ? (
+          <table className="nc-tbl" style={{ minWidth: 840 }}>
+            <thead>
+              <tr>
+                <th>签署方</th>
+                <th style={{ width: 58 }}>身份</th>
+                <th style={{ width: 78 }}>签章类型</th>
+                <th style={{ width: 76 }}>骑缝章</th>
+                <th style={{ width: 110 }}>定位方式</th>
+                <th>落签位置</th>
+                <th style={{ width: 78 }}>状态</th>
+                <th style={{ width: 128 }} className="is-num">签署时间</th>
+                <th style={{ width: 108 }}>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {signParties.map((p, i) => (
+                <tr key={`${p.name}-${i}`}>
+                  <td>{p.name || <span className="nc-v-red">未命名签署方</span>}</td>
+                  <td><Tag tone={p.side === '我方' ? 'blue' : 'purple'}>{p.side}</Tag></td>
+                  <td>{p.seal}</td>
+                  <td>{p.across ? '已开启' : '—'}</td>
+                  <td>{p.locateMode}</td>
+                  <td>{p.anchor ? <span className="num">{p.anchor}</span> : <span className="nc-v-red">未配置落签位置</span>}</td>
+                  <td><Tag tone={PARTY_TONE[p.st] ?? 'gray'}>{p.st}</Tag></td>
+                  <td className="is-num num">{p.at ?? '—'}</td>
+                  <td>
+                    <span className="nc-ops">
+                      <Op onClick={() => setAnchorIdx(i)}>落签地</Op>
+                      {p.st === '待签署' && <><OpSep /><Op onClick={() => doSignOne(p.name)} title="模拟第三方电子签回调：登记该方签署时间戳与 IP">登记签署</Op></>}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <div className="nc-empty-mini">/ 尚未配置签署方 · 可「套用标准双签模板」或「+ 签署方」后保存，再发起签署</div>
+        )}
+
+        {/* ③ 签署动作 */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
+          <Btn size="sm" kind="primary" onClick={doStartSign} disabled={signSt === '签署中' || signSt === '已签'}>发起签署</Btn>
+          <Btn size="sm" danger onClick={() => setWithdrawOpen(true)} disabled={signSt !== '签署中'}>撤回签署</Btn>
+          <span style={{ flex: 1 }} />
+          <span className="nc-cell-sub">签署链进度 {signSignedN}/{signParties.length} 方已签</span>
+        </div>
+
+        {/* ④ 签署链 */}
+        <div className="nc-sec-title" style={{ marginTop: 16 }}>签署链</div>
+        {signChain.length
+          ? <Timeline items={signChain} />
+          : <div className="nc-empty-mini">/ 尚未发起签署 · 发起后逐方记录签署时间戳与 IP</div>}
       </Modal>
 
       {/* ============ 统一导出（单条） ============ */}

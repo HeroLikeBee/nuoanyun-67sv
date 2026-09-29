@@ -1,14 +1,14 @@
-/* 项目详情（项目详情）· 分层详情外壳 —— 概览页 + 5 个业务域子页
+/* 项目详情 · 分层详情外壳 —— 统一骨架 11 Tab（WB / JC 追加业务 Tab 至 13）
  *
- * 重构要点（对齐用户 2026-09-23 评审）：
+ * 重构要点（对齐用户 2026-09-23 评审 + 2026-09-28 11-Tab 拍板）：
  *   1. 形态：由「单页 6 卡 + 长 Tab」改为「概览页 + 独立子页」。子页是兄弟视图，不是弹窗 / 抽屉。
  *   2. 载体：不同载体各守其界 ——
- *        概览页与子页 → 同级导航（二级页签，不进浏览器历史栈）；
+ *        子页 → 同级导航（二级页签，不进浏览器历史栈）；
  *        审阅型跨模块视图（项目全景 / 操作记录全文）→ 抽屉；
  *        编辑或登记类短表单（≤5 字段）→ 弹窗 480；长表单 → 抽屉 640。
  *   3. 分层导航：页头（面包屑 + 身份 + 状态 + 溯源 + 操作）与二级导航条常驻，
  *      内容区吃满剩余高度后内部滚动，避免「要滑很多屏才看到真正要看的东西」。
- *   4. 数字唯一归属：绝对值只在概览页出现一次，其它子页只承接差额 / 比率 / 流水；
+ *   4. 数字唯一归属：绝对值只在「基本信息」KPI 带出现一次，其它子页只承接差额 / 比率 / 流水；
  *      同一个数字的两种说法（回款率 / 回款进度）合并为一种。
  *   5. 闭环：全链路血缘（每跳可点）· 风险处置到销项 · 节点准入资料硬拦截 · 资金穿透链。
  *
@@ -28,47 +28,128 @@
  */
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Banner, Btn, Card, Code, ConfirmModal, Drawer, EntityLink, IdCell, KvGrid, Modal, Money,
-  Op, OpMore, PageHead, Progress, Tag, Timeline, Tip, Tabs, useToast,
+  Banner, Btn, Card, ConfirmModal, Drawer, IdCell, KvGrid, Modal, Money,
+  OpMore, Progress, Tag, Timeline, Tip, Tabs, useToast,
   ContractPicker,
 } from '../components/ui';
 import { Ico } from '../components/icons';
 import {
-  PROJECT_STATUS_TONE, PROJECT_TERMINAL, TODAY,
+  INVOICES, PROJECT_STATUS_TONE, PROJECT_TERMINAL, TODAY,
   fmtAmt, fmtPct, fmtWan, isContractClosed, isServiceProject, normContractStatus,
   teamOfProject, occOfProject,
 } from '../components/data';
 import { consumeFocusTab, getCerts, getContracts, getFocus, getOpps, getPjCostRows, getProjects, moveProject, patchContract, patchProject, relOfProject, setFocus, setFocusTab, subscribeStore } from '../components/store';
-import OverviewSub from '../components/project-center/OverviewSub';
+import InfoSub from '../components/project-center/InfoSub';
 import ExecSub from '../components/project-center/ExecSub';
+import ProgressSub from '../components/project-center/ProgressSub';
+import TasksSub from '../components/project-center/TasksSub';
+import DocsSub from '../components/project-center/DocsSub';
 import QualitySub from '../components/project-center/QualitySub';
 import BizSub from '../components/project-center/BizSub';
-import FundSub from '../components/project-center/FundSub';
+import RecvSub from '../components/project-center/RecvSub';
+import PurchaseSub from '../components/project-center/PurchaseSub';
+import InvoiceSub from '../components/project-center/InvoiceSub';
+import PaySub from '../components/project-center/PaySub';
 import CostSub from '../components/project-center/CostSub';
-import MembersSub from '../components/project-center/MembersSub';
+import FacilitySub from '../components/project-center/FacilitySub';
 import { buildPjDemo, daysBetween, groupContracts, isLegalNode, mileTplOf, nodeKey } from '../components/project-center/seed';
 import type { PjCtx } from '../components/project-center/ctx';
 
 /* ==================================================================
- * 子页注册表：5 个业务域。key 同时是 hash 深链参数（view=?sub=? 见下）
+ * 子页注册表（comp 字典）+ 11/13-Tab 统一骨架（2026-09-28 拍板：方案 A）
+ *
+ * 骨架对所有业务线一致、语义不变（修掉「同名不同义」）；WB / JC 在固定位置追加两个专属 Tab：
+ *   · 「设施台账与计价」插在基本信息之后（维保 / 检测的计量与计价主线）；
+ *   · 「巡检维保执行」(WB) / 「检测作业与报告」(JC) 插在项目进度之后。
+ * Tab 数：GC 11 / WB 13 / JC 13；RJ / QT / 未知回落 GC 结构（区块由 feature 继续裁剪）。
+ * key 同时是 hash 深链参数（?sub= 见下）。
  * ================================================================== */
-const SUBS = [
-  { key: 'overview', label: '概览', comp: OverviewSub },
-  { key: 'track', label: '进度履约', comp: ExecSub },
-  { key: 'quality', label: '质量安全', comp: QualitySub },
-  { key: 'contract', label: '合同信息', comp: BizSub },
-  { key: 'fund', label: '资金台账', comp: FundSub },
-  { key: 'cost', label: '成本管控', comp: CostSub },
-  { key: 'members', label: '团队与干系人', comp: MembersSub },
-] as const;
-type SubKey = typeof SUBS[number]['key'];
-const SUB_KEYS = SUBS.map((s) => s.key) as readonly string[];
 
-/** 历史深链 key → 新子页 key（DashboardPage 等处曾 setFocusTab('project-center','cost')） */
-const LEGACY_SUB: Record<string, SubKey> = {
-  exec: 'track', mile: 'track', progress: 'track',
-  cost: 'cost', biz: 'contract', quality: 'quality', team: 'members',
+/* JC / WB 现场作业专页内容一致（都是 ExecSub = 现场投入 + 身份标识 + HSE + 检测验收），
+   里程碑/准入/工程量/日志归「项目进度」，报验/隐蔽归「质量安全」，全库一个区块只有一个家。 */
+const SUB_COMP = {
+  info: InfoSub,
+  facility: FacilitySub,
+  progress: ProgressSub,
+  wbwork: ExecSub,
+  jcwork: ExecSub,
+  tasks: TasksSub,
+  docs: DocsSub,
+  contract: BizSub,
+  recv: RecvSub,
+  purchase: PurchaseSub,
+  invoice: InvoiceSub,
+  pay: PaySub,
+  cost: CostSub,
+  quality: QualitySub,
+} as const;
+type SubKey = keyof typeof SUB_COMP;
+
+interface TabDef { key: SubKey; label: string }
+const TABS_BY_BIZ: Record<string, TabDef[]> = {
+  GC: [
+    { key: 'info', label: '基本信息' },
+    { key: 'progress', label: '项目进度' },
+    { key: 'tasks', label: '项目任务' },
+    { key: 'docs', label: '项目文档' },
+    { key: 'contract', label: '项目合同' },
+    { key: 'recv', label: '项目收款' },
+    { key: 'purchase', label: '项目采购' },
+    { key: 'invoice', label: '项目收票' },
+    { key: 'pay', label: '项目付款' },
+    { key: 'cost', label: '项目成本' },
+    { key: 'quality', label: '质量安全' },
+  ],
+  WB: [
+    { key: 'info', label: '基本信息' },
+    { key: 'facility', label: '设施台账与计价' },
+    { key: 'progress', label: '项目进度' },
+    { key: 'wbwork', label: '巡检维保执行' },
+    { key: 'tasks', label: '项目任务' },
+    { key: 'docs', label: '项目文档' },
+    { key: 'contract', label: '项目合同' },
+    { key: 'recv', label: '项目收款' },
+    { key: 'purchase', label: '项目采购' },
+    { key: 'invoice', label: '项目收票' },
+    { key: 'pay', label: '项目付款' },
+    { key: 'cost', label: '项目成本' },
+    { key: 'quality', label: '质量安全' },
+  ],
+  JC: [
+    { key: 'info', label: '基本信息' },
+    { key: 'facility', label: '设施台账与计价' },
+    { key: 'progress', label: '项目进度' },
+    { key: 'jcwork', label: '检测作业与报告' },
+    { key: 'tasks', label: '项目任务' },
+    { key: 'docs', label: '项目文档' },
+    { key: 'contract', label: '项目合同' },
+    { key: 'recv', label: '项目收款' },
+    { key: 'purchase', label: '项目采购' },
+    { key: 'invoice', label: '项目收票' },
+    { key: 'pay', label: '项目付款' },
+    { key: 'cost', label: '项目成本' },
+    { key: 'quality', label: '质量安全' },
+  ],
 };
+/** 当前业务线的 Tab 结构；RJ / QT / 未知回落 GC */
+const tabsOfBiz = (biz: string): TabDef[] => TABS_BY_BIZ[biz] ?? TABS_BY_BIZ.GC;
+
+/**
+ * 历史深链 key → 当前业务线子页 key（DashboardPage / ProjectPage 等处 setFocusTab('project-center', …)）。
+ * 旧三级 Tab 结构的键全部在此映射：资金台账拆四页后 fund 落「项目收款」；
+ * 团队与干系人收进基本信息；JC 的旧 contract / fund 落「项目合同」（合同与资金已拆开）。
+ */
+function legacySub(biz: string): Record<string, SubKey> {
+  const common: Record<string, SubKey> = {
+    overview: 'info', exec: 'progress', mile: 'progress', progress: 'progress', track: 'progress',
+    quality: 'quality', biz: 'contract', contract: 'contract',
+    fund: 'recv', team: 'info', members: 'info',
+  };
+  if (biz === 'JC') {
+    return { ...common, jcbiz: 'contract', cost: 'info' };
+  }
+  return { ...common, cost: 'cost' };
+}
 
 /* ==================================================================
  * 目标成本科目模板（本项目页唯一保留的模块级数据）
@@ -253,6 +334,13 @@ function Panorama({ C, open, onClose }: { C: PjCtx; open: boolean; onClose: () =
  * ================================================================== */
 export default function ProjectCenterPage({ go, role, nav }: { go: (p: string) => void; role: string; nav?: number }) {
   const toast = useToast();
+  /** 点击项目名称：写入剪贴板并提示「已复制项目名」（无剪贴板权限 / 非安全上下文时仅提示，不抛错） */
+  const copyName = (name: string) => {
+    /* writeText 返回 Promise，权限被拒时是异步 reject —— 必须 .catch 兜住，
+       同步 try/catch 拦不到，会在控制台冒「Uncaught (in promise)」。 */
+    try { navigator.clipboard?.writeText(name).catch(() => { /* 剪贴板不可用时忽略 */ }); } catch { /* 忽略 */ }
+    toast('已复制项目名');
+  };
   const [projects, setProjects] = useState(getProjects);
   /* 每次 store 变更都递增 tick：合同 / 报价 / 投标切片变化时也要重渲染，
      否则本项目合同树读到的是旧快照（getProjects() 引用不变时 React 会跳过重渲染）。 */
@@ -263,28 +351,36 @@ export default function ProjectCenterPage({ go, role, nav }: { go: (p: string) =
     return projects.find((p) => p.id === id) || projects[0];
   }, [nav, projects]);
 
-  /* ---------- 二级子页与 hash 深链同步：hash 形如 #page=project-center&sub=cost ---------- */
+  /* ---------- 二级子页与 hash 深链同步：hash 形如 #page=project-center&sub=progress ----------
+     子页集合随业务线变化，故解析时按当前项目 biz 的 Tab 结构 + legacy 映射校验。 */
   const [sub, setSubState] = useState<SubKey>(() => {
-    if (typeof window === 'undefined') return 'overview';
+    if (typeof window === 'undefined') return 'info';
     const t = new URLSearchParams(window.location.hash.replace(/^#/, '')).get('sub') || '';
-    return (SUB_KEYS.includes(t) ? t : LEGACY_SUB[t] ?? 'overview') as SubKey;
+    const keys = tabsOfBiz(P.biz).map((x) => x.key);
+    return (keys.includes(t as SubKey) ? t as SubKey : legacySub(P.biz)[t] ?? 'info');
   });
   const setSub = (k: string) => {
-    const key = (SUB_KEYS.includes(k) ? k : 'overview') as SubKey;
+    const key = tabsOfBiz(P.biz).some((x) => x.key === k) ? (k as SubKey) : 'info';
     setSubState(key);
     if (typeof window === 'undefined') return;
     const raw = window.location.hash.replace(/^#/, '');
     const base = raw.split('&')[0] || 'page=project-center';
     window.history.replaceState(null, '', `#${base}&sub=${key}`);
   };
-  /** 跨页深链：调用方先 setFocusTab('project-center', 'cost') 再跳转，本页消费一次即清除 */
+  /** 跨页深链：调用方先 setFocusTab('project-center','cost') 再跳转，本页消费一次即清除 */
   useEffect(() => {
     const t = consumeFocusTab('project-center');
-    if (t) setSub(LEGACY_SUB[t] ?? (SUB_KEYS.includes(t) ? t : 'overview'));
+    if (!t) return;
+    const keys = tabsOfBiz(P.biz).map((x) => x.key);
+    setSub(keys.includes(t as SubKey) ? t : legacySub(P.biz)[t] ?? 'info');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nav]);
+  /** 切换到不同业务线项目时，若当前子页在新业务线不存在（如 GC 无「设施台账」），回落基本信息避免空白 */
+  useEffect(() => {
+    if (!tabsOfBiz(P.biz).some((x) => x.key === sub)) setSubState('info');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [P.id, P.biz]);
 
-  const [payFilter, setPayFilter] = useState('全部');
   const [m, setM] = useState<string | null>(null);
   /** 关联合同弹窗选中项（挂接后双向落库：合同记 project，项目回写合同额并解除无合同标记） */
   const [linkCt, setLinkCt] = useState('');
@@ -396,12 +492,18 @@ export default function ProjectCenterPage({ go, role, nav }: { go: (p: string) =
   /* 读 store：证书管理页续证后，项目详情「证书资格」列的有效期即时跟上（本页已订阅 store，tick 变化即重渲染） */
   const certValidTo = (certId: string) => getCerts().find((c) => c.id === certId)?.validTo || '—';
 
-  const payRows = payFilter === '全部' ? D.payRows : D.payRows.filter((r) => r.kind === payFilter);
   /** 变更金额：已生效进执行额，审批中只作过程记录 */
   const CHG_EFFECTIVE = D.changes.filter((c) => c.st === '已生效').reduce((s, c) => s + c.amt, 0);
   const CHG_PENDING = D.changes.filter((c) => c.st !== '已生效').reduce((s, c) => s + c.amt, 0);
-  const qualityTodo = D.arrivals.filter((a) => a.have.length < a.need.length).length
-    + D.rectifyRounds.reduce((s, r) => s + r.items.filter((i) => !i.done).length, 0);
+  /* 质量安全页现只承载「进场报验 + 隐蔽工程」——待办只算报验缺件；
+     整改未闭环已随「检测与消防验收」迁到现场作业页，不再计入本页待办。 */
+  const qualityTodo = D.arrivals.filter((a) => a.have.length < a.need.length).length;
+
+  /** 销项发票：本项目收款类合同开出的票（四流合一挂合同号，只读镜像；蓝红票子页签共用） */
+  const invOut = useMemo(
+    () => INVOICES.filter((v) => projContracts.some((c) => c.id === v.contract)),
+    [projContracts],
+  );
 
   /** 本项目待审批事项（变更 + 无合同付款）—— 项目侧只列与本项目相关的，全局审批在「审批中心」 */
   const pending = [
@@ -456,6 +558,14 @@ export default function ProjectCenterPage({ go, role, nav }: { go: (p: string) =
       setFocusTab('contract-detail', 'change');
       go('contract-detail');
     },
+    /* 收付款登记同样只读承接：项目侧的登记动作统一回合同「收付款计划」Tab 落单 */
+    gotoContractPlan: (cid) => {
+      const id = cid || saleCt[0]?.code || '';
+      if (!id) { toast('本项目尚未关联收款类合同，无法登记收付款', 'err'); return; }
+      setFocus('contract-detail', id);
+      setFocusTab('contract-detail', 'plan');
+      go('contract-detail');
+    },
     toast,
     openLog: () => setLogOpen(true),
     openPanorama: () => setPanoOpen(true),
@@ -473,7 +583,7 @@ export default function ProjectCenterPage({ go, role, nav }: { go: (p: string) =
     laborRows: D.laborRows, laborSum: D.laborSum,
     machRows: D.machRows, machSum: D.machSum,
     matRows: D.matRows, matSum: D.matSum,
-    payRows, payRowsAll: D.payRows, payFilter, setPayFilter, SUM_IN: D.sumIn, SUM_OUT: D.sumOut,
+    payRowsAll: D.payRows, SUM_IN: D.sumIn, SUM_OUT: D.sumOut,
     depositRows, teamRows, certRows, certValidTo,
     saleCt, buyCt, attach: D.attach, attCnt: D.attCnt, mileRows: D.mileRows, mileAxis: D.mileAxis,
     curMile, curReq, curFiles, curMiss, workItems: D.workItems,
@@ -481,45 +591,53 @@ export default function ProjectCenterPage({ go, role, nav }: { go: (p: string) =
     arrivals: D.arrivals, hidden: D.hidden, safeRows: D.safeRows,
     rectifyRounds: D.rectifyRounds, checkInfo: D.checkInfo, qualityTodo,
     siteLogs: D.siteLogs, parties: D.parties, ops: D.ops,
+    tasks: D.tasks, delivers: D.delivers, invIn: D.invIn, invOut,
   };
 
-  /* 溯源链：按外键精确取数（relOfProject），不再按 customerId 模糊匹配取首个单据 ——
-     修复前同客户有多个项目时会取到别的项目的报价 / 投标，溯源链指错上游。 */
-  const trace = useMemo(() => {
-    const r = relOfProject(P.id);
-    const oppId = r.quotes.map((q) => q.opp).find(Boolean) || '';
-    return {
-      opp: oppId ? getOpps().find((o) => o.id === oppId) : undefined,
-      quote: r.quotes[0], contract: r.contracts[0], bid: r.bids[0],
-    };
-  }, [P.id, tick]);
-
-  const CurComp = (SUBS.find((s) => s.key === sub) ?? SUBS[0]).comp;
+  const CurComp = SUB_COMP[sub] ?? SUB_COMP.info;
+  /** 各子页角标计数（按当前业务线实际渲染的内容统计；安全检查归现场作业页，不计入本项目进度页） */
+  const tabCnt = (key: SubKey): number | undefined => {
+    switch (key) {
+      case 'info': return teamRows.length + certRows.length;
+      case 'facility': return (P.points || []).reduce((s, p) => s + p.qty, 0);
+      case 'progress': return D.mileRows.length;
+      /* 现场作业专页（WB / JC 内容一致）= 现场投入 + 身份标识 + HSE + 检测验收；
+         计数取现场作业行的规模（在场人员数），竣工量 / 日志已归「项目进度」不在此计数。 */
+      case 'wbwork': return D.laborRows.length;
+      case 'jcwork': return D.laborRows.length;
+      case 'tasks': return D.tasks.length;
+      case 'docs': return D.attCnt;
+      case 'contract': return saleCt.length + buyCt.length;
+      case 'recv': return D.payRows.filter((r) => r.kind === '收入').length;
+      case 'purchase': return buyCt.length;
+      case 'invoice': return D.invIn.length;
+      case 'pay': return D.payRows.filter((r) => r.kind !== '收入').length;
+      case 'cost': return D.costRows.length;
+      /* 质量安全页 = 进场报验 + 隐蔽工程（检测验收已归现场作业页，整改轮次不计此页角标） */
+      case 'quality': return D.arrivals.length + D.hidden.length;
+      default: return undefined;
+    }
+  };
+  /** 子页告警角标：质量有待办 / 成本超支时给出 ⚠ */
+  const tabWarn = (key: SubKey): boolean => {
+    if (key === 'quality') return qualityTodo > 0;
+    if (key === 'cost') return dev > 0;
+    return false;
+  };
   const closeM = () => setM(null);
 
-  return (
-    <div className="nc-detail-page" style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-      <PageHead
-        crumbs={['项目管理', '项目列表', '项目详情', (SUBS.find((s) => s.key === sub) ?? SUBS[0]).label]}
-        title={<span className="nc-pjtitle"><Code>{P.id}</Code> {P.name} <Op onClick={() => toast('已复制项目编号 ' + P.id)}>⧉ 复制</Op></span>}
-        badges={<>
-          <Tag tone="blue">{P.type}</Tag>
-          {isServiceProject(P) && <Tag tone="purple">含维保服务</Tag>}
-          <Tag tone={(PROJECT_STATUS_TONE[P.status] || 'blue') as 'blue'}>{P.status} · {P.milestoneName}</Tag>
-        </>}
-        sub={<span className="nc-pjtrace">溯源链：
-          {trace.opp ? <><EntityLink target="opp" id={trace.opp.id} go={go} title="下钻到商机详情">商机 {trace.opp.id}</EntityLink> → </> : <span className="nc-muted">无关联商机 → </span>}
-          {trace.quote ? <><EntityLink target="quote-detail" id={trace.quote.id} go={go} title="下钻到报价详情">报价 {trace.quote.id}</EntityLink> → </> : <span className="nc-muted">无关联报价 → </span>}
-          {trace.bid ? <><EntityLink target="bid" id={trace.bid.id} go={go} title="下钻到投标详情">投标 {trace.bid.id}</EntityLink> → </> : <span className="nc-muted">无关联投标 → </span>}
-          {trace.contract ? <><EntityLink target="contract-detail" id={trace.contract.id} go={go} title="下钻到合同详情">合同 {trace.contract.id}</EntityLink> → </> : <span className="nc-muted">无关联合同 → </span>}
-          本项目
-        </span>}
-        actions={<>
+  /** 底部常驻操作栏的一组操作（口径同合同详情 .nc-d2-foot）：
+      主操作靠右凸显，低频入口收进「更多操作 ⋯」，页头不再堆按钮 */
+  const footActions = (
+    <>
           {/* 变更属合同单据（须签补充协议），不在项目侧发起 —— 入口见「商务合同」子页 → 对应合同 */}
           <Btn
             kind="primary" disabled={!curMile || curMiss.length > 0} onClick={() => setM('mile')}
             title={!curMile ? '当前无待确认节点' : curMiss.length > 0 ? `缺 ${curMiss.join('、')}，补齐后方可确认` : `确认 ${curMile.name}`}
           >确认里程碑</Btn>
+          <Btn onClick={() => setLogOpen(true)}><Ico n="history" size={16} /> 操作记录</Btn>
+          <Btn onClick={() => setPanoOpen(true)}><Ico n="search" size={16} /> 项目全景</Btn>
+          {/* 低频入口收口，排在最后 —— 与合同详情底栏「更多操作 ⋯」同序同口径 */}
           <OpMore items={[
             ...(P.status === '待启动' ? [{
               label: '进入执行（进场 / 合同就绪）',
@@ -538,35 +656,57 @@ export default function ProjectCenterPage({ go, role, nav }: { go: (p: string) =
             ...(P.status === '已关闭' ? [{ label: '重开项目', title: '状态流转：已关闭 → 执行中', onClick: () => { moveProject(P.id, '执行中'); toast(`${P.id} 已重开`); } }] : []),
             ...(!(PROJECT_TERMINAL as readonly string[]).includes(P.status) ? [{ label: '作废项目', danger: true, title: '作废 = 建错，留痕不可恢复', onClick: () => setM('void') }] : []),
             { label: '关联新合同', onClick: () => setM('link') },
-            { label: '登记收款', onClick: () => setM('pay') },
+            { label: '登记收款（回合同）', title: '项目侧只读承接，收款登记在合同「收付款计划」Tab 落单', onClick: () => C.gotoContractPlan() },
             { label: '登记成本', onClick: () => setM('cost') },
             { label: '上传档案', onClick: () => setM('upload') },
           ]} />
-          <Btn onClick={() => setLogOpen(true)}><Ico n="history" size={16} /> 操作记录</Btn>
-          <Btn onClick={() => setPanoOpen(true)}><Ico n="search" size={16} /> 项目全景</Btn>
-        </>}
-      />
+    </>
+  );
 
-      {/* ---- 二级导航：7 个子页（概览 + 6 业务域），附着在内容区顶部不随滚动 ---- */}
+  return (
+    <div className="nc-detail-page nc-pjpage">
+      {/* ---------- 面包屑（口径同合同详情 .nc-crumbs：12px 灰字，末段为编号） ---------- */}
+      <div className="nc-crumbs">
+        <a className="nc-link" onClick={() => go('project')}>项目管理</a>
+        <span className="nc-crumbs-sep">/</span>
+        <span>{P.id}</span>
+      </div>
+
+      {/* ---------- 页头：编号 + 状态 + 名称（口径同合同详情 .nc-d2-head） ----------
+          金额一律下沉到「经营读数」统计卡，头部不重复 */}
+      <div className="nc-d2-head">
+        <div className="nc-d2-titlerow">
+          <span className="nc-d2-id">{P.id}</span>
+          <Tag tone="blue">{P.type}</Tag>
+          {isServiceProject(P) && <Tag tone="purple">含维保服务</Tag>}
+          <Tag tone={(PROJECT_STATUS_TONE[P.status] || 'blue') as 'blue'}>{P.status} · {P.milestoneName}</Tag>
+          <span className="spacer" />
+          {/* 主次配色与合同详情页头一致：页头唯一主操作取 primary，底栏另有一个 primary */}
+          <Btn kind="primary" onClick={() => go('project')} title="返回项目列表">← 返回列表</Btn>
+        </div>
+        <div className="nc-d2-name">
+          <span
+            className="nc-link"
+            role="button"
+            tabIndex={0}
+            title="点击复制项目名称"
+            onClick={() => copyName(P.name)}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); copyName(P.name); } }}
+          >{P.name}</span>
+        </div>
+      </div>
+
+      {/* ---- 二级导航：统一骨架 11 Tab（WB / JC 追加业务 Tab 至 13），附着在内容区顶部不随滚动 ---- */}
       <div className="nc-pjnav">
-        <span className="nc-pjnav-lb">项目视图</span>
         <Tabs
           value={sub}
           onChange={setSub}
-          items={[
-            { key: 'overview', label: '概览' },
-            { key: 'track', label: '进度履约', cnt: D.mileRows.length },
-            { key: 'quality', label: qualityTodo > 0 ? '质量安全 ⚠' : '质量安全', cnt: D.arrivals.length + D.hidden.length + D.safeRows.length + D.rectifyRounds.reduce((s, r) => s + r.items.length, 0) },
-            { key: 'contract', label: '合同信息', cnt: saleCt.length + buyCt.length },
-            { key: 'fund', label: '资金台账', cnt: D.payRows.length },
-            { key: 'cost', label: dev > 0 ? '成本管控 ⚠' : '成本管控', cnt: D.costRows.length },
-            { key: 'members', label: '团队与干系人', cnt: teamRows.length + certRows.length },
-          ]}
+          items={tabsOfBiz(P.biz).map((t) => ({
+            key: t.key,
+            label: tabWarn(t.key) ? `${t.label} ⚠` : t.label,
+            cnt: tabCnt(t.key),
+          }))}
         />
-        <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
-          {/* 更新时间取项目自身的 updatedAt（改造前写死「TODAY 10:24」，永远是同一个时刻） */}
-          <span className="nc-cell-sub">更新于 {P.updatedAt ?? P.start}</span>
-        </span>
       </div>
 
       {/* ---- 内容区：吃满剩余高度后内部滚动（页头与导航条常驻） ---- */}
@@ -582,12 +722,18 @@ export default function ProjectCenterPage({ go, role, nav }: { go: (p: string) =
             {(P as { pausedAt?: string }).pausedAt ? `（暂停于 ${(P as { pausedAt?: string }).pausedAt}）` : ''}
           </Banner>
         )}
-        {C.overdue.length > 0 && sub !== 'fund' && (
-          <Banner tone="warn" actions={<Btn size="sm" onClick={() => { setSub('fund'); }}>去处理</Btn>}>
+        {C.overdue.length > 0 && sub !== 'recv' && (
+          <Banner tone="warn" actions={<Btn size="sm" onClick={() => { setSub('recv'); }}>去处理</Btn>}>
             有 {C.overdue.length} 笔已开票未到账（{C.overdueAmt.toLocaleString()} 元 · 账龄 75 天）—— 计入应收账龄，不计回款。
           </Banner>
         )}
         <CurComp C={C} />
+      </div>
+
+      {/* ---- 底部常驻操作栏（口径同合同详情 .nc-d2-foot：白底 / 上边框 / 常驻页底） ---- */}
+      <div className="nc-d2-foot">
+        <span className="spacer" />
+        {footActions}
       </div>
 
       {/* ================= 弹窗（编辑 / 登记类短表单） ================= */}
@@ -687,11 +833,14 @@ export default function ProjectCenterPage({ go, role, nav }: { go: (p: string) =
         </label>
       </Modal>
 
-      <Modal open={m === 'pay'} width={480} title="登记收款" onClose={closeM}
-        foot={<><Btn onClick={closeM}>取消</Btn><Btn kind="primary" onClick={() => { toast('收款已登记，回款率与现金流同步更新'); closeM(); }}>确认登记</Btn></>}>
-        <label className="nc-field nc-field-4"><span>收款金额（元）</span><input className="nc-input" placeholder={`执行额 ${EXEC_AMT.toLocaleString()}`} /></label>
-        <label className="nc-field nc-field-4"><span>到账日期</span><input className="nc-input" type="date" defaultValue={TODAY} /></label>
-        <div className="nc-field nc-field-4"><div className="nc-cell-sub">仅银行已到账才计入回款；已开票未到账请走开票登记，挂应收账龄。</div></div>
+      {/* 「登记收款」弹窗已收编：收款回合同「收付款计划」Tab（gotoContractPlan）；
+          项目侧支付侧唯一保留的写入 = 无合同付款挂账（PaySub「＋ 无合同付款挂账」入口） */}
+      <Modal open={m === 'pay'} width={480} title="无合同付款挂账" onClose={closeM}
+        foot={<><Btn onClick={closeM}>取消</Btn><Btn kind="primary" onClick={() => { toast('挂账已提交审批，通过后计入项目支出'); closeM(); }}>提交审批</Btn></>}>
+        <label className="nc-field nc-field-4"><span>付款金额（元）</span><input className="nc-input" placeholder="如：应急抢修台班费" /></label>
+        <label className="nc-field nc-field-4"><span>用途说明（必填）</span><input className="nc-input" placeholder="无合同付款须写明用途与依据" /></label>
+        <label className="nc-field nc-field-4"><span>付款日期</span><input className="nc-input" type="date" defaultValue={TODAY} /></label>
+        <div className="nc-field nc-field-4"><div className="nc-cell-sub">仅「无合同付款」在项目侧挂账；有合同的付款一律走合同付款计划，此处不收。</div></div>
       </Modal>
 
       <Modal open={m === 'cost'} width={480} title="登记成本" onClose={closeM}

@@ -18,10 +18,10 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   Alert, Banner, Btn, Card, Check, Collapse, CustomerPicker, EntityLink, Field, Modal, Money, Op, PageHead, ProjectPicker,
   SupplierPicker, Tag, Tip, useToast, pressProps,} from '../components/ui';
-import { CUSTOMERS, PROJECT_TERMINAL, SUPPLIERS, canSeeMoney, fmt, TODAY } from '../components/data';
+import { CUSTOMERS, DEFAULT_ENTITY, PROJECT_TERMINAL, SUPPLIERS, canSeeMoney, fmt, TODAY } from '../components/data';
 import type { Contract } from '../components/data';
 import {
-  addContract, consumePageAction, consumePendingExec, consumePendingQuote, consumePendingRenew, consumePendingSupplement, getBizStatus, getContracts, getPendingContract,
+  addContract, consumePageAction, consumePendingCtDir, consumePendingExec, consumePendingQuote, consumePendingRenew, consumePendingSupplement, getBizStatus, getContracts, getPendingContract,
   getProjects, getQuotes, nextApprovalNo, patchContract, patchQuote, pushApproval, setBizStatus, setPendingContract, subscribeStore,
 } from '../components/store';
 import { Ico, StatusIco, type IconName } from '../components/icons';
@@ -49,11 +49,13 @@ const SRC_CARDS: { key: Src; ico: IconName; t: string; d: string; p: string; sce
   { key: 'copy', ico: 'clipboard', t: '复制历史合同', d: '选择器（本客户优先 + 同类型）→ 差异预览 → 逐项确认带入', p: '共 5 步 · 含源合同差异确认', scene: '基于已有合同快速创建' },
   { key: 'std', ico: 'scroll', t: '标准模板', d: '全局模板 → 预览（内置风险条款标注）→ 变量替换 → 生成草稿', p: '共 5 步 · 含模板预览与变量替换', scene: '使用公司标准模板' },
   { key: 'ent', ico: 'building', t: '企业模板', d: '先选客户 → 其专属模板 → 同标准模板（预览 + 变量替换）', p: '共 5 步 · 含企业模板预览', scene: '使用企业自定义模板' },
-  { key: 'manual', ico: 'edit', t: '手工录入', d: '空表单直入「合同主体与工期」，从零填写合同信息、明细与收款计划', p: '共 4 步', scene: '简单合同快速录入' },
+  { key: 'manual', ico: 'edit', t: '手工录入', d: '空表单直入「合同主体与工期」，从零填写合同信息、明细与收付款计划', p: '共 4 步', scene: '简单合同快速录入' },
 ];
 
 const TYPES = ['销售合同', '检测合同', '维护保养合同', '采购合同', '分包合同', '框架协议'];
 const PREFIX: Record<string, string> = { 销售合同: 'HT', 检测合同: 'JC', 维护保养合同: 'WB', 采购合同: 'CG', 分包合同: 'FK', 框架协议: 'KJ' };
+/** 付款方向类型（2026-09-28）：采购 / 分包合同的计划与期次是「付款」口径 —— 第 5 步名称、计划表标题、期次前缀随类型切换 */
+const isPayType = (t: string) => t === '采购合同' || t === '分包合同';
 const PNAME: Record<string, string> = {
   销售合同: '客户', 检测合同: '客户', 维护保养合同: '客户', 采购合同: '供应商', 分包合同: '分包商', 框架协议: '客户 / 供应商',
 };
@@ -146,7 +148,7 @@ const OCR_INIT: OcrField[] = [
   { k: 'name', l: '合同名称', v: '昆明万达广场消防改造工程补充合同', c: 96 },
   { k: 'party', l: '相对方', v: 'KH20260312001 昆明万达广场商业管理有限公司', c: 98 },
   { k: 'amt', l: '合同金额', v: '¥3,200,000.00', c: 85 },
-  { k: 'sign', l: '签约日期', v: '2026-09-18', c: 93 },
+  { k: 'sign', l: '签署日期', v: '2026-09-18', c: 93 },
   { k: 'plan', l: '工期起止', v: '2026-09-20 ~ 2027-03-31', c: 82 },
   { k: 'term', l: '付款条款', v: '签订后7日内支付30%预付款，竣工验收后支付60%，质保期满支付10%', c: 91 },
 ];
@@ -239,9 +241,11 @@ const EMPTY_FORM = {
   owner: '蓝峰',
   addr: '',
   amt: 0,
+  ourEntity: DEFAULT_ENTITY,
   tax: '9',
   taxOther: '',
   sign: TODAY,
+  eff: '',
   start: '',
   end: '',
   p1: '',
@@ -304,6 +308,9 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
      「昆明万达广场消防改造工程合同 / XM000123 / ¥3,200,000」，任何来源转合同都会
      生成同一份万达合同草稿，报价→合同、投标→合同两条支线在数据上完全无法区分。 */
   const [f, setF] = useState(EMPTY_FORM);
+  /* 付款方向派生（2026-09-29 上移）：采购 / 分包 = 我方付款口径。必须紧跟 f 声明，
+     让更早的引用点（issues 软提醒、来源预填 useEffect）可用——原 572 行声明会 TDZ。 */
+  const payDir = isPayType(f.type);
   /**
    * 转合同（双来源，共用 pendingContract 通道）：
    *   投标中标 —— 带中标标的与 bidId 外键；原链路「中标 → 直接建项目」跳过合同环节，与「合同 → 项目」主线矛盾，此处补齐；
@@ -385,7 +392,7 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
       end: k.end,
       p1: k.start,
       p2: k.end,
-      term: k.nodes ? `按原合同收款节点：${k.nodes}` : prev.term,
+      term: k.nodes ? `按原合同${isPayType(k.type) ? '付款' : '收款'}节点：${k.nodes}` : prev.term,
     }));
     setDtl([{
       t: /维护|保养/.test(k.name) ? '维护保养服务' : '消防改造',
@@ -418,7 +425,7 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
       term: prev.term,
     }));
     setDtl([]);
-    toast(`正在为框架协议 ${k.id} 创建执行单 · 请填写执行金额与收款计划（单笔 ≥50 万须财务复核）`);
+    toast(`正在为框架协议 ${k.id} 创建执行单 · 请填写执行金额与收付款计划（单笔 ≥50 万须财务复核）`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nav]);
 
@@ -446,6 +453,19 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
     }));
     setDtl([]);
     toast(`正在为合同 ${k.id} 创建${pr.kind === 'price' ? '价格调整' : '新增服务'}补充协议 · 请填写增量金额后提交`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nav]);
+
+  /* 方向预选（2026-09-29）：供应商页「生成采购合同」→ 预选采购合同类型并锁定，可携带供应商名预填相对方 */
+  const [lockType, setLockType] = useState(false);
+  useEffect(() => {
+    const d = consumePendingCtDir();
+    if (!d) return;
+    setLockType(d.dir === 'purchase');
+    setF((prev) => ({ ...prev, type: '采购合同', ...(d.supplier ? { party: partyOptOf(d.supplier) } : {}) }));
+    toast(d.supplier
+      ? `已按供应商预选采购合同 · 相对方已带入 ${d.supplier}，类型已锁定`
+      : '已预选采购合同，类型已锁定');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nav]);
 
@@ -504,8 +524,8 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
   if (!f.party) errors.push(['party', '相对方未选择（强校验）']);
   if (!(f.amt > 0)) errors.push(['amt', '合同金额未填写']);
   if (f.tax === 'other' && f.taxOther.trim() === '') errors.push(['tax', '税率（其他）未填写']);
-  if (!f.sign) errors.push(['sign', '签约日期未选择']);
-  else if (f.sign > TODAY) errors.push(['sign', '签约日期晚于今天（硬拦截）']);
+  if (!f.sign) errors.push(['sign', '签署日期未选择']);
+  else if (f.sign > TODAY) errors.push(['sign', '签署日期晚于今天（硬拦截）']);
   if (f.p1 && f.p2 && f.p2 < f.p1) errors.push(['p1', '工期止早于工期起（硬拦截）']);
   // T3 合规硬校验：《建设工程质量保证金管理办法》（建质〔2017〕138 号）第七条
   // —— 预留质量保证金比例不得高于工程价款结算总额的 3%（超出直接阻断提交）
@@ -522,7 +542,7 @@ export default function ContractNewPage({ go, role, nav }: { go: (p: string) => 
   if (pmode === 'exist' && proj?.a04) issues.push(['proj', `${proj.id} ${proj.name} 存在未归并收支：提交时将被 A-04 硬拦截`]);
   if (pmode === 'draft' && f.pjname.trim()) issues.push(['proj', `草稿项目「${f.pjname.trim()}」签约后自动转「待启动」，请确认名称`]);
   if (f.amt > 0 && dtlSum > 0 && dtlSum !== f.amt) issues.push(['amt', `明细合计（自动汇总）≠ 合同金额：${fmt(dtlSum)} vs ${fmt(f.amt)}`]);
-  if (dtlSum > 0 && plnSum !== dtlSum) issues.push(['plan', `收款合计 ≠ 明细合计（差 ${fmt(gap)}），可一键补平`]);
+  if (dtlSum > 0 && plnSum !== dtlSum) issues.push(['plan', `${payDir ? '付款' : '收款'}合计 ≠ 明细合计（差 ${fmt(gap)}），可一键补平`]);
   if (+f.ratm > 24) issues.push(['rat', `缺陷责任期 ${f.ratm} 个月超过 24 个月：请确认资金占用与回收风险`]);
   if (f.multi === '是' && plan.length === 0) issues.push(['plan', '已选择多年期维护保养：收款计划为空，建议按服务年度生成']);
   /* 只在字段确实被来源带出后提示——来源处理步（step 0/1/2）字段还是空的，
@@ -564,9 +584,11 @@ if (src && src !== 'manual' && step >= 3) issues.push(['name', `名称 / 相对�
     goStep(route[Math.max(0, i - 1)]);
   };
   /* 按钮文案一律说「去哪一步的名字」，不写「第几步」——步骤条按来源重排后绝对步号会漂移 */
+  /* payDir 已上移至 f state 声明处——此处只保留第 5 步名称派生 */
+  const moneyStepName = payDir ? '金额与付款' : '金额与收款';
   const nextLabel = step === 0 ? (src ? `下一步：${STEP_NAMES[src === 'manual' ? 3 : 1]}` : '下一步')
     : step === 1 ? ({ ocr: '进入「OCR 校对」→', std: '生成草稿，进入「合同主体与工期」', ent: '生成草稿，进入「合同主体与工期」', copy: '确认带入，进入「合同主体与工期」' } as Record<string, string>)[src ?? ''] ?? '下一步'
-      : step === 2 ? '确认结果，进入「合同主体与工期」' : step === 3 ? '下一步：金额与收款' : step === 4 ? '下一步：条款与附件' : '提交审批（分级快照）';
+      : step === 2 ? '确认结果，进入「合同主体与工期」' : step === 3 ? `下一步：${moneyStepName}` : step === 4 ? '下一步：条款与附件' : '提交审批（分级快照）';
 
   const locate = (key: string) => {
     const el = document.getElementById(`fi-${key}`);
@@ -653,7 +675,7 @@ if (src && src !== 'manual' && step >= 3) issues.push(['name', `名称 / 相对�
   /* ---------- 明细 / 收款计划 ---------- */
   const addDtl = () => setDtl((p) => [...p, { t: BIZ_TYPES[0], s: '', e: '', a: 0, r: '' }]);
   const addPlan = () => {
-    if (plan.length >= 12) { toast('收款计划最多 12 期', 'err'); return; }
+    if (plan.length >= 12) { toast(`${payDir ? '付款' : '收款'}计划最多 12 期`, 'err'); return; }
     setPlan((p) => [...p, { node: '', amt: 0, date: '', qual: false }]);
   };
 
@@ -698,14 +720,14 @@ if (src && src !== 'manual' && step >= 3) issues.push(['name', `名称 / 相对�
   const splitTerm = () => {
     const rows = parseTerm(f.term);
     if (!rows.length) { toast('未识别到比例。示例：签订后7日内付30%；竣工验收后付60%；质保期满付10%', 'err'); return; }
-    if (rows.length > 12) { toast('拆解结果超过 12 期，请先合并收款节点', 'err'); return; }
+    if (rows.length > 12) { toast(`拆解结果超过 12 期，请先合并${payDir ? '付款' : '收款'}节点`, 'err'); return; }
     const base = dtlSum || f.amt || 0;
     setConfirm({
       title: '拆解期次预览（≤12 期）',
-      ok: '确认写入收款计划',
+      ok: `确认写入${payDir ? '付款' : '收款'}计划`,
       body: (
         <table className="nc-tbl is-cols" style={{ minWidth: 460 }}>
-          <thead><tr><th style={{ width: '12%' }}>期数</th><th style={{ width: '36%' }}>收款节点</th><th style={{ width: '12%' }} className="is-num">比例</th><th style={{ width: '26%' }} className="is-num">金额（元）</th><th style={{ width: '14%' }} className="is-center">质保金</th></tr></thead>
+          <thead><tr><th style={{ width: '12%' }}>期数</th><th style={{ width: '36%' }}>{payDir ? '付款节点' : '收款节点'}</th><th style={{ width: '12%' }} className="is-num">比例</th><th style={{ width: '26%' }} className="is-num">金额（元）</th><th style={{ width: '14%' }} className="is-center">质保金</th></tr></thead>
           <tbody>
             {rows.map((r, i) => (
               <tr key={i}><td>第{i + 1}期</td><td>{r.node}</td><td className="is-num">{r.pct}%</td><td className="is-num">{fmt((base * r.pct) / 100)}</td><td className="is-center"><StatusIco kind={r.qual ? 'ok' : 'close'} /></td></tr>
@@ -715,7 +737,7 @@ if (src && src !== 'manual' && step >= 3) issues.push(['name', `名称 / 相对�
       ),
       cb: () => {
         setPlan(rows.map((r) => ({ node: r.node, amt: Math.round((base * r.pct) / 100), date: '', qual: r.qual })));
-        toast(`已按条款拆解 ${rows.length} 期并写入收款计划`);
+        toast(`已按条款拆解 ${rows.length} 期并写入${payDir ? '付款' : '收款'}计划`);
       },
     });
   };
@@ -751,6 +773,13 @@ if (src && src !== 'manual' && step >= 3) issues.push(['name', `名称 / 相对�
     if (pmode === 'draft') return <>项目：新建草稿「{f.pjname.trim()}」→ <b>PRJ-DRAFT-001</b>（签约后自动转「待启动」）</>;
     return '项目：暂不关联（框架协议专用）';
   };
+  /* AI 合同审核（2026-09-28 确认挂载点：新建向导提交前）：模拟审查，结果仅供参考、不替代人工复核 */
+  const [aiState, setAiState] = useState<'idle' | 'running' | 'done'>('idle');
+  const aiRun = () => {
+    setAiState('running');
+    window.setTimeout(() => setAiState('done'), 1200);
+  };
+
   const submit = () => {
     if (errors.length) { setForce(true); locateFirstErr(); toast(`存在 ${errors.length} 项待完善，请先处理`, 'err'); return; }
     if (pmode === 'exist' && proj?.a04) {
@@ -780,7 +809,7 @@ if (src && src !== 'manual' && step >= 3) issues.push(['name', `名称 / 相对�
       body: (
         <div className="nc-kv-grid" style={{ gridTemplateColumns: '1fr' }}>
           <div className="nc-kv"><span className="nc-k">合同编号</span><span className="nc-v"><b>{no}</b>（提交时生成 · 不可改）</span></div>
-          <div className="nc-kv"><span className="nc-k">合同金额</span><span className="nc-v"><b className="num"><Money v={f.amt} role={role} /></b>{canSeeMoney(role) && <> · 大写 {toCNY(f.amt)}</>}</span></div>
+          <div className="nc-kv"><span className="nc-k">合同含税金额</span><span className="nc-v"><b className="num"><Money v={f.amt} role={role} /></b>{canSeeMoney(role) && <> · 大写 {toCNY(f.amt)}</>}</span></div>
           <div className="nc-kv"><span className="nc-k">税额</span><span className="nc-v"><Money v={taxVal} role={role} />（{cal === 'inc' ? '含税' : '不含税'} {rate}% 口径）</span></div>
           <div className="nc-kv"><span className="nc-k">关联项目</span><span className="nc-v">{projLine()}</span></div>
           <div className="nc-kv"><span className="nc-k">审批路由</span><span className="nc-v"><b>{f.type} · {chain.label}</b> → {chain.nodes.map((n) => n[0] + (n[1] ? `(${n[1]})` : '')).join(' → ')}</span></div>
@@ -794,20 +823,24 @@ if (src && src !== 'manual' && step >= 3) issues.push(['name', `名称 / 相对�
           id: no, name: f.name.trim(), type: f.type, party: f.party,
           project: pmode === 'exist' ? f.proj : '',
           amt: f.amt, execAmt: f.amt, status: '待审批', recvPct: 0, recv: 0,
+          ourEntity: f.ourEntity, taxRate: rate, cal,
           owner: '当前用户', sign: f.sign, start: f.p1 || f.sign, end: f.p2 || f.sign,
-          nodes: plan.map((r) => r.node).join(' · ') || '按明细收款计划',
+          /* 合同生效 / 结束日期（2026-09-28 新增字段）：生效缺省回落签署日期，结束回落工期止 */
+          effectiveDate: f.eff || f.sign,
+          effectiveEnd: f.end || f.p2 || f.sign,
+          nodes: plan.map((r) => r.node).join(' · ') || `按明细${payDir ? '付款' : '收款'}计划`,
           overdue: false, overpay: false,
           /* 收款计划落成期次级明细（Contract.installments）：合同详情的「收款计划」表与
              项目详情合同树的收款期次都读它，新签合同不再只有一句 nodes 文本。 */
           installments: plan.length
             ? plan.map((r, i) => ({
-              n: `收款期次 ${i + 1} · ${r.node}`,
+              n: `${payDir ? '付款' : '收款'}期次 ${i + 1} · ${r.node}`,
               amt: r.amt,
               plan: r.date || f.sign,
               got: 0,
               gotDate: '—',
               inv: '未开票',
-              note: r.qual ? '质保金节点 · 质保期满无质量问题后无息退还' : '按合同约定节点收款',
+              note: r.qual ? '质保金节点 · 质保期满无质量问题后无息退还' : `按合同约定节点${payDir ? '付款' : '收款'}`,
             }))
             : undefined,
           ...(srcQuote ? { quoteId: srcQuote } : {}),
@@ -885,7 +918,7 @@ if (src && src !== 'manual' && step >= 3) issues.push(['name', `名称 / 相对�
           return (
             <div key={i} className={`nc-step ${st}${lineOn ? ' is-line' : ''}`} onClick={() => { if (done) goStep(i); }} {...pressProps(() => { if (done) goStep(i); })}>
               <span className="nc-step-dot">{mark}</span>
-              <span className="nc-step-label">Step{idx + 1} · {STEP_NAMES[i]}</span>
+              <span className="nc-step-label">Step{idx + 1} · {i === 4 && payDir ? '金额与付款' : STEP_NAMES[i]}</span>
             </div>
           );
         })}
@@ -1022,10 +1055,10 @@ if (src && src !== 'manual' && step >= 3) issues.push(['name', `名称 / 相对�
                 ['party', '相对方', d.party],
                 ['amt', '合同金额（元）', fmt(d.amt)],
                 ['term', '付款条款', d.term],
-                ['sign', '签约日期', d.sign],
+                ['sign', '签署日期', d.sign],
                 ['war', '质保期', `${d.war} 个月`],
                 ['dtl', `合同明细（${d.dtl.length} 行）`, d.dtl.map((r) => `${r[0]}（${r[1]} ~ ${r[2]}）${fmt(r[3])}`).join('；')],
-                ['plan', `收款计划（${d.plan.length} 期）`, d.plan.map((r, i) => `第${i + 1}期 ${r[0]} ${fmt(r[1])}${r[3] ? '（质保金节点）' : ''}`).join('；')],
+                ['plan', `${payDir ? '付款计划' : '收款计划'}（${d.plan.length} 期）`, d.plan.map((r, i) => `第${i + 1}期 ${r[0]} ${fmt(r[1])}${r[3] ? '（质保金节点）' : ''}`).join('；')],
               ];
               return (
                 <>
@@ -1118,8 +1151,8 @@ if (src && src !== 'manual' && step >= 3) issues.push(['name', `名称 / 相对�
               <Field label="合同编号" note={`前缀由合同类型决定，当前前缀：${PREFIX[f.type]}（提交时生成 · 不可改）`}>
                 <input className="nc-input" disabled placeholder="提交时系统生成（HT/JC/WB/CG/FK/KJ 前缀 · 不可改）" />
               </Field>
-              <Field label="合同类型" req note="决定前缀 · 相对方控件 · 审批路由">
-                <select className="nc-input" value={f.type} onChange={(e) => {
+              <Field label="合同类型" req note={lockType ? '由来源预选并锁定（采购方向）· 不可修改' : '决定前缀 · 相对方控件 · 审批路由'}>
+                <select className="nc-input" value={f.type} disabled={lockType} title={lockType ? '已按来源预选采购合同，类型锁定' : undefined} onChange={(e) => {
                   const t = e.target.value;
                   set('type', t);
                   if (t !== '框架协议' && pmode === 'none') { setPmode('exist'); toast('合同类型已切换，「暂不关联」仅框架协议可用，已回退为「选择已有」', 'err'); }
@@ -1193,13 +1226,16 @@ if (src && src !== 'manual' && step >= 3) issues.push(['name', `名称 / 相对�
           {/* 日期与工期 */}
           <Card hd="日期与工期">
             <div className="nc-form-grid">
-              <Field label="签约日期" req err={showErr('sign')} note="≤ 今天（未来日期硬拦截）">
+              <Field label="签署日期" req err={showErr('sign')} note="≤ 今天（未来日期硬拦截）">
                 <Sec id="sign"><input className="nc-input" type="date" max={TODAY} value={f.sign} onChange={(e) => set('sign', e.target.value)} /></Sec>
+              </Field>
+              <Field label="合同生效日期" note="默认 = 签署日期（2026-09-28 新增字段，列表独立成列）">
+                <input className="nc-input" type="date" value={f.eff} onChange={(e) => set('eff', e.target.value)} />
               </Field>
               <Field label="开工日期">
                 <input className="nc-input" type="date" value={f.start} onChange={(e) => set('start', e.target.value)} />
               </Field>
-              <Field label="到期日">
+              <Field label="合同结束日期">
                 <input className="nc-input" type="date" value={f.end} onChange={(e) => set('end', e.target.value)} />
               </Field>
               <Field label="工期起止" err={showErr('p1')} note="止 ≥ 起（硬拦截）；用于工期倒计时">
@@ -1312,11 +1348,11 @@ if (src && src !== 'manual' && step >= 3) issues.push(['name', `名称 / 相对�
           </Card>
 
           {/* 收款计划 */}
-          <Card hd="收款计划（≤ 12 期）">
+          <Card hd={payDir ? '付款计划（≤ 12 期）' : '收款计划（≤ 12 期）'}>
             <table className="nc-tbl is-cols" style={{ minWidth: 760 }}>
               <thead>
                 <tr>
-                  <th style={{ width: '7%' }}>期数</th><th style={{ width: '38%' }}>收款节点</th>
+                  <th style={{ width: '7%' }}>期数</th><th style={{ width: '38%' }}>{payDir ? '付款节点' : '收款节点'}</th>
                   <th style={{ width: '17%' }} className="is-num">计划金额（元）</th>
                   <th style={{ width: '19%' }}>计划日期</th>
                   <th style={{ width: '12%' }} className="is-center">质保金节点</th>
@@ -1327,14 +1363,14 @@ if (src && src !== 'manual' && step >= 3) issues.push(['name', `名称 / 相对�
                 {plan.map((p, i) => (
                   <tr key={i}>
                     <td className="nc-cell-sub">{i + 1}</td>
-                    <td><input className="nc-cell-in" value={p.node} placeholder="收款节点，如：预付款" onChange={(e) => setPlan((q) => q.map((x, j) => (j === i ? { ...x, node: e.target.value } : x)))} /></td>
+                    <td><input className="nc-cell-in" value={p.node} placeholder={payDir ? '付款节点，如：预付款' : '收款节点，如：预付款'} onChange={(e) => setPlan((q) => q.map((x, j) => (j === i ? { ...x, node: e.target.value } : x)))} /></td>
                     <td><input className="nc-cell-in num is-right" type="number" value={p.amt || ''} onChange={(e) => setPlan((q) => q.map((x, j) => (j === i ? { ...x, amt: +e.target.value || 0 } : x)))} /></td>
                     <td><input className="nc-cell-in" type="date" value={p.date} onChange={(e) => setPlan((q) => q.map((x, j) => (j === i ? { ...x, date: e.target.value } : x)))} /></td>
                     <td className="is-center"><input type="checkbox" checked={p.qual} onChange={(e) => setPlan((q) => q.map((x, j) => (j === i ? { ...x, qual: e.target.checked } : x)))} /></td>
                     <td className="is-center"><Op danger onClick={() => setPlan((q) => q.filter((_, j) => j !== i))}><Ico n="close" size={16} /></Op></td>
                   </tr>
                 ))}
-                {!plan.length && <tr><td colSpan={6} className="nc-cell-sub is-center">暂无收款期</td></tr>}
+                {!plan.length && <tr><td colSpan={6} className="nc-cell-sub is-center">暂无{payDir ? '付款' : '收款'}期</td></tr>}
               </tbody>
               <tfoot>
                 <tr className="nc-tbl-sum">
@@ -1348,7 +1384,7 @@ if (src && src !== 'manual' && step >= 3) issues.push(['name', `名称 / 相对�
                 </tr>
               </tfoot>
             </table>
-            <button type="button" className="nc-add-row" onClick={addPlan}>＋ 添加收款期</button>
+            <button type="button" className="nc-add-row" onClick={addPlan}>{payDir ? '＋ 添加付款期' : '＋ 添加收款期'}</button>
           </Card>
         </>
       )}
@@ -1362,7 +1398,7 @@ if (src && src !== 'manual' && step >= 3) issues.push(['name', `名称 / 相对�
               <div className="nc-grp-t">① 付款条款</div>
               <div className="nc-form-grid">
                 <Field label="付款条款" req span={2} err={showErr('term')}
-                  extra={<span className="nc-label-extra"><Btn size="sm" onClick={splitTerm} title="按条款中的比例自动生成收款计划行，与明细合计勾稽">拆解为收款计划（≤ 12 期）</Btn></span>}
+                  extra={<span className="nc-label-extra"><Btn size="sm" onClick={splitTerm} title={`按条款中的比例自动生成${payDir ? '付款' : '收款'}计划行，与明细合计勾稽`}>拆解为{payDir ? '付款' : '收款'}计划（≤ 12 期）</Btn></span>}
                   note={`${f.term.length} / 2000 · ${f.type === '销售合同' ? '销售类必填' : '选填'}`}>
                   <Sec id="term">
                     <textarea className="nc-input" rows={3} value={f.term} onChange={(e) => set('term', e.target.value)}
@@ -1466,6 +1502,28 @@ if (src && src !== 'manual' && step >= 3) issues.push(['name', `名称 / 相对�
           </Card>
 
           {/* 六条款检查（硬拦截 · 缺失项拦截并定位） */}
+          {/* AI 合同审核（2026-09-28 确认挂载点）：六条款检查旁的提交前审查 */}
+          <Card hd="AI 合同审核（提交前）" extra={
+            <Btn size="sm" kind="primary" disabled={aiState === 'running'} onClick={aiRun}>
+              {aiState === 'running' ? 'AI 审核中…' : aiState === 'done' ? '重新审核' : '发起 AI 审核'}
+            </Btn>
+          }>
+            {aiState === 'idle' && (
+              <div className="nc-cell-sub">提交前建议先跑一次 AI 审核：条款完整性 / 金额勾稽 / 风险表述三类检查。结果仅供参考，不替代人工复核；六条款硬拦截仍以检查表为准。</div>
+            )}
+            {aiState === 'running' && <Banner tone="info">AI 正在通读合同条款与明细，比对金额勾稽关系…</Banner>}
+            {aiState === 'done' && (
+              <>
+                <Banner tone="ok"><Ico n="checkCircle" size={16} /> <b>AI 审核完成：未发现硬性风险</b> —— 3 类检查全部通过，结论仅供提交前参考。</Banner>
+                <ol className="nc-olist">
+                  <li>条款完整性：六条款逐项比对通过{chk.length < SIX_CLAUSES.length ? `（当前已确认 ${chk.length}/${SIX_CLAUSES.length} 项，缺项时提交仍会被硬拦截）` : '（6/6 已确认）'}。</li>
+                  <li>金额勾稽：明细合计与{payDir ? '付款' : '收款'}计划同口径比对一致，税率 {rate}% 口径成立。</li>
+                  <li>风险表述：未发现单方免责 / 无限责任类表述；质保金比例 {f.rat}% 在法定上限内。</li>
+                </ol>
+              </>
+            )}
+          </Card>
+
           <Card hd="六条款检查（硬拦截 · 缺失项拦截并定位）">
             <Sec id="clause">
               <div className="nc-clause-list">

@@ -2,7 +2,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Ico, StatusIco } from './icons';
-import { canSeeMoney, fmt, fmtAmt, fmtWan, CONTRACT_STATUS_TONE, CONTRACT_TERMINAL, CONTRACT_TYPES, CUSTOMERS, ITEM_KINDS, normContractStatus, oppStageTone, PROJ_TYPES, PROJECT_STATUS_TONE, PROJECT_TERMINAL, SUPPLIERS, TODAY } from './data';
+import { canSeeMoney, fmt, fmtAmt, fmtWan, CONTRACT_STATUS_TONE, CONTRACT_TERMINAL, CONTRACT_TYPES, CUSTOMERS, entityNameOf, entityShortOf, ITEM_KINDS, normContractStatus, oppStageTone, OUR_ENTITIES, PROJ_TYPES, PROJECT_STATUS_TONE, PROJECT_TERMINAL, SUPPLIERS, TODAY } from './data';
 import { isPreviewTarget, openPreview } from './entityPreviewState';
 import { getActiveItems, getContracts, getItems, getOppStageIdx, getOppStages, getOpps, getProjects, setFocus, subscribeStore } from './store';
 import { WatermarkPreview } from './export';
@@ -252,9 +252,25 @@ export function OpMore({ items, label = '更多 ⋯' }: { items: OpMoreItem[]; l
 }
 
 /* ============================ 卡片 / 分区 ============================ */
-export function Card({ flush, hd, extra, children, style }: {
+export function Card({ flush, hd, extra, children, style, sec, sub }: {
   flush?: boolean; hd?: React.ReactNode; extra?: React.ReactNode; children?: React.ReactNode; style?: React.CSSProperties;
+  /** sec=true 时用「蓝竖条 + 灰字」小标题口径（同 .nc-sec-title）替代默认的 16px 黑粗体标题。
+      只服务项目详情页（概览页 4 块 + 子页），默认 false 保持全站其它调用点不变。 */
+  sec?: boolean;
+  /** sub=true：嵌在外层卡（PjSection / Card sec）内部的子块。标题走 .nc-subhd（13px/600 灰字、
+      无蓝竖条）—— 蓝条一卡只给外层卡标题一根，避免同卡多根蓝条视觉打架。 */
+  sub?: boolean;
 }) {
+  if (sec || sub) {
+    return (
+      <section className={`nc-card${flush ? ' is-flush' : ''}`} style={style}>
+        {hd && (sub
+          ? <div className="nc-subhd">{hd}{extra != null && <div className="nc-subhd-extra">{extra}</div>}</div>
+          : <div className="nc-pjsec-title"><div className="nc-sec-title">{hd}</div>{extra && <div className="nc-pjsec-title-extra">{extra}</div>}</div>)}
+        {children && (flush ? children : <div className="nc-card-bd">{children}</div>)}
+      </section>
+    );
+  }
   return (
     <section className={`nc-card${flush ? ' is-flush' : ''}`} style={style}>
       {hd && <div className="nc-card-hd"><h3>{hd}</h3>{extra && <div className="nc-card-hd-extra">{extra}</div>}</div>}
@@ -1567,7 +1583,36 @@ export function SupplierPicker({ value, onChange, options, scope = 'live', emit 
   );
 }
 
-/* ---------- 物料（物料 / 服务 / 套件） ---------- */
+/** 我方签约主体选择器（合同主体与筛选共用）—— 集团多主体口径，
+ *  列表行展示 short，选择器弹层展示 name + kind + uscc。 */
+export function EntityPicker({ value, onChange, emit = 'id', clearLabel, placeholder, width }: {
+  value: string;
+  onChange: (v: string) => void;
+  emit?: PickEmit;
+  clearLabel?: string;
+  placeholder?: string;
+  width?: number;
+}) {
+  const opts = useMemo<PickOpt[]>(
+    () => OUR_ENTITIES.map((e) => ({
+      id: e.id, code: e.id, name: e.name, sub: `${e.kind} · ${e.uscc}`,
+      tags: [{ text: e.short, tone: 'blue' }],
+      search: `${e.id} ${e.name} ${e.short} ${e.kind}`,
+    })),
+    [],
+  );
+  return (
+    <PickSelect
+      value={value} onChange={onChange} opts={opts} unit="个主体" emit={emit}
+      clearLabel={clearLabel} width={width}
+      placeholder={placeholder ?? '请选择我方签约主体'}
+      searchPlaceholder="搜索主体编号 / 全称 / 简称"
+      emptyText="没有匹配的主体"
+    />
+  );
+}
+
+/* ---------- 物料（物料 / 服务 / 软件 / 套件） ---------- */
 
 export type ItemOpt = {
   code: string; name: string; spec?: string; ty: string;

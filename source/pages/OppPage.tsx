@@ -13,25 +13,28 @@
 //   ③ 转项目 —— 例外路径（应急抢修）：无合同先施工，落 oppId + 无合同标记 + 30 日补签期限，并进驾驶舱风险榜。
 // 「一个商机仅可转化一次」的旧约束已删 —— 规格 §2.2④ 写的是「关联报价 / 投标 / 合同列表」，
 // 分标段分别投标、分批成交是消防工程常态，故允许多次转化，已产出数量由下游外键派生。
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Banner, Btn, Card, ChainBar, DataTable, Drawer, EntityLink, Field, KvGrid, ListToolbar, Modal,
   Op, OpMore, OpNone, OpSep, PageHead, TableFoot, Tag, Tabs, Timeline, Tile, Tip, useToast, Code, IdCell, pressProps,
-  CustomerPicker, type CustOpt,} from '../components/ui';
+  CustomerPicker, ItemPicker, type CustOpt,} from '../components/ui';
 import {
   OPP_STATUS, LOSE_REASONS, isBidClosed, isOppClosed, fmtWan, canSeeMoney, TODAY, oppStageTone,
   CUSTOMERS, CUST_GRADES, CUST_GRADE_LABEL, CUST_INDUSTRIES, CUST_REGIONS, CUST_SOURCES, CUST_STATUS_NEW,
-  getOppFollowDays,
+  ITEM_KINDS, getOppFollowDays, itemCostBase, markupOf,
+  type QuoteLine, type Svy, type SvyQtyRow,
 } from '../components/data';
 import {
   consumeFocus, setFocus, subscribeStore, getOpps, getOppLogs, getOppClose,
   getOppStages, getOppStageIdx, getOppGateIdx, getOppStageWeight, getOppBids,
   moveOpp, closeOpp, reopenOpp, setPendingBid,
-  getQuotes, getContracts, getProjects,
+  getQuotes, getContracts, getProjects, getActiveItems,
   setPendingContract, setPendingProject, setPendingOppQuote,
+  addQuote, nextQuoteNo, getSvys, addSvy, patchSvy,
 } from '../components/store';
 import { Ico } from '../components/icons';
 import { ExportButton, ExportDialog, useExport, getUserName, type ExportField } from '../components/export';
+import { parseDelimited, readTableFile } from '../components/xlsx';
 
 const STATUS_TONE: Record<string, 'blue' | 'green' | 'gray'> = { 跟进中: 'blue', 赢单: 'green', 输单: 'gray' };
 const BIZ_NAME: Record<string, string> = { GC: '消防工程', WB: '维护保养', JC: '检测', RJ: '软件研发', QT: '其他' };
@@ -62,38 +65,57 @@ const outText = (id: string) => {
 };
 
 /* ============================ 勘察记录 ============================ */
-type QtyRow = { n: string; u: string; q: string; r: string };
-type Svy = {
-  id: string; at: string; persons: string[]; sys: string; desc: string;
-  photos: number; rows: QtyRow[]; quoteId?: string;
-};
-/** 已过 gate（默认「方案报价」）的商机，默认有一条已生成报价的勘察（锁定只读） */
-const svySeed = (o: O): Svy[] => (getOppStageIdx(o.stage) >= getOppGateIdx() ? [{
-  id: `SRV-2026-${o.id.slice(-3)}`, at: '2026-09-05', persons: [o.owner], sys: '火灾自动报警系统 / 自动喷淋',
-  desc: '现场踏勘：主机房 2 处、报警回路 24 路；喷洒头原型号 ZSTX-15 老化需全部更换；消防泵房设备需同步改造；弱电井桥架可利用。',
-  photos: 4,
-  rows: [
-    { n: '点型感烟火灾探测器', u: '只', q: '860', r: '含底座' },
-    { n: '喷洒头 ZSTX-15/68℃', u: '个', q: '1240', r: '下垂型' },
-    { n: '火灾报警控制器（联动型）', u: '台', q: '4', r: '2 回路' },
-    { n: '消防水泵接合器 SQD150-A', u: '套', q: '6', r: '含止回阀' },
-  ],
-  quoteId: 'BJ000011',
-}] : []);
+/** 工程量行：名称 / 单位取自物料主数据（选料 / 模板库 / OCR 带出），数量现场填，备注默认带参考单价 */
+type QtyRow = SvyQtyRow;
+/** 物料主数据行类型（模板库 / OCR 候选集元素） */
+type ItemRow = ReturnType<typeof getActiveItems>[number];
+/** 模板库 / OCR 候选集的分页步长（弹窗内「获取更多」） */
+const TPL_PAGE = 10;
 
-/** 工程量项模板库（mock · 常用消防工程分项）：勾选后带出名称+单位+参考单价，数量现场手填 */
-const QTY_TPL = [
-  { n: '点型感烟火灾探测器', u: '只', p: 85 },
-  { n: '点型感温火灾探测器', u: '只', p: 65 },
-  { n: '喷洒头 ZSTX-15/68℃', u: '个', p: 12 },
-  { n: '火灾报警控制器（联动型）', u: '台', p: 12000 },
-  { n: '消防水泵接合器 SQD150-A', u: '套', p: 1800 },
-  { n: '消防广播扬声器', u: '只', p: 120 },
-  { n: '手动火灾报警按钮', u: '只', p: 45 },
-  { n: '电气火灾监控探测器', u: '只', p: 260 },
-  { n: '消防应急照明灯具', u: '盏', p: 95 },
-  { n: '防火卷帘门（含控制器）', u: '樘', p: 3500 },
+/** OCR 识别录入示例（mock）：现场手写 / 打印的工程量清单照片 → 结构化行。
+    真实产品接 OCR 服务；此处按物料主数据编码给出识别结果，保证「内容与物料主数据一致」。
+    conf = 识别置信度，低于 90% 的行在弹窗内提示人工复核。 */
+const OCR_DEMO: { code: string; q: string; conf: number }[] = [
+  { code: 'EQ000002', q: '860', conf: 0.98 },
+  { code: 'CL000145', q: '1240', conf: 0.96 },
+  { code: 'EQ000001', q: '4', conf: 0.93 },
+  { code: 'CL000226', q: '6', conf: 0.91 },
+  { code: 'CL000201', q: '180', conf: 0.88 },
+  { code: 'SV000004', q: '2', conf: 0.72 },
 ];
+
+/* ============================ 工程量清单：Excel 粘贴 / 批量填列 ============================ */
+/** 粘贴核对行：解析出的原始行 + 物料匹配结果 */
+type PasteRow = { name: string; unit: string; qty: string; note: string; item?: ItemRow };
+/** 批量填列可作用的列（名称列只能选料，故不开放） */
+const FILL_COLS = [
+  { key: 'u' as const, label: '单位' },
+  { key: 'q' as const, label: '数量' },
+  { key: 'r' as const, label: '备注' },
+];
+
+/** 名称归一：去空格 / 全角括号转半角 / 小写 —— 把粘贴进来的名称对到物料主数据 */
+const normName = (s: string) => s.trim().toLowerCase().replace(/\s+/g, '').replace(/（/g, '(').replace(/）/g, ')');
+
+/** 名称 / 编码 → 物料主数据：名称全等 → 编码全等 → 去掉括号后缀后全等 */
+function matchItemOf(list: ItemRow[], key: string): ItemRow | undefined {
+  const k = normName(key);
+  if (!k) return undefined;
+  return list.find((i) => normName(i.name) === k)
+    ?? list.find((i) => i.code.toLowerCase() === k)
+    ?? list.find((i) => normName(i.name).replace(/\(.*?\)/g, '') === k.replace(/\(.*?\)/g, ''));
+}
+
+/** 粘贴内容带表头（含「名称」且含「数量 / 单位」）时剥掉首行 */
+function stripHeader(grid: string[][]): string[][] {
+  const h = grid[0] ?? [];
+  return grid.length > 1 && h.some((c) => /名称|物料/.test(c)) && h.some((c) => /数量|单位/.test(c))
+    ? grid.slice(1) : grid;
+}
+
+/** 只改某一列（避免计算属性键的类型收窄问题） */
+const withCol = (r: QtyRow, col: 'u' | 'q' | 'r', v: string): QtyRow =>
+  ({ ...r, u: col === 'u' ? v : r.u, q: col === 'q' ? v : r.q, r: col === 'r' ? v : r.r });
 
 /** 关联报价：按商机派生的示意数据（多版本口径，与列表「报价 N 版」同源） */
 const relQuotes = (o: O) => o.quotes > 0
@@ -146,14 +168,74 @@ export default function OppPage({ go, role, nav }: { go: (p: string) => void; ro
   const [advNote, setAdvNote] = useState('');
   const [reopenOpen, setReopenOpen] = useState<O | null>(null);
   const [svyOpen, setSvyOpen] = useState<{ o: O; s: Svy | null } | null>(null);
-  const [svyForm, setSvyForm] = useState<Svy>({ id: '', at: TODAY, persons: [], sys: '', desc: '', photos: 0, rows: [] });
-  const [svyMap, setSvyMap] = useState<Record<string, Svy[]>>({});
-  /* 工程量项模板库勾选：勾选常用分项后带出名称+单位+参考单价，数量现场手填 */
+  const [svyForm, setSvyForm] = useState<Svy>({ id: '', oppId: '', at: TODAY, persons: [], sys: '', desc: '', photos: 0, rows: [] });
+  /* 工程量项模板库勾选：内容取物料主数据（可搜索 / 按类型快筛 / 分页），勾选后带出名称+单位+参考单价，数量现场手填 */
   const [svyTplOpen, setSvyTplOpen] = useState(false);
-  const [svyTplSel, setSvyTplSel] = useState<number[]>([]);
+  const [svyTplSel, setSvyTplSel] = useState<string[]>([]);
+  const [svyTplKw, setSvyTplKw] = useState('');
+  const [svyTplKind, setSvyTplKind] = useState('');
+  const [svyTplShown, setSvyTplShown] = useState(TPL_PAGE);
+  /* OCR 识别录入工程量：上传清单照片 → 识别出行 → 复核后带入清单 */
+  const [ocrOpen, setOcrOpen] = useState(false);
+  const [ocrStage, setOcrStage] = useState<'idle' | 'scanning' | 'done'>('idle');
+  const [ocrSel, setOcrSel] = useState<string[]>([]);
+  /* Excel 粘贴：粘贴 / 选文件 → 按物料库核对 → 带入清单 */
+  const [pasteOpen, setPasteOpen] = useState(false);
+  const [pasteStep, setPasteStep] = useState<'pick' | 'check'>('pick');
+  const [pasteText, setPasteText] = useState('');
+  const [pasteGrid, setPasteGrid] = useState<string[][] | null>(null);
+  const [pasteErr, setPasteErr] = useState('');
+  const [pasteBusy, setPasteBusy] = useState(false);
+  const [pasteDrag, setPasteDrag] = useState(false);
+  const [pasteMode, setPasteMode] = useState<'append' | 'replace'>('append');
+  /** 未匹配到物料库的名称（表格上方提示用） */
+  const [badNames, setBadNames] = useState<string[]>([]);
+  const pasteFileRef = useRef<HTMLInputElement>(null);
+  /* 批量填列：统一值 / 按倍数 / 粘贴一列 */
+  const [fillOpen, setFillOpen] = useState(false);
+  const [fillCol, setFillCol] = useState<'u' | 'q' | 'r'>('q');
+  const [fillMode, setFillMode] = useState<'value' | 'scale' | 'paste'>('value');
+  const [fillVal, setFillVal] = useState('');
+  const [fillText, setFillText] = useState('');
   const [cvtHtOpen, setCvtHtOpen] = useState<O | null>(null);
   const [cvtXmOpen, setCvtXmOpen] = useState<O | null>(null);
   const [noContractReason, setNoContractReason] = useState('');
+
+  /* ---- 模板库候选集：取物料主数据（启用）· 类型档位由字典派生且只留真实存在的档 ---- */
+  const tplItems = useMemo(() => getActiveItems(), [tick]);
+  const tplKinds = useMemo(() => ITEM_KINDS.filter((k) => tplItems.some((i) => i.ty === k)), [tplItems]);
+  const tplMatched = useMemo(() => {
+    const k = svyTplKw.trim().toLowerCase();
+    return tplItems.filter((i) => {
+      if (svyTplKind && i.ty !== svyTplKind) return false;
+      if (!k) return true;
+      return `${i.code} ${i.name} ${i.spec} ${i.cat}`.toLowerCase().includes(k);
+    });
+  }, [tplItems, svyTplKw, svyTplKind]);
+  const tplVisible = tplMatched.slice(0, svyTplShown);
+  /* 全选口径：表头 checkbox = 「所见即所选」（当前显示的行）；
+     匹配数多于显示数时，计数行另给「全选匹配的 N 项」，避免勾到看不见的项。 */
+  const tplVisSel = tplVisible.filter((i) => svyTplSel.includes(i.code)).length;
+  const tplAllOn = tplVisible.length > 0 && tplVisSel === tplVisible.length;
+  const toggleTplAll = () => setSvyTplSel((sel) => {
+    const codes = tplVisible.map((i) => i.code);
+    return tplAllOn ? sel.filter((c) => !codes.includes(c)) : Array.from(new Set([...sel, ...codes]));
+  });
+  const selTplAllMatched = () => setSvyTplSel((sel) => Array.from(new Set([...sel, ...tplMatched.map((i) => i.code)])));
+  /* ---- OCR 识别结果：按物料主数据编码解析，缺项自动跳过（主数据调整后弹窗不报错） ---- */
+  const ocrHits = useMemo(
+    () => OCR_DEMO.map((d) => { const it = tplItems.find((i) => i.code === d.code); return it ? { ...d, it } : null; })
+      .filter((x): x is { code: string; q: string; conf: number; it: ItemRow } => !!x),
+    [tplItems],
+  );
+  /* ---- Excel 粘贴核对行：名称按物料库匹配（命中 → 带出编码 / 单位 / 参考价） ---- */
+  const pasteRows = useMemo<PasteRow[]>(() => (pasteGrid ?? []).map((r) => {
+    const name = (r[0] ?? '').trim();
+    const item = matchItemOf(tplItems, name);
+    return { name, unit: (r[1] ?? '').trim() || item?.unit || '', qty: (r[2] ?? '').trim(), note: (r[3] ?? '').trim(), item };
+  }).filter((r) => r.name || r.qty), [pasteGrid, tplItems]);
+  const pasteOk = pasteRows.filter((r) => r.item);
+  const pasteMiss = pasteRows.filter((r) => !r.item);
 
   /* ---- 新增：更多筛选（金额区间 / 创建区间 / 排序） ---- */
   const [more, setMore] = useState(false);
@@ -247,7 +329,8 @@ export default function OppPage({ go, role, nav }: { go: (p: string) => void; ro
   const paged = rows.slice((page - 1) * pageSize, page * pageSize);
   const active = opps.filter((o) => !isOppClosed(o));
   const weighted = active.reduce((s, o) => s + o.amt * (stageW(o.stage) || 0) / 100, 0);
-  const svyOf = (o: O) => svyMap[o.id] ?? svySeed(o);
+  /* 勘察记录走共享 store：切页不丢，且与商机按 oppId 归属 */
+  const svyOf = (o: O) => getSvys(o.id);
   /** 阶段历史：store 里的真实留痕在前，无留痕时回落到按当前阶段推导的示意链 */
   const histOf = (o: O) => {
     const real = getOppLogs(o.id);
@@ -295,23 +378,146 @@ export default function OppPage({ go, role, nav }: { go: (p: string) => void; ro
   /* ---------- 勘察：新增 / 保存 / 生成报价 ---------- */
   const openSvy = (o: O, s: Svy | null) => {
     setSvyOpen({ o, s });
-    setSvyForm(s ?? { id: `SRV-2026-${String(100 + Math.floor(Math.random() * 800))}`, at: TODAY, persons: [], sys: '', desc: '', photos: 0, rows: [{ n: '', u: '个', q: '', r: '' }] });
+    setSvyForm(s ?? { id: `SRV-2026-${String(100 + Math.floor(Math.random() * 800))}`, oppId: o.id, at: TODAY, persons: [], sys: '', desc: '', photos: 0, rows: [{ code: '', n: '', u: '个', q: '', r: '' }] });
   };
   const togglePerson = (p: string) => setSvyForm((f) => ({
     ...f,
     persons: f.persons.includes(p) ? f.persons.filter((x) => x !== p) : (f.persons.length >= 5 ? (toast('勘察人员最多 5 人', 'err'), f.persons) : [...f.persons, p]),
   }));
   const setRow = (i: number, k: keyof QtyRow, v: string) => setSvyForm((f) => ({ ...f, rows: f.rows.map((r, ix) => (ix === i ? { ...r, [k]: v } : r)) }));
-  const openSvyTpl = () => { setSvyTplSel([]); setSvyTplOpen(true); };
-  const toggleTpl = (i: number) => setSvyTplSel((sel) => (sel.includes(i) ? sel.filter((x) => x !== i) : [...sel, i]));
+  /** 选料带出：名称 / 单位取自物料主数据，备注默认写参考单价；清空时同步清掉名称与备注 */
+  const setRowItem = (i: number, code: string) => setSvyForm((f) => ({
+    ...f,
+    rows: f.rows.map((r, ix) => {
+      if (ix !== i) return r;
+      const it = code ? tplItems.find((x) => x.code === code) : undefined;
+      return it
+        ? { ...r, code: it.code, n: it.name, u: it.unit, r: r.r || `参考单价¥${it.price}/${it.unit}` }
+        : { ...r, code: '', n: '', r: '' };
+    }),
+  }));
+  const openSvyTpl = () => { setSvyTplSel([]); setSvyTplKw(''); setSvyTplKind(''); setSvyTplShown(TPL_PAGE); setSvyTplOpen(true); };
+  const toggleTpl = (code: string) => setSvyTplSel((sel) => (sel.includes(code) ? sel.filter((x) => x !== code) : [...sel, code]));
   const addTplRows = () => {
-    if (!svyTplSel.length) { toast('请先勾选要添加的工程量项', 'err'); return; }
-    setSvyForm((f) => ({ ...f, rows: [...f.rows, ...svyTplSel.map((i) => {
-      const t = QTY_TPL[i];
-      return { n: t.n, u: t.u, q: '', r: `参考单价¥${t.p}/${t.u}` } as QtyRow;
-    })] }));
-    toast(`已从模板库带入 ${svyTplSel.length} 项，请填写数量`);
+    const picked = svyTplSel.map((c) => tplItems.find((i) => i.code === c)).filter((x): x is ItemRow => !!x);
+    if (!picked.length) { toast('请先勾选要添加的工程量项', 'err'); return; }
+    setSvyForm((f) => ({ ...f, rows: [...f.rows, ...picked.map((it) => ({ code: it.code, n: it.name, u: it.unit, q: '', r: `参考单价¥${it.price}/${it.unit}` } as QtyRow))] }));
+    toast(`已从模板库带入 ${picked.length} 项，请填写数量`);
     setSvyTplOpen(false);
+  };
+  /* ---- OCR 识别录入工程量 ---- */
+  const openOcr = () => { setOcrStage('idle'); setOcrSel([]); setOcrOpen(true); };
+  const toggleOcr = (code: string) => setOcrSel((sel) => (sel.includes(code) ? sel.filter((x) => x !== code) : [...sel, code]));
+  const runOcr = () => {
+    setOcrStage('scanning');
+    window.setTimeout(() => { setOcrStage('done'); setOcrSel(ocrHits.map((h) => h.code)); }, 900);
+  };
+  const addOcrRows = () => {
+    const picked = ocrHits.filter((h) => ocrSel.includes(h.code));
+    if (!picked.length) { toast('请先勾选要带入的识别结果', 'err'); return; }
+    setSvyForm((f) => ({ ...f, rows: [...f.rows, ...picked.map((h) => ({ code: h.code, n: h.it.name, u: h.it.unit, q: h.q, r: '' } as QtyRow))] }));
+    toast(`OCR 已带入 ${picked.length} 行工程量，请复核数量`);
+    setOcrOpen(false);
+  };
+  /* ---------- Excel 粘贴 ---------- */
+  const openPaste = () => {
+    setPasteStep('pick'); setPasteText(''); setPasteGrid(null);
+    setPasteErr(''); setPasteBusy(false); setPasteMode('append'); setPasteOpen(true);
+  };
+  const openFill = () => { setFillCol('q'); setFillMode('value'); setFillVal(''); setFillText(''); setFillOpen(true); };
+  /** 解析结果 → 进入核对步骤 */
+  const acceptPaste = (grid: string[][]) => {
+    if (!grid.length) { setPasteErr('没解析到内容：请在 Excel 里选中整块单元格后再复制'); return; }
+    setPasteGrid(stripHeader(grid));
+    setPasteErr('');
+    setPasteStep('check');
+  };
+  const onPasteFile = async (f: File) => {
+    setPasteBusy(true); setPasteErr('');
+    try { acceptPaste(await readTableFile(f)); }
+    catch (e) { setPasteErr(e instanceof Error ? e.message : '读取文件失败'); }
+    finally { setPasteBusy(false); }
+  };
+  /** 核对行 → 工程量行（命中物料：带出编码 / 单位 / 参考价；未命中：只留名称） */
+  const toQtyRow = (r: PasteRow): QtyRow => (r.item
+    ? { code: r.item.code, n: r.item.name, u: r.unit || r.item.unit, q: r.qty, r: r.note || `参考单价¥${r.item.price}/${r.item.unit}` }
+    : { code: '', n: r.name, u: r.unit || '个', q: r.qty, r: r.note });
+  const addPasteRows = () => {
+    if (!pasteOk.length) { toast('没有可带入的行：名称需与物料库一致', 'err'); return; }
+    setSvyForm((f) => ({
+      ...f,
+      rows: [...(pasteMode === 'append' ? f.rows : []), ...pasteOk.map(toQtyRow)].slice(0, 100),
+    }));
+    setBadNames(pasteMiss.map((r) => r.name));
+    toast(`已带入 ${pasteOk.length} 行${pasteMiss.length ? `；${pasteMiss.length} 行名称未匹配物料，未带入` : ''}`);
+    setPasteOpen(false);
+  };
+  /**
+   * 表格内直接粘贴：从 (row0, col0) 起铺开。
+   * 粘贴 1 列 → 填当前列（批量替换某列）；粘贴 ≥2 列 → 按「名称 / 单位 / 数量 / 备注」整行铺开。
+   * 名称列按物料库匹配，未命中的行**保持原值**并汇总提示（不猜、不静默丢）。
+   */
+  const pasteAtCell = (grid: string[][], row0: number, col0: number) => {
+    const wide = grid.some((l) => l.length >= 2);
+    const startCol = wide ? 0 : col0;
+    const rows = svyForm.rows.map((r) => ({ ...r }));
+    const miss: string[] = [];
+    while (rows.length < row0 + grid.length && rows.length < 100) rows.push({ code: '', n: '', u: '个', q: '', r: '' });
+    grid.forEach((line, ri) => {
+      const tr = rows[row0 + ri];
+      if (!tr) return;
+      line.forEach((raw, ci) => {
+        const c = startCol + ci;
+        if (c > 3) return;
+        const v = raw.trim();
+        if (c === 0) {
+          if (!v) { tr.code = ''; tr.n = ''; return; }
+          const it = matchItemOf(tplItems, v);
+          if (it) {
+            tr.code = it.code; tr.n = it.name;
+            if (!tr.u) tr.u = it.unit;
+            if (!tr.r) tr.r = `参考单价¥${it.price}/${it.unit}`;
+          } else miss.push(v);
+        } else if (c === 1) tr.u = v;
+        else if (c === 2) tr.q = v;
+        else tr.r = v;
+      });
+    });
+    setSvyForm((f) => ({ ...f, rows }));
+    setBadNames(miss);
+    toast(miss.length ? `已粘贴；${miss.length} 个名称未匹配物料，该行名称未改动` : '已从剪贴板粘贴到工程量清单');
+  };
+  const onCellPaste = (e: React.ClipboardEvent, i: number, col: 0 | 1 | 2 | 3) => {
+    const text = e.clipboardData.getData('text/plain');
+    if (!text || !/[\t\n]/.test(text)) return;   /* 单值粘贴不拦截，走原生行为 */
+    e.preventDefault();
+    pasteAtCell(parseDelimited(text), i, col);
+  };
+  /* ---------- 批量填列 ---------- */
+  const applyFill = () => {
+    const label = FILL_COLS.find((c) => c.key === fillCol)?.label ?? '';
+    if (fillMode === 'paste') {
+      const vals = parseDelimited(fillText).map((r) => (r[0] ?? '').trim()).filter(Boolean);
+      if (!vals.length) { toast('请先粘贴一列数据', 'err'); return; }
+      setSvyForm((f) => ({ ...f, rows: f.rows.map((r, i) => (i < vals.length ? withCol(r, fillCol, vals[i]) : r)) }));
+      toast(`「${label}」已按列更新 ${Math.min(vals.length, svyForm.rows.length)} 行`);
+    } else if (fillMode === 'value') {
+      if (!fillVal.trim()) { toast(`请填写要统一设置的${label}`, 'err'); return; }
+      setSvyForm((f) => ({ ...f, rows: f.rows.map((r) => withCol(r, fillCol, fillVal.trim())) }));
+      toast(`「${label}」整列已设为 ${fillVal.trim()}`);
+    } else {
+      const k = Number(fillVal);
+      if (!Number.isFinite(k) || k <= 0) { toast('请填写大于 0 的倍数（如 1.2）', 'err'); return; }
+      setSvyForm((f) => ({
+        ...f,
+        rows: f.rows.map((r) => {
+          const n = Number(r[fillCol]);
+          return r[fillCol] !== '' && Number.isFinite(n) ? withCol(r, fillCol, String(Math.round(n * k * 1000) / 1000)) : r;
+        }),
+      }));
+      toast(`「${label}」已按 ${k} 倍调整`);
+    }
+    setFillOpen(false);
   };
   const validSvy = () => {
     if (!svyForm.at) { toast('勘察时间必填', 'err'); return false; }
@@ -324,22 +530,60 @@ export default function OppPage({ go, role, nav }: { go: (p: string) => void; ro
   const saveSvy = () => {
     if (!validSvy() || !svyOpen) return;
     const o = svyOpen.o;
-    const rec: Svy = { ...svyForm, rows: svyForm.rows.filter((r) => r.n.trim()) };
-    setSvyMap((m) => ({ ...m, [o.id]: [rec, ...svyOf(o)] }));
-    toast(`勘察已保存：${rec.id}（工程量 ${rec.rows.length} 行）`);
+    const rec: Svy = { ...svyForm, oppId: o.id, rows: svyForm.rows.filter((r) => r.n.trim()) };
+    addSvy(rec);
+    toast(`勘察已保存：${rec.id}（工程量 ${rec.rows.length} 行）· 可在下方记录行点「生成报价单」`);
     setSvyOpen(null);
   };
-  const genQuote = () => {
-    if (!validSvy() || !svyOpen) return;
-    const o = svyOpen.o;
-    const ok = svyForm.rows.filter((r) => r.n.trim() && Number(r.q) > 0);
-    const skip = svyForm.rows.filter((r) => r.n.trim() && !(Number(r.q) > 0));
-    if (!ok.length) { toast('工程量清单至少 1 行且数量 > 0 才能生成报价', 'err'); return; }
-    const qid = `BJ${TODAY.replace(/-/g, '')}-00${20 + ok.length}`;
-    const rec: Svy = { ...svyForm, rows: svyForm.rows.filter((r) => r.n.trim()), quoteId: qid };
-    setSvyMap((m) => ({ ...m, [o.id]: [rec, ...svyOf(o)] }));
-    toast(`报价草稿已生成：${qid}（带入 ${ok.length} 行${skip.length ? `；${skip.length} 行未填数量未带入` : ''}；勘察已入库并锁定）`);
-    setSvyOpen(null);
+  /** 一条勘察记录里**可带入报价**的工程量行数：名称对上物料主数据、且数量 > 0（对不上的无法计价） */
+  const quotableRowsOf = (s: Svy) => s.rows.filter((r) => r.code && Number(r.q) > 0 && tplItems.some((x) => x.code === r.code)).length;
+
+  /* ---------- 勘察记录 → 报价单 ----------
+     对**已保存的勘察记录**发起（列表行操作），不是对弹窗里那份还没落库的表单 ——
+     否则「生成」就等于「顺手保存」，用户先存好、再针对某条记录生成这条正常路径反而走不通。
+     真正落库一张草稿（明细 = 该记录的工程量清单），回写 quoteId 锁定该记录，再跳报价工作台继续组价。 */
+  const genQuote = (o: O, s: Svy) => {
+    if (s.quoteId) { toast(`该勘察记录已生成报价单 ${s.quoteId}`, 'err'); return; }
+    const ok = s.rows.filter((r) => r.n.trim() && Number(r.q) > 0);
+    if (!ok.length) { toast('该勘察记录没有可计价的工程量行（需名称对上物料库、数量 > 0）', 'err'); return; }
+    /* 逐行按物料主数据取成本与目录默认上浮率 —— 与报价工作台同一套口径，不在这里另算一套：
+       cost = itemCostBase(物料)（四类「参考价」语义各不相同）· markup = markupOf(分类树节点) */
+    const lines: QuoteLine[] = [];
+    ok.forEach((r) => {
+      const it = r.code ? tplItems.find((x) => x.code === r.code) : undefined;
+      if (!it) return;
+      const cost = itemCostBase(it);
+      const markup = markupOf(it.cat);
+      lines.push({
+        matId: it.code, catId: it.cat, name: it.name, spec: it.spec,
+        unit: r.u || it.unit, qty: Number(r.q), cost, markup,
+        price: Math.round((cost + (cost * markup) / 100) * 100) / 100,
+        note: r.r || undefined,
+      });
+    });
+    if (!lines.length) { toast('清单里的名称都没对上物料库，无法计价；请核对名称或联系采购新增物料', 'err'); return; }
+    const dropped = s.rows.filter((r) => r.n.trim()).length - lines.length;
+    const sum = lines.reduce((a, l) => a + l.price * l.qty, 0);
+    const costSum = lines.reduce((a, l) => a + l.cost * l.qty, 0);
+    const qid = nextQuoteNo();
+    addQuote({
+      id: qid, ver: 'V1', customer: o.customer,
+      /* 客户外键：商机若未带 customerId，按客户名回查档案兜底（避免落成空外键） */
+      customerId: o.customerId ?? CUSTOMERS.find((c) => c.name === o.customer)?.id ?? '',
+      opp: o.id,
+      name: `${o.name}报价`, total: Math.round(sum * 100) / 100,
+      taxRate: 9, taxMode: '含税', status: '草稿', owner: o.owner,
+      date: TODAY, update: TODAY, approveLevel: '—',
+      /* 整单上浮率 = 各明细按成本额加权的平均浮率，与工作台「整单上浮率」同口径 */
+      markup: costSum ? Math.round(lines.reduce((a, l) => a + l.markup * l.cost * l.qty, 0) / costSum) : 0,
+      region: '昆明', uplift: 0, items: lines.length, base: o.industry || '其他', costSqm: 0,
+      lines,
+    });
+    /* 回写 quoteId：该条勘察记录随即锁定只读（不新建记录，也不覆盖其它字段） */
+    patchSvy(s.id, { quoteId: qid });
+    toast(`报价单 ${qid} 已生成（草稿 · 明细 ${lines.length} 行${dropped ? ` · ${dropped} 行未带入` : ''}）· 已进入报价工作台`);
+    setFocus('quote-edit', qid);
+    go('quote-edit');
   };
 
   /* 统一导出：把原「一步直达 CSV」补全为标准弹窗流程；预计金额 / 加权金额为敏感字段 */
@@ -621,18 +865,18 @@ export default function OppPage({ go, role, nav }: { go: (p: string) => void; ro
             {dTab === 'srv' && (
               <div style={{ marginTop: 12 }}>
                 <div className="nc-inline-ops" style={{ marginBottom: 12 }}>
-                  <span className="nc-cell-sub">生成报价后勘察锁定只读；如需修改请新建一条</span>
+                  <span className="nc-cell-sub">保存后可在记录行点「生成报价单」；生成后该条锁定只读，如需修改请新建一条</span>
                   <span style={{ flex: 1 }} />
                   <Btn size="sm" kind="primary" onClick={() => openSvy(detail, null)}>＋ 新增勘察记录</Btn>
                 </div>
                 {svyOf(detail).length === 0
-                  ? <div className="nc-empty-mini">暂无勘察记录：点击「＋ 新增勘察记录」登记现场情况，工程量可用于生成报价草稿</div>
+                  ? <div className="nc-empty-mini">暂无勘察记录：点击「＋ 新增勘察记录」登记并保存，再在记录行点「生成报价单」由工程量清单生成报价草稿</div>
                   : (
-                    <table className="nc-tbl" style={{ minWidth: 700 }}>
+                    <table className="nc-tbl" style={{ minWidth: 720 }}>
                       <thead><tr>
-                        <th style={{ width: 130 }}>勘察编号</th><th style={{ width: 100 }}>勘察时间</th>
-                        <th style={{ width: 120 }}>勘察人员</th><th>系统类别</th>
-                        <th style={{ width: 90 }} className="is-num">工程量</th><th style={{ width: 110 }}>报价状态</th><th style={{ width: 80 }}>操作</th>
+                        <th style={{ width: 116 }}>勘察编号</th><th style={{ width: 96 }}>勘察时间</th>
+                        <th style={{ width: 86 }}>勘察人员</th><th>系统类别</th>
+                        <th style={{ width: 66 }} className="is-num">工程量</th><th style={{ width: 130 }}>报价状态</th><th style={{ width: 140 }}>操作</th>
                       </tr></thead>
                       <tbody>
                         {svyOf(detail).map((s) => (
@@ -643,7 +887,17 @@ export default function OppPage({ go, role, nav }: { go: (p: string) => void; ro
                             <td>{s.sys}</td>
                             <td className="is-num">{s.rows.length} 行</td>
                             <td>{s.quoteId ? <Tag tone="green">已生成 {s.quoteId}</Tag> : <Tag tone="gray">未生成</Tag>}</td>
-                            <td><Op onClick={() => openSvy(detail, s)}>{s.quoteId ? '查看' : '编辑'}</Op></td>
+                            <td>
+                              <Op onClick={() => openSvy(detail, s)}>{s.quoteId ? '查看' : '编辑'}</Op>
+                              {!s.quoteId && <>
+                                <OpSep />
+                                <Op gold disabled={quotableRowsOf(s) === 0}
+                                  title={quotableRowsOf(s) === 0
+                                    ? '该记录没有可计价的工程量行（名称需对上物料库、数量 > 0）'
+                                    : `按该记录工程量生成报价草稿（带入 ${quotableRowsOf(s)} 行）`}
+                                  onClick={() => genQuote(detail, s)}>生成报价单</Op>
+                              </>}
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -656,7 +910,7 @@ export default function OppPage({ go, role, nav }: { go: (p: string) => void; ro
               <div style={{ marginTop: 12 }}>
                 <div className="nc-sec-title" style={{ marginBottom: 8 }}>报价单</div>
                 {relQuotes(detail).length === 0
-                  ? <div className="nc-empty-mini">暂无报价单：可在勘察记录中由工程量清单一键生成，或点「去报价」手工创建</div>
+                  ? <div className="nc-empty-mini">暂无报价单：可在勘察记录行点「生成报价单」由工程量清单生成，或点「去报价」手工创建</div>
                   : (
                     <table className="nc-tbl" style={{ minWidth: 620 }}>
                       <thead><tr><th style={{ width: 160 }}>报价单号</th><th style={{ width: 70 }}>版本</th><th style={{ width: 130 }} className="is-num">金额</th><th style={{ width: 90 }}>状态</th><th style={{ width: 110 }}>日期</th></tr></thead>
@@ -1031,10 +1285,9 @@ export default function OppPage({ go, role, nav }: { go: (p: string) => void; ro
             <Btn kind="primary" onClick={() => svyOpen && openSvy(svyOpen.o, null)}>＋ 新建一条勘察</Btn>
           </>
           : <>
-            <span className="nc-cell-sub">照片自动加时间 / 定位水印 · 工程量行 ≤100 行</span>
+            <span className="nc-cell-sub">照片自动加时间 / 定位水印 · 工程量行 ≤100 行 · 保存后在记录行点「生成报价单」</span>
             <Btn onClick={() => setSvyOpen(null)}>取消</Btn>
-            <Btn onClick={saveSvy}>保存勘察</Btn>
-            <Btn kind="primary" onClick={genQuote}>生成报价单（预填工程量）</Btn>
+            <Btn kind="primary" onClick={saveSvy}>保存勘察</Btn>
           </>}>
         {svyOpen && (
           <>
@@ -1063,26 +1316,39 @@ export default function OppPage({ go, role, nav }: { go: (p: string) => void; ro
             </div>
 
             <div className="nc-sec-title" style={{ margin: '14px 0 8px' }}>工程量清单（≤100 行 · 数量 &gt; 0 · ≤3 位小数）</div>
+            {!svyOpen.s?.quoteId && (
+              <div className="nc-cell-sub" style={{ marginBottom: 6 }}>支持从 Excel 直接粘贴：选中单元格后 Ctrl+V 可整块铺开（粘贴 1 列 = 填当前列，多列 = 按名称 / 单位 / 数量 / 备注整行铺开）。</div>
+            )}
+            {badNames.length > 0 && (
+              <div className="nc-warnbox is-warn" style={{ marginBottom: 6 }}>
+                <b>{badNames.length} 个名称未匹配物料库</b>（如「{badNames[0]}」）：请核对名称，或联系采购在物料主数据中新增后再录入。
+              </div>
+            )}
             <table className="nc-tbl" style={{ minWidth: 640 }}>
               <thead><tr><th style={{ width: 40 }} className="is-num">#</th><th>名称（≤50）</th><th style={{ width: 80 }}>单位</th><th style={{ width: 110 }} className="is-num">数量</th><th>备注</th><th style={{ width: 70 }}>操作</th></tr></thead>
               <tbody>
                 {svyForm.rows.map((r, i) => (
                   <tr key={i}>
                     <td className="is-num">{i + 1}</td>
-                    <td><input className="nc-input" value={r.n} maxLength={50} disabled={!!svyOpen.s?.quoteId} onChange={(e) => setRow(i, 'n', e.target.value)} /></td>
-                    <td><input className="nc-input" value={r.u} disabled={!!svyOpen.s?.quoteId} onChange={(e) => setRow(i, 'u', e.target.value)} /></td>
-                    <td><input className="nc-input num" value={r.q} disabled={!!svyOpen.s?.quoteId} onChange={(e) => setRow(i, 'q', e.target.value)} /></td>
-                    <td><input className="nc-input" value={r.r} disabled={!!svyOpen.s?.quoteId} onChange={(e) => setRow(i, 'r', e.target.value)} /></td>
+                    <td onPaste={(e) => onCellPaste(e, i, 0)}>{svyOpen.s?.quoteId
+                      ? <span className="nc-combo-val">{r.code && <span className="num">{r.code}</span>}{r.code ? ' ' : ''}{r.n}</span>
+                      : <ItemPicker value={r.code} clearLabel="清空" placeholder="请选择物料 / 服务 / 软件 / 套件" onChange={(v) => setRowItem(i, v)} />}</td>
+                    <td><input className="nc-input" value={r.u} disabled={!!svyOpen.s?.quoteId} onChange={(e) => setRow(i, 'u', e.target.value)} onPaste={(e) => onCellPaste(e, i, 1)} /></td>
+                    <td><input className="nc-input num" value={r.q} disabled={!!svyOpen.s?.quoteId} onChange={(e) => setRow(i, 'q', e.target.value)} onPaste={(e) => onCellPaste(e, i, 2)} /></td>
+                    <td><input className="nc-input" value={r.r} disabled={!!svyOpen.s?.quoteId} onChange={(e) => setRow(i, 'r', e.target.value)} onPaste={(e) => onCellPaste(e, i, 3)} /></td>
                     <td><Op danger disabled={!!svyOpen.s?.quoteId || svyForm.rows.length <= 1} onClick={() => setSvyForm((f) => ({ ...f, rows: f.rows.filter((_, ix) => ix !== i) }))}>删除</Op></td>
                   </tr>
                 ))}
               </tbody>
             </table>
             {!svyOpen.s?.quoteId && (
-              <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+              <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+                <Btn size="sm" onClick={openPaste}><Ico n="clipboard" size={14} /> 从 Excel 粘贴</Btn>
+                <Btn size="sm" onClick={openFill}>批量填列</Btn>
+                <Btn size="sm" onClick={openOcr}><Ico n="camera" size={14} /> OCR 识别录入</Btn>
                 <Btn size="sm" onClick={openSvyTpl}>从模板库勾选</Btn>
                 {svyForm.rows.length < 100 && (
-                  <Btn size="sm" onClick={() => setSvyForm((f) => ({ ...f, rows: [...f.rows, { n: '', u: '个', q: '', r: '' }] }))}>＋ 新增工程量行</Btn>
+                  <Btn size="sm" onClick={() => setSvyForm((f) => ({ ...f, rows: [...f.rows, { code: '', n: '', u: '个', q: '', r: '' }] }))}>＋ 新增工程量行</Btn>
                 )}
               </div>
             )}
@@ -1090,26 +1356,220 @@ export default function OppPage({ go, role, nav }: { go: (p: string) => void; ro
         )}
       </Modal>
 
-      {/* ============ 工程量项模板库勾选（在勘察弹窗之上叠加） ============ */}
+      {/* ============ 从模板库勾选工程量项（在勘察弹窗之上叠加 · 内容取物料主数据） ============ */}
       <Modal open={svyTplOpen} size="M" title="从模板库勾选工程量项" onClose={() => setSvyTplOpen(false)}
         foot={<>
           <span className="nc-cell-sub">已选 {svyTplSel.length} 项 · 带出名称/单位/参考单价，数量现场补填</span>
           <Btn onClick={() => setSvyTplOpen(false)}>取消</Btn>
-          <Btn kind="primary" onClick={addTplRows}>添加到清单</Btn>
+          <Btn kind="primary" disabled={!svyTplSel.length} onClick={addTplRows}>添加到清单</Btn>
         </>}>
-        <table className="nc-tbl" style={{ minWidth: 480 }}>
-          <thead><tr><th style={{ width: 40 }}></th><th>分项名称</th><th style={{ width: 70 }}>单位</th><th style={{ width: 110 }} className="is-num">参考单价</th></tr></thead>
+        <Banner tone="info">模板库内容取自<b>物料主数据</b>（物料 / 服务 / 软件 / 套件）；可按编码 / 名称 / 规格搜索，或按类型快筛。</Banner>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
+          <div className="nc-search" style={{ width: '100%', flex: '1 1 auto' }}>
+            <span className="nc-search-ico"><Ico n="search" size={13} /></span>
+            <input value={svyTplKw} placeholder="搜索编码 / 名称 / 规格 / 目录" onChange={(e) => { setSvyTplKw(e.target.value); setSvyTplShown(TPL_PAGE); }} />
+          </div>
+          {svyTplKw && <Btn size="sm" onClick={() => { setSvyTplKw(''); setSvyTplShown(TPL_PAGE); }}>清空</Btn>}
+        </div>
+        <div className="nc-pick-inline" style={{ margin: '8px 0' }}>
+          <button type="button" className={`nc-fchip${svyTplKind === '' ? ' is-on' : ''}`} onClick={() => { setSvyTplKind(''); setSvyTplShown(TPL_PAGE); }}>全部类型</button>
+          {tplKinds.map((k) => (
+            <button key={k} type="button" className={`nc-fchip${svyTplKind === k ? ' is-on' : ''}`} onClick={() => { setSvyTplKind(k); setSvyTplShown(TPL_PAGE); }}>{k}</button>
+          ))}
+        </div>
+        <table className="nc-tbl" style={{ minWidth: 520 }}>
+          <thead><tr>
+            <th style={{ width: 40 }}>
+              <input type="checkbox" className="nc-check" checked={tplAllOn} disabled={!tplVisible.length}
+                ref={(el) => { if (el) el.indeterminate = !tplAllOn && tplVisSel > 0; }}
+                onChange={toggleTplAll} aria-label="全选当前显示" title="全选当前显示" />
+            </th>
+            <th>名称</th><th style={{ width: 60 }}>类型</th><th style={{ width: 70 }}>单位</th><th style={{ width: 110 }} className="is-num">参考单价</th>
+          </tr></thead>
           <tbody>
-            {QTY_TPL.map((t, i) => (
-              <tr key={t.n} onClick={() => toggleTpl(i)} {...pressProps(() => toggleTpl(i))} style={{ cursor: 'pointer' }}>
-                <td><input type="checkbox" className="nc-check" checked={svyTplSel.includes(i)} onChange={() => toggleTpl(i)} onClick={(e) => e.stopPropagation()} /></td>
-                <td>{t.n}</td>
-                <td>{t.u}</td>
-                <td className="is-num num">¥{t.p}</td>
-              </tr>
-            ))}
+            {tplVisible.map((it) => {
+              const on = svyTplSel.includes(it.code);
+              return (
+                <tr key={it.code} onClick={() => toggleTpl(it.code)} {...pressProps(() => toggleTpl(it.code))} style={{ cursor: 'pointer' }}>
+                  <td><input type="checkbox" className="nc-check" checked={on} onChange={() => toggleTpl(it.code)} onClick={(e) => e.stopPropagation()} /></td>
+                  <td><span className="num nc-muted">{it.code}</span> {it.name}<span className="nc-muted nc-tiny"> {it.spec}</span></td>
+                  <td><Tag tone="gray">{it.ty}</Tag></td>
+                  <td>{it.unit}</td>
+                  <td className="is-num num">¥{it.price}</td>
+                </tr>
+              );
+            })}
+            {!tplMatched.length && (
+              <tr><td colSpan={5}><div className="nc-empty-mini">没有匹配的物料：请调整搜索词或类型档</div></td></tr>
+            )}
           </tbody>
         </table>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
+          <span className="nc-cell-sub">共 {tplItems.length} 项 · 匹配 <b>{tplMatched.length}</b> 项 · 已显示 {tplVisible.length}</span>
+          {tplVisible.length < tplMatched.length && (
+            <Btn size="sm" onClick={() => setSvyTplShown((v) => v + TPL_PAGE)}>获取更多（还有 {tplMatched.length - tplVisible.length} 项）</Btn>
+          )}
+          {tplVisible.length < tplMatched.length && tplVisSel < tplMatched.length && (
+            <Btn size="sm" onClick={selTplAllMatched}>全选匹配的 {tplMatched.length} 项</Btn>
+          )}
+        </div>
+      </Modal>
+
+      {/* ============ OCR 识别录入工程量（上传清单照片 → 识别 → 复核带入） ============ */}
+      <Modal open={ocrOpen} size="M" title="OCR 识别录入工程量" onClose={() => setOcrOpen(false)}
+        foot={<>
+          <span className="nc-cell-sub">识别结果按物料主数据匹配名称与单位，低置信度行请人工复核</span>
+          <Btn onClick={() => setOcrOpen(false)}>取消</Btn>
+          {ocrStage === 'done'
+            ? <Btn kind="primary" disabled={!ocrSel.length} onClick={addOcrRows}>带入 {ocrSel.length} 行</Btn>
+            : <Btn kind="primary" disabled={ocrStage === 'scanning'} onClick={runOcr}>{ocrStage === 'scanning' ? '识别中…' : '开始识别'}</Btn>}
+        </>}>
+        {ocrStage === 'idle' && (
+          <>
+            <Banner tone="info">上传现场手写 / 打印的<b>工程量清单照片</b>，自动识别分项与数量；识别结果按物料主数据匹配名称与单位，复核后带入清单。</Banner>
+            <div className="nc-dropzone"><Ico n="paperclip" size={16} /> 点击或拖拽上传工程量清单照片（JPG / PNG · ≤9 张）</div>
+            <div className="nc-cell-sub">演示态：点「开始识别」将按示例照片返回 {OCR_DEMO.length} 行识别结果。</div>
+          </>
+        )}
+        {ocrStage === 'scanning' && (
+          <div className="nc-empty-mini" style={{ padding: '28px 0' }}><Ico n="search" size={18} /> 正在识别工程量清单…</div>
+        )}
+        {ocrStage === 'done' && (
+          <>
+            <div className="nc-sec-title" style={{ marginBottom: 8 }}>识别结果（{ocrHits.length} 行 · 已选 {ocrSel.length}）</div>
+            <table className="nc-tbl" style={{ minWidth: 540 }}>
+              <thead><tr><th style={{ width: 40 }}></th><th>识别名称</th><th style={{ width: 60 }}>单位</th><th style={{ width: 90 }} className="is-num">识别数量</th><th style={{ width: 110 }}>置信度</th></tr></thead>
+              <tbody>
+                {ocrHits.map((h) => {
+                  const on = ocrSel.includes(h.code);
+                  return (
+                    <tr key={h.code} onClick={() => toggleOcr(h.code)} {...pressProps(() => toggleOcr(h.code))} style={{ cursor: 'pointer' }}>
+                      <td><input type="checkbox" className="nc-check" checked={on} onChange={() => toggleOcr(h.code)} onClick={(e) => e.stopPropagation()} /></td>
+                      <td><span className="num nc-muted">{h.it.code}</span> {h.it.name}</td>
+                      <td>{h.it.unit}</td>
+                      <td className="is-num num">{h.q}</td>
+                      <td>{h.conf >= 0.9 ? <Tag tone="green">{Math.round(h.conf * 100)}%</Tag> : <Tag tone="gold">{Math.round(h.conf * 100)}% 待复核</Tag>}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </>
+        )}
+      </Modal>
+
+      {/* ============ 从 Excel 粘贴工程量（粘贴 / 选文件 → 按物料库核对 → 带入） ============ */}
+      <Modal open={pasteOpen} size="M" onClose={() => setPasteOpen(false)}
+        title={pasteStep === 'pick' ? '从 Excel 粘贴工程量 · 选择内容' : '从 Excel 粘贴工程量 · 核对'}
+        foot={pasteStep === 'pick' ? (
+          <>
+            <Btn onClick={() => setPasteOpen(false)}>取消</Btn>
+            <Btn kind="primary" disabled={!pasteText.trim()} onClick={() => acceptPaste(parseDelimited(pasteText))}>
+              <Ico n="check" size={16} /> 解析粘贴内容
+            </Btn>
+          </>
+        ) : (
+          <>
+            <span className="nc-cell-sub">带入后清单 ≤ 100 行</span>
+            <Btn onClick={() => setPasteStep('pick')}>返回上一步</Btn>
+            <Btn kind="primary" disabled={!pasteOk.length} onClick={addPasteRows}>
+              <Ico n="check" size={16} /> 带入 {pasteOk.length} 行
+            </Btn>
+          </>
+        )}>
+        {pasteStep === 'pick' && (
+          <>
+            <Banner tone="info">
+              在 Excel 里选中整块（<b>名称 / 单位 / 数量 / 备注</b>）按 <b>Ctrl+C</b> 粘到下面；也可直接选择 <b>.xlsx / .csv</b> 文件。
+            </Banner>
+            <div className={`nc-dropzone${pasteDrag ? ' is-drag' : ''}`}
+              onClick={() => pasteFileRef.current?.click()}
+              onDragOver={(e) => { e.preventDefault(); setPasteDrag(true); }}
+              onDragLeave={() => setPasteDrag(false)}
+              onDrop={(e) => { e.preventDefault(); setPasteDrag(false); const f = e.dataTransfer.files?.[0]; if (f) void onPasteFile(f); }}>
+              <Ico n="upload" size={16} /> {pasteBusy ? '正在解析…' : '点击选择文件，或把文件拖到这里'}
+              <div className="nc-cell-sub">.xlsx / .xlsm / .csv / .txt · 单文件 ≤ 5MB</div>
+              <input ref={pasteFileRef} type="file" accept=".xlsx,.xlsm,.csv,.txt" style={{ display: 'none' }}
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) void onPasteFile(f); e.target.value = ''; }} />
+            </div>
+            <Field label="或粘贴表格内容" span={2}>
+              <textarea className="nc-input" rows={5} value={pasteText}
+                placeholder={'名称\t单位\t数量\t备注\n感烟探测器\t只\t860\t含底座'}
+                onChange={(e) => setPasteText(e.target.value)} />
+            </Field>
+            {pasteErr && <Banner tone="danger">{pasteErr}</Banner>}
+            <div className="nc-cell-sub">列序固定为 名称 → 单位 → 数量 → 备注；首行若是表头会自动跳过。</div>
+          </>
+        )}
+        {pasteStep === 'check' && (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <Tag tone="green">匹配 {pasteOk.length} 行</Tag>
+              {pasteMiss.length > 0 && <Tag tone="red">未匹配 {pasteMiss.length} 行</Tag>}
+              <span className="nc-cell-sub">按名称 / 编码与物料库比对（忽略空格与括号）</span>
+            </div>
+            {pasteMiss.length > 0 && (
+              <div className="nc-warnbox is-warn" style={{ marginBottom: 8 }}>
+                <b>{pasteMiss.length} 行名称在物料库中不存在，不会带入。</b>请核对名称，或联系采购在物料主数据中新增后再录入。
+              </div>
+            )}
+            <table className="nc-tbl" style={{ minWidth: 560 }}>
+              <thead><tr><th style={{ width: 34 }} className="is-num">#</th><th>名称</th><th style={{ width: 60 }}>单位</th><th style={{ width: 80 }} className="is-num">数量</th><th style={{ width: 90 }}>匹配</th></tr></thead>
+              <tbody>
+                {pasteRows.map((r, i) => (
+                  <tr key={i} className={r.item ? '' : 'is-warn'}>
+                    <td className="is-num">{i + 1}</td>
+                    <td>{r.item ? <><span className="num nc-muted">{r.item.code}</span> {r.item.name}</> : r.name}</td>
+                    <td>{r.unit}</td>
+                    <td className="is-num num">{r.qty}</td>
+                    <td>{r.item ? <Tag tone="green">已匹配</Tag> : <Tag tone="red">未匹配</Tag>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="nc-pick-inline" style={{ marginTop: 10 }}>
+              <button type="button" className={`nc-fchip${pasteMode === 'append' ? ' is-on' : ''}`} onClick={() => setPasteMode('append')}>追加到清单</button>
+              <button type="button" className={`nc-fchip${pasteMode === 'replace' ? ' is-on' : ''}`} onClick={() => setPasteMode('replace')}>替换现有清单</button>
+            </div>
+          </>
+        )}
+      </Modal>
+
+      {/* ============ 批量填列（统一值 / 按倍数 / 粘贴一列） ============ */}
+      <Modal open={fillOpen} width={480} title="批量填列" onClose={() => setFillOpen(false)}
+        foot={<>
+          <span className="nc-cell-sub">作用于全部 {svyForm.rows.length} 行</span>
+          <Btn onClick={() => setFillOpen(false)}>取消</Btn>
+          <Btn kind="primary" onClick={applyFill}>应用</Btn>
+        </>}>
+        <Banner tone="info">批量修改同一列：统一填一个值、按倍数调整，或从 Excel 粘贴一列（按行顺序对应）。</Banner>
+        <Field label="目标列" span={2}>
+          <div className="nc-pick-inline">
+            {FILL_COLS.map((c) => (
+              <button key={c.key} type="button" className={`nc-fchip${fillCol === c.key ? ' is-on' : ''}`} onClick={() => setFillCol(c.key)}>{c.label}</button>
+            ))}
+          </div>
+        </Field>
+        <Field label="方式" span={2}>
+          <div className="nc-pick-inline">
+            <button type="button" className={`nc-fchip${fillMode === 'value' ? ' is-on' : ''}`} onClick={() => setFillMode('value')}>统一值</button>
+            <button type="button" className={`nc-fchip${fillMode === 'scale' ? ' is-on' : ''}`} onClick={() => setFillMode('scale')}>按倍数</button>
+            <button type="button" className={`nc-fchip${fillMode === 'paste' ? ' is-on' : ''}`} onClick={() => setFillMode('paste')}>粘贴一列</button>
+          </div>
+        </Field>
+        {fillMode === 'paste' ? (
+          <Field label="粘贴一列（每行一个值）" span={2}>
+            <textarea className="nc-input" rows={4} value={fillText}
+              placeholder="在 Excel 里选中该列，Ctrl+C 后粘到这里"
+              onChange={(e) => setFillText(e.target.value)} />
+          </Field>
+        ) : (
+          <Field label={fillMode === 'value' ? '统一设置为' : '调整倍数'} span={2}
+            note={fillMode === 'scale' ? '仅对已有数值生效，如 1.2 = 上浮 20%' : undefined}>
+            <input className="nc-input num" value={fillVal} onChange={(e) => setFillVal(e.target.value)}
+              placeholder={fillMode === 'value' ? '如 10' : '如 1.2'} />
+          </Field>
+        )}
       </Modal>
 
       {/* ============ 统一导出弹窗 ============ */}

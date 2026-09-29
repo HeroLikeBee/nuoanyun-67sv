@@ -11,7 +11,7 @@ import type { OpMoreItem } from '../components/ui';
 import { QUOTE_STATUS, REAL_SCOPES, CUSTOMERS, TODAY, approveLevel, calcTax, can, catPathsOfScope, fmt, fmtWan, higherLevel, marginGuardOf, marginGuardText, quoteTrigger, verNo } from '../components/data';
 import type { Quote, QuoteVersion } from '../components/data';
 import {
-  addQuote, consumeFocus, getBids, getBizStatus, getQuotes, nextApprovalNo, patchQuote, pushApproval,
+  addQuote, consumeFocus, getBids, getBizStatus, getQuotes, nextApprovalNo, nextQuoteNo, patchQuote, pushApproval,
   setBizStatus, setFocus, setPendingQuote, subscribeStore,
 } from '../components/store';
 import { DiffTable, prevOf, sortVers } from '../components/quoteDiff';
@@ -22,15 +22,6 @@ const ST_TONE: Record<string, 'gray' | 'blue' | 'green' | 'red' | 'gold'> = {
   草稿: 'gray', 待审批: 'blue', 已审批: 'green', 已转化: 'green', 作废: 'gray', 审批中: 'blue',
 };
 type Q = Quote;
-
-/** 报价单号：BJ + 6 位流水（取现有最大流水 + 1） */
-const nextQuoteNo = () => {
-  const max = getQuotes()
-    .filter((q) => /^BJ\d{6}$/.test(q.id))
-    .map((q) => Number(q.id.slice(2)))
-    .reduce((a, b) => Math.max(a, b), 0);
-  return `BJ${String(max + 1).padStart(6, '0')}`;
-};
 
 /** 生成报价审批单（提交审批 → 审批中心可见，形成正向闭环） */
 const makeQuoteApproval = (ref: string, ver: string, obj: string, amt: number, level: string) => ({

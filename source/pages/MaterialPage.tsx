@@ -2,7 +2,7 @@
 // ------------------------------------------------------------------
 // 统一主数据：物料 / 服务 / 软件 / 套件 四类同表（ITEMS），用「类型」字段区分。
 //   · 服务与套件共享同一套「配置 / 成本构成」编辑器；
-//   · 配置行只能引用主数据（物料 / 服务 / 子套件），人工费只能来自工种单价主数据；
+//   · 配置行只能引用主数据（物料 / 服务 / 软件 / 子套件），人工费只能来自工种单价主数据；
 //   · 台账徽标、合规证书、价格库、批次账全部由同一份主数据派生，杜绝两页说法不一。
 // 信息架构（M-IA 重构）：「供应链管理」组下 5 个二级菜单平铺，各自就是终点页，鼠标点即到 ——
 //   物料主数据 material-list（一张列表含物料 / 服务 / 软件 / 套件四类）· 库存管理 material-stock
@@ -47,8 +47,8 @@ const KIND_DESC: Record<ItemKind, string> = {
   套件: '成套交付 · 成本 = 配置行（引用主数据，可嵌子套件）自动合计',
   软件: '无实物库存 · 许可 / 订阅费 · 成本 = 参考价（6% 现代服务口径，不做价税分离）',
 };
-/** 配置行可选类型（套件配置 = 物料 / 服务行混合，可嵌子套件） */
-const LINE_KINDS: ItemKind[] = ['物料', '服务', '套件', '软件'];
+/** 配置行可选类型（套件配置 = 物料 / 服务 / 软件行混合，可嵌子套件） */
+const LINE_KINDS: ItemKind[] = [...ITEM_KINDS];
 /* 物料选择器的类型档位常量：选择器把 kinds 当 useMemo 依赖，必须在模块级定义（不能每渲染新造数组） */
 const KINDS_NO_KIT = ITEM_KINDS.filter((k) => k !== '套件');
 const KINDS_STOCKED = ITEM_KINDS.filter((k) => isStocked(k));
@@ -984,7 +984,7 @@ export default function MaterialPage({ go, role, nav, pageId }: {
               cols={[
                 { key: 'id', title: '询价单号', width: 130, render: (r) => <span className="num">{r.id}</span> },
                 { key: 'from', title: '来源', width: 90, render: (r) => <Tag tone={r.from === '库存补齐' ? 'orange' : 'gray'}>{r.from || '手工发起'}</Tag> },
-                { key: 'mats', title: '物料 / 服务（数量）', render: (r) => <span className="nc-tiny">{r.mats.map((m) => `${m.name} ×${m.qty}${m.unit}`).join('；')}</span> },
+                { key: 'mats', title: '物料 / 服务 / 软件（数量）', render: (r) => <span className="nc-tiny">{r.mats.map((m) => `${m.name} ×${m.qty}${m.unit}`).join('；')}</span> },
                 { key: 'needDate', title: '需求日期', width: 100, align: 'right', render: (r) => <span className="num nc-tiny">{r.needDate}</span> },
                 { key: 'deadline', title: '报价截止', width: 130, align: 'right', render: (r) => <span className="num nc-tiny">{r.deadline}</span> },
                 {
@@ -1553,7 +1553,7 @@ export default function MaterialPage({ go, role, nav, pageId }: {
                 </Field>
               </>
             ) : (
-              <Field label="配置行（物料 / 服务 / 子套件 混合）" req span={4}>
+              <Field label="配置行（物料 / 服务 / 软件 / 子套件 混合）" req span={4}>
                 <table className="nc-tbl" style={{ minWidth: 820 }}>
                   <thead><tr>
                     <th style={{ width: 44 }}>序</th>
@@ -2023,8 +2023,8 @@ export default function MaterialPage({ go, role, nav, pageId }: {
       {/* ==================== 发起询价 ==================== */}
       <Modal open={rfqNew} title="发起询价" width={640} onClose={() => setRfqNew(false)}
         foot={<><Btn onClick={() => setRfqNew(false)}>取消</Btn><Btn kind="primary" onClick={() => {
-          if (!rfqLines.length) { setRfqErr('请至少添加一行物料 / 服务'); return; }
-          if (rfqLines.some((l) => !l.code)) { setRfqErr('每行须选择物料 / 服务'); return; }
+          if (!rfqLines.length) { setRfqErr('请至少添加一行物料 / 服务 / 软件'); return; }
+          if (rfqLines.some((l) => !l.code)) { setRfqErr('每行须选择物料 / 服务 / 软件'); return; }
           if (rfqLines.some((l) => !(Number(l.qty) > 0))) { setRfqErr('每行数量须 > 0'); return; }
           if (!rfqDl || new Date(rfqDl.replace(' ', 'T')).getTime() <= new Date(`${TODAY}T12:00`).getTime()) { setRfqErr('报价截止须晚于当前时间'); return; }
           if (!rfqInv.length) { setRfqErr('请至少邀约一家供应商'); return; }
@@ -2039,11 +2039,11 @@ export default function MaterialPage({ go, role, nav, pageId }: {
           setRfqNew(false); setQrOpen(id);
           toast(`询价单 ${id} 已发起（来源：${rfqFrom}），已生成一人一码二维码`);
         }}>生成二维码并发起</Btn></>}>
-        <div className="nc-warnbox is-info">填写需要的物料 / 服务与数量 → 生成二维码，供应商扫码填价；<b>黑名单供应商不可邀约</b>。服务只寻源可外采项，套件不询价。</div>
+        <div className="nc-warnbox is-info">填写需要的物料 / 服务 / 软件与数量 → 生成二维码，供应商扫码填价；<b>黑名单供应商不可邀约</b>。服务只寻源可外采项，套件不询价。</div>
         {rfqErr && <Alert icon={<Ico n="warning" size={16} />} tone="danger" title={rfqErr} />}
-        <Field label="物料 / 服务（数量）" req span={4}>
+        <Field label="物料 / 服务 / 软件（数量）" req span={4}>
           <table className="nc-tbl" style={{ minWidth: 560 }}>
-            <thead><tr><th>物料 / 服务</th><th style={{ width: 120 }}>数量</th><th style={{ width: 60 }}>操作</th></tr></thead>
+            <thead><tr><th>物料 / 服务 / 软件</th><th style={{ width: 120 }}>数量</th><th style={{ width: 60 }}>操作</th></tr></thead>
             <tbody>
               {rfqLines.map((l, i) => (
                 <tr key={i}>
@@ -2218,7 +2218,7 @@ export default function MaterialPage({ go, role, nav, pageId }: {
           <div style={{ flex: 1, minWidth: 0 }}>
             <KvGrid cols={1} rows={[
               { k: '询价单号', v: qrOpen || '—' },
-              { k: '物料 / 服务', v: (rfqs.find((r) => r.id === qrOpen)?.mats || []).map((m) => `${m.name} ×${m.qty}${m.unit}`).join('；') || '—' },
+              { k: '物料 / 服务 / 软件', v: (rfqs.find((r) => r.id === qrOpen)?.mats || []).map((m) => `${m.name} ×${m.qty}${m.unit}`).join('；') || '—' },
               { k: '报价截止', v: rfqs.find((r) => r.id === qrOpen)?.deadline || '—' },
               { k: '邀请供应商', v: (rfqs.find((r) => r.id === qrOpen)?.invited || []).map((g) => supName(g)).join('、') || '—' },
             ]} />
@@ -2303,7 +2303,7 @@ export default function MaterialPage({ go, role, nav, pageId }: {
               { k: '预估不含税存货成本', v: <span className="num" title="入库后按不含税单价计入存货账，领用时结转项目成本（按各行税率折算）">{fmt(poFor.mats.reduce((t, m) => { const p = poFor.quotes[sup]?.[m.code] ?? (byCode(m.code)?.price ?? 0); const tr = byCode(m.code)?.taxRate ?? 13; return t + p * m.qty / (1 + tr / 100); }, 0))}</span> },
             ]} />
             <table className="nc-tbl" style={{ minWidth: 520, marginTop: 10 }}>
-              <thead><tr><th>物料 / 服务</th><th style={{width: 100}} className="is-num">数量</th><th style={{width: 110}} className="is-num">成交单价</th><th style={{width: 110}} className="is-num">小计</th></tr></thead>
+              <thead><tr><th>物料 / 服务 / 软件</th><th style={{width: 100}} className="is-num">数量</th><th style={{width: 110}} className="is-num">成交单价</th><th style={{width: 110}} className="is-num">小计</th></tr></thead>
               <tbody>
                 {poFor.mats.map((m) => {
                   const p = poFor.quotes[sup]?.[m.code] ?? (byCode(m.code)?.price ?? 0);
@@ -2358,7 +2358,7 @@ export default function MaterialPage({ go, role, nav, pageId }: {
         </>}>
         <div className="nc-warnbox is-info">
           <b>导入规则</b>
-          <div>先下载模板按列填写；服务型须填「工日 + 工种」，套件型导入后到「套件与配置」补配置行。
+          <div>先下载模板按列填写；服务型须填「工日 + 工种」，套件型导入后到行内「配置」补配置行。
             重名 / 重码逐行报错，<b>不覆盖</b>既有数据。</div>
         </div>
         <div className="nc-form-grid">
@@ -2367,7 +2367,7 @@ export default function MaterialPage({ go, role, nav, pageId }: {
         </div>
       </Modal>
 
-      {/* ==================== 新增主数据（三类同表，类型可切换） ==================== */}
+      {/* ==================== 新增主数据（四类同表，类型可切换） ==================== */}
       <Drawer open={newOpen} title="新增主数据" width={840} onClose={() => setNewOpen(false)}
         foot={<>
           <Btn onClick={() => setNewOpen(false)}>取消</Btn>
@@ -2411,7 +2411,7 @@ export default function MaterialPage({ go, role, nav, pageId }: {
             setNf({ ty: '物料', name: '', spec: '', cat: '', unit: UNITS[0], price: '', safe: '', ccc: false, mand: false, certType: CERT_TYPES[0], certNo: '', certValidTo: '', batch: '', notifyCh: CHANNELS[0], qualReq: '', sale: '' });
             setNfLabor([{ trade: LABOR_RATES[0].trade, days: 1 }]);
             setNfMats([]);
-            toast(`已新增 ${code} · ${item.name}（${nf.ty}）${nf.ty === '套件' ? '，请到「套件与配置」补配置行' : ''}`);
+            toast(`已新增 ${code} · ${item.name}（${nf.ty}）${nf.ty === '套件' ? '，请点行内「配置」补配置行' : ''}`);
           }}>保存</Btn>
         </>}>
         {newErr && <Alert icon={<Ico n="warning" size={16} />} tone="danger" title={newErr} />}
@@ -2569,7 +2569,7 @@ export default function MaterialPage({ go, role, nav, pageId }: {
               </div>
               <div className="nc-warnbox is-info">
                 <b>下一步</b>
-                <div>套件保存后到「套件与配置」维护配置行（引用物料 / 服务 / 子套件），成本与毛利率会实时计算，负毛利会给「调价」动作。</div>
+                <div>套件保存后点行内「配置」维护配置行（引用物料 / 服务 / 软件 / 子套件），成本与毛利率会实时计算，负毛利会给「调价」动作。</div>
               </div>
             </>}
             {nf.ty === '软件' && (

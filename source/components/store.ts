@@ -3,8 +3,8 @@
 // 设计：模块级可变数组 + 订阅广播；各台账页用 useState(getXxx) 播种并 useEffect 订阅，
 //      保证 A 页写入后 B 页挂载 / 已挂载都能拿到最新数据（不引入第三方状态库）。
 // 说明：BIDS / QUOTES / INVOICES 等在下方「实体关系图」处二次导入，此处不重复声明。
-import { APPROVALS, ATT_TEAM_SEED, ATT_WORKERS_SEED, BIDS, CERT_OCCUPANCY, CERT_OCCUPANCY_SEED, CERTS, CONTRACTS, CUSTOMERS, ID_MARK_FLOWS, ID_MARK_FLOWS_SEED, ID_MARK_RANGES, ID_MARK_RANGES_SEED, INVOICES, ITEMS, OPP_STAGE_TPL, OPPS, PROJECTS, PUSH_BATCHES, PUSH_BATCHES_SEED, QUOTES, SIGN_CHAINS, TODAY, certStatusOf, certWarnDays, isStocked, normContractStatus, verNo } from './data';
-import type { AttTeam, AttWorker, Cert, Item, OppStageTpl, Quote, QuoteVersion, SignConfig } from './data';
+import { APPROVALS, ATT_TEAM_SEED, ATT_WORKERS_SEED, BIDS, CERT_OCCUPANCY, CERT_OCCUPANCY_SEED, CERTS, CONTRACTS, CUSTOMERS, ID_MARK_FLOWS, ID_MARK_FLOWS_SEED, ID_MARK_RANGES, ID_MARK_RANGES_SEED, INVOICES, ITEMS, OPP_STAGE_TPL, OPPS, PROJECTS, PUSH_BATCHES, PUSH_BATCHES_SEED, QUOTES, SIGN_CHAINS, SVYS, TODAY, certStatusOf, certWarnDays, isStocked, normContractStatus, verNo } from './data';
+import type { AttTeam, AttWorker, Cert, Item, OppStageTpl, Quote, QuoteVersion, SignConfig, Svy } from './data';
 import type { PjCostRow } from './project-center/ctx';
 
 type C = (typeof CONTRACTS)[number];
@@ -627,6 +627,37 @@ export function nextApprovalNo(): string {
   return `SP${String(max + 1).padStart(6, '0')}`;
 }
 
+/**
+ * 报价单号：前缀 BJ + 6 位流水（全局单号规范 · 唯一事实源）。
+ * 此前 QuotePage 与 QuoteEditPage 各写了一份**完全相同**的实现，商机「勘察记录 → 生成报价单」
+ * 又要用第三份 —— 收敛到这里三处共用，避免任一处改了流水口径另两处不跟随。
+ */
+export function nextQuoteNo(): string {
+  const max = quotes
+    .map((q) => /^BJ(\d{6})$/.exec(q.id))
+    .reduce((mx, m) => (m ? Math.max(mx, Number(m[1])) : mx), 0);
+  return `BJ${String(max + 1).padStart(6, '0')}`;
+}
+
+/* ============================ 商机勘察记录 ============================
+ * 与商机同源：`getSvys(oppId)` 供商机详情的「勘察记录」页签读取，`addSvy` 落库。
+ * 此前这切片在 OppPage 的 useState 里，切页即丢 —— 报价单落库了、勘察却没落，
+ * 回到商机详情那条勘察连同 quoteId 一起消失。
+ * ================================================================== */
+let svys: Svy[] = JSON.parse(JSON.stringify(SVYS));
+export const getSvys = (oppId?: string) => (oppId ? svys.filter((s) => s.oppId === oppId) : svys);
+/** 保存勘察记录：**同 id 覆盖**（编辑一条已存在的记录不会再前插一条重复行）。 */
+export function addSvy(s: Svy) {
+  const i = svys.findIndex((x) => x.id === s.id);
+  svys = i >= 0 ? svys.map((x, ix) => (ix === i ? s : x)) : [s, ...svys];
+  emit();
+}
+/** 按 id 局部更新（生成报价后只回写 quoteId，不整体覆盖其它字段）。 */
+export function patchSvy(id: string, patch: Partial<Svy>) {
+  svys = svys.map((s) => (s.id === id ? { ...s, ...patch } : s));
+  emit();
+}
+
 /* ============================ 转合同待办交接（双来源） ============================
  * 两个来源共用一个通道，合同新建页按「有 bidId 则投标中标，有 oppId 则商机直签」判定来源标记：
  *   投标中标 —— 投标详情「中标 → 生成合同」；
@@ -734,6 +765,19 @@ export function setPendingSupplement(v: typeof pendingSupplement) {
 export function consumePendingSupplement() {
   const v = pendingSupplement;
   pendingSupplement = null;
+  return v;
+}
+/** 合同方向预选来源（2026-09-29）：供应商页「生成采购合同」→ 新建向导预选采购合同类型并锁定，
+ *  可携带 supplier 名称直接预填相对方。消费式读取：向导读后立即清除，避免下次独立进入也误预选。 */
+let pendingCtDir: { dir: 'purchase'; supplier?: string } | null = null;
+export const getPendingCtDir = () => pendingCtDir;
+export function setPendingCtDir(v: typeof pendingCtDir) {
+  pendingCtDir = v;
+  emit();
+}
+export function consumePendingCtDir() {
+  const v = pendingCtDir;
+  pendingCtDir = null;
   return v;
 }
 
@@ -1019,6 +1063,7 @@ export function resetStore() {
   opps = OPPS.slice();
   oppStages = OPP_STAGE_TPL.map((s) => ({ ...s }));
   quotes = JSON.parse(JSON.stringify(QUOTES));
+  svys = JSON.parse(JSON.stringify(SVYS));
   bids = JSON.parse(JSON.stringify(BIDS));
   items = ITEMS.map((i) => ({ ...i }));
   certs = JSON.parse(JSON.stringify(CERTS));

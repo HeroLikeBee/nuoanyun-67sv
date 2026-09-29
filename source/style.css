@@ -515,6 +515,11 @@ h1, h2, h3, h4 { margin: 0; font-weight: 600; }
 .nc-banner-danger { color: var(--c-danger-deep); background: var(--c-danger-bg); border-color: var(--c-danger-border); }
 .nc-banner-ok { color: var(--c-success-deep); background: var(--c-success-bg); border-color: var(--c-success-border); }
 .nc-banner-actions { margin-left: auto; display: flex; gap: 8px; flex: none; }
+/* 提示条紧贴后面的卡片时没有呼吸感（.nc-banner 自身 margin:0，靠容器给间距；
+   但「项目详情」的两处 banner 与卡片是**平级兄弟**，没有容器兜底 —— 黄条直接压在「项目团队」卡
+   顶边上，蓝色开票提醒也直接贴在 KPI 卡上）。只对「紧邻卡片」这一种签名补 16px，
+   不动别处：项目详情页卡片是 .nc-pjsection，故用相邻兄弟选择器精确命中。 */
+.nc-banner + .nc-pjsection { margin-top: 16px; }
 
 .nc-alert {
   display: flex; align-items: flex-start; gap: 10px;
@@ -2124,14 +2129,22 @@ td.is-num, th.is-num { text-align: right; }
 .nc-done-sub { font-size: 13px; color: var(--ink-3); }
 
 /* ---- 操作清单（更多操作下拉面板） ---- */
-.nc-oplist { display: flex; flex-direction: column; padding: 4px; min-width: 150px; }
+.nc-oplist { display: flex; flex-direction: column; gap: 2px; padding: 4px; min-width: 150px; }
 .nc-oplist-item {
   display: block; width: 100%; text-align: left;
-  padding: 7px 10px; border: 0; border-radius: var(--r-2);
-  background: transparent; font-size: 13px; color: var(--ink-2); cursor: pointer;
+  padding: 8px 10px; border: 0; border-radius: var(--r-4);
+  background: transparent; font-size: 13px; font-weight: 600; color: var(--ink-1); cursor: pointer;
+  transition: background .15s;
 }
-.nc-oplist-item:hover { background: var(--c-fill-1); color: var(--ink-1); }
+.nc-oplist-item:hover { background: var(--c-primary-weak); color: var(--c-primary); }
+.nc-oplist-item small {
+  display: block; margin-top: 3px;
+  font-size: 12px; font-weight: 400; color: var(--ink-3); line-height: 1.5;
+}
+.nc-oplist-item:hover small { color: var(--ink-2); }
 .nc-oplist-item.is-danger { color: var(--c-danger-deep); }
+.nc-oplist-item.is-danger:hover { background: var(--c-danger-hover); color: var(--c-danger-deep); }
+.nc-oplist-item.is-danger:hover small { color: var(--c-danger-deep); }
 .nc-dropmenu-wrap { position: relative; display: inline-block; }
 
 /* ---- 有效性胶囊（税率口径 / 分级路由） ---- */
@@ -2299,6 +2312,9 @@ td.is-num, th.is-num { text-align: right; }
 .nc-prog-cell { display: flex; align-items: center; gap: 8px; }
 .nc-prog-cell .nc-progress { flex: 1; min-width: 46px; }
 .nc-prog-cell .num { white-space: nowrap; }
+/* 资金进度列的「收 / 付」方向标：采购与销售合同同列展示时区分口径（收=蓝 / 付=橙，与类型 Tag 同色系） */
+.nc-prog-dir { flex: none; width: 16px; height: 16px; line-height: 16px; text-align: center; border-radius: 4px; font-size: 11px; font-weight: 600; color: var(--c-primary); background: rgba(24, 144, 255, .1); }
+.nc-prog-dir.is-pay { color: var(--c-warning-deep); background: rgba(250, 173, 20, .12); }
 
 /* ---- 快捷条（随角色变化，替代原底部 fixed quick-bar） ---- */
 .nc-quickbar {
@@ -2400,6 +2416,58 @@ td.is-num, th.is-num { text-align: right; }
   display: flex; gap: 8px; align-items: center; flex-wrap: wrap; background: var(--c-canvas);
 }
 .nc-d2-foot .spacer { flex: 1; }
+/* 底栏内的「更多 ⋯」（OpMore）与一排 .nc-btn 并排：.nc-op 默认是无描边的蓝色文字链（≈23px），
+   夹在 32px 的实底按钮里既矮一截又跳色 —— 在 .nc-d2-foot 内按 .nc-btn 默认态按钮化，
+   与同栏「操作记录 / 项目全景」同高同色。只作用于底栏，表格操作列 / 行内 .nc-op 保持文字态。 */
+.nc-d2-foot .nc-op-more {
+  height: 32px; padding: 0 16px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  border: 1px solid var(--c-hairline-strong); border-radius: var(--r-md);
+  background: var(--c-canvas); color: var(--ink);
+  font-size: 14px; white-space: nowrap;
+  transition: color .15s, border-color .15s, background .15s, box-shadow .15s;
+}
+.nc-d2-foot .nc-op-more:hover:not(:disabled):not([disabled]) {
+  opacity: 1; color: var(--c-primary); border-color: var(--c-primary);
+}
+.nc-d2-foot .nc-op-more:disabled, .nc-d2-foot .nc-op-more[disabled] {
+  color: rgba(0, 0, 0, .25); border-color: var(--c-hairline); background: var(--c-surface-soft);
+}
+
+/* ---- 内容模块卡片（合同详情「详细信息」Tab） ----
+   一个 .nc-modcard = 一个内容模块：标题（.nc-sec-title）+ 内容同卡。
+   与 ui.tsx 的 Card / 项目中心 PjSection 同口径（白底 / 1px 描边 / 8px 圆角 / 16px 内边距），
+   使同页各模块外观与间距完全统一。
+   ⚠️ 故意不复用 .nc-sec-block —— 那个类名在 SettingsPage 有 7 处当「分隔横线」用
+   （margin-top + border-top），与之共用会让系统设置页长出卡片边框。 */
+.nc-modcard {
+  background: var(--c-canvas);
+  border: 1px solid var(--c-hairline);
+  border-radius: var(--r-lg);
+  padding: 16px;
+  margin-bottom: 16px;
+}
+.nc-modcard:last-child { margin-bottom: 0; }
+/* 卡内标题：蓝竖条 + 单行文字（无图标）。
+   竖条 3px 主色，高度贴文字、垂直居中；标题与正文之间留 12px 呼吸。 */
+.nc-modcard > .nc-sec-title {
+  margin: 0 0 12px;
+  padding-left: 10px;
+  border-left: 3px solid var(--c-primary);
+  min-height: 20px;
+  line-height: 20px;
+}
+/* 标题右侧带操作按钮时（如「基本信息 编辑」）：按钮右靠，标题文字不换行 */
+.nc-modcard > .nc-sec-title > .nc-btn,
+.nc-modcard > .nc-sec-title > .nc-tag { flex: none; }
+/* 标题右侧操作组（多个按钮）：整体右靠，内部等距 */
+.nc-sec-title-ops { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: none; }
+/* 嵌套标题（如「相对方信息」下的子块）：同样的蓝竖条口径，上下节奏更松 */
+.nc-modcard .nc-modcard > .nc-sec-title {
+  margin: 16px 0 8px;
+  padding-left: 10px;
+  border-left: 3px solid var(--c-primary);
+}
 
 /* ---- 汇总条 / 说明条 ---- */
 .nc-sum-strip {
@@ -2623,8 +2691,8 @@ td.is-num, th.is-num { text-align: right; }
 /* ==========================================================================
    项目经营中心（复刻 项目详情.html）
    ========================================================================== */
-.nc-pjtitle { font-size: 20px; font-weight: 600; color: var(--ink); }
-.nc-pjtrace { font-size: 12px; color: var(--ink-2); }
+/* 2026-09-29：项目详情页头已改挂合同详情 .nc-d2-head 口径（编号 .nc-d2-id + 名称 .nc-d2-name），
+   原 .nc-pjtitle（20px 独立标题）随之废止，此处不再保留。 */
 
 /* ① 生命周期轴（胶囊 + 箭头） */
 .nc-lifebar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 2px 0 12px; }
@@ -2690,12 +2758,29 @@ td.is-num, th.is-num { text-align: right; }
 /* 成本台账双栏 */
 .nc-overhead { font-size: 12.5px; color: var(--ink-2); background: var(--c-surface-soft); border: 1px solid var(--c-hairline); border-radius: var(--r-md); padding: 7px 12px; margin-bottom: 12px; }
 .nc-ledgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: stretch; }
-.nc-ledhd { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--ink); margin-bottom: 8px; }
+/* 卡片内分区小标题：与 .nc-sec-title 视觉同口径（13px/600 灰字 + 3px 主色左条）。
+   原先这里是黑色无左条，导致「项目详情各子页」与「合同详情各 Tab」同一概念两种长相；
+   统一为灰字 + 蓝条后，全站「卡内小标题」只有一个样子。间距语义保持不变（靠 margin-bottom 收口，
+   不用 .nc-sec-title 的 margin: 16px 0 8px —— 那个会与父容器已有的 16px 节奏叠成 32px）。 */
+/* 卡内二级小标题：灰字 + 13px/600，**无蓝竖条**（蓝条只给外层卡标题，一卡一条）。
+   2026-09-30 由「蓝竖条」改为「纯文字」—— 此前外层卡标题也加了蓝条，同卡出现 2~3 根，视觉打架。 */
+.nc-ledhd {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; font-weight: 600; color: var(--ink-3);
+  margin-bottom: 8px;
+}
 .nc-ledhd > *:last-child { margin-left: auto; }
+/* 计数徽标 / 标签不得被压成竖排文字 */
+.nc-ledhd > b, .nc-ledhd > .nc-tag { flex: 0 0 auto; }
 /* 末位靠右是为「标题 …… Tip / 操作按钮」设计的。若末位是计数徽标（标题 <b>N</b>，后面没有 Tip），
    在左右分栏里会被推到栏位右缘，紧贴邻栏标题 —— 左栏的「1」与右栏的「付款类 · 采购 / 分包合同」
    挨在一起，读起来像右栏的一部分。计数属于标题，留在标题旁即可。 */
 .nc-2col .nc-ledhd > b:last-child { margin-left: 0; }
+/* 卡内子块标题（Card sub）：外层卡（PjSection / Card sec）内嵌套子块的标题 ——
+   13px/600 灰字、无蓝竖条。蓝条一卡一根、只给外层卡标题；与 .nc-ledhd 同口径，
+   但不带「末位推右」规则，只有单个标题时不会跑偏；extra 走 .nc-subhd-extra 靠右。 */
+.nc-subhd { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--ink-3); margin: 0 0 8px; }
+.nc-subhd > .nc-subhd-extra { margin-left: auto; display: flex; align-items: center; font-weight: 400; }
 .nc-typebars { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
 .nc-typebar { display: grid; grid-template-columns: 62px minmax(0, 1fr) 68px; align-items: center; gap: 8px; font-size: 11.5px; color: var(--ink-2); }
 .nc-typebar > span:last-child { text-align: right; font-size: 11.5px; color: var(--ink); }
@@ -2788,6 +2873,8 @@ td.is-num, th.is-num { text-align: right; }
 
 /* 基础信息 13 字段（查看态 / 编辑态共用 4 列栅格） */
 .nc-desc-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px 20px; }
+/* 三列变体：相对方信息（客户名称 / 法定代表人 / 电话 · 地址 / 开户行 / 银行账号）3×2 */
+.nc-desc-grid.is-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .nc-desc-item { min-width: 0; }
 .nc-desc-2 { grid-column: span 2; }
 .nc-desc-label { font-size: 12px; color: var(--ink-3); margin-bottom: 2px; }
@@ -2837,6 +2924,7 @@ td.is-num, th.is-num { text-align: right; }
 @media (max-width: 1280px) {
   .nc-stat5 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .nc-desc-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .nc-desc-grid.is-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .nc-form-grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
@@ -4082,14 +4170,21 @@ tr.is-warn-row td, tr.is-danger-row td, tr.trig-hit td,
    项目详情 · 总览区（版式：经营概览条 → 风险标签条 → 常用动作 → 页级提示 → 分区分卡）
    ========================================================================== */
 
-/* ---- 经营概览条：4 格等分，竖线分隔，整格可点 ----
-   绝对值只在此处出现一次，下方各分区只承载差额 / 比率，避免同名指标两处口径。 */
+/* ---- 经营读数条：一行一组，组内等分 ----
+   绝对值只在此处出现一次，下方各分区只承载差额 / 比率，避免同名指标两处口径。
+   组分两行（金额 4 格 / 执行 2 格）：切换 Tab 后格数会变（如检测类项目无施工进度），
+   固定 4 列会把余数格推到第二行并各自撑满半行，故由组数而非总格数决定列数。 */
 .nc-ovstrip {
   display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
   background: var(--c-canvas); border: 1px solid var(--c-hairline);
-  border-radius: var(--r-lg); margin-top: 12px; overflow: hidden;
+  border-radius: var(--r-lg); overflow: hidden;
   box-shadow: 0 1px 2px rgba(0,0,0,.03), 0 2px 8px rgba(0,0,0,.04);
 }
+.nc-ovstrip + .nc-ovstrip { margin-top: 12px; }
+/* 执行组只有进度 / 质量两格：各占 1/4 宽，与上行 4 格金额逐列对齐，条内不空转 */
+.nc-ovstrip[data-grp="exec"] { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.nc-ovstrip[data-grp="exec"] .nc-ovcell { grid-column: span 2; }
+.nc-ovstrip[data-grp="exec"] .nc-ovcell + .nc-ovcell { border-left: 1px solid var(--c-hairline); }
 .nc-ovcell {
   position: relative; min-width: 0; text-align: left;
   padding: 12px 18px; background: none; border: 0; font: inherit;
@@ -4098,11 +4193,13 @@ tr.is-warn-row td, tr.is-danger-row td, tr.trig-hit td,
 .nc-ovcell + .nc-ovcell { border-left: 1px solid var(--c-hairline); }
 button.nc-ovcell { cursor: pointer; }
 button.nc-ovcell:hover { background: #f5f7fa; }
-.nc-ovcell-k { font-size: 12px; color: var(--ink-3); display: flex; align-items: center; gap: 6px; }
+/* 三行文字的字号 / 字重 / 颜色与合同详情统计卡（.nc-stat5-hd / -amt / -foot）逐项对齐：
+   标签 12px 次级灰、主数值 20px 700 等宽数字、脚注 11px 三级灰。 */
+.nc-ovcell-k { font-size: 12px; color: var(--ink-2); display: flex; align-items: center; gap: 6px; }
 .nc-ovcell-k .nc-drill { margin-left: auto; opacity: 0; transition: opacity .15s; }
 button.nc-ovcell:hover .nc-drill, button.nc-ovcell:focus-visible .nc-drill { opacity: 1; }
-.nc-ovcell-v { font-size: 22px; line-height: 30px; font-weight: 700; color: var(--ink); }
-.nc-ovcell-sub { font-size: 11.5px; color: var(--ink-3); }
+.nc-ovcell-v { font-size: 20px; line-height: 1.2; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
+.nc-ovcell-sub { font-size: 11px; color: var(--ink-3); }
 
 /* ---- 常用动作行（原落在 ⋯更多 里的高频登记动作前置） ---- */
 .nc-actbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
@@ -4125,11 +4222,15 @@ button.nc-ovcell:hover .nc-drill, button.nc-ovcell:focus-visible .nc-drill { opa
   .nc-ovstrip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .nc-ovcell:nth-child(3) { border-left: 0; }
   .nc-ovcell:nth-child(n + 3) { border-top: 1px solid var(--c-hairline); }
+  /* 执行组两格在窄屏各占 1/2（2 列栅格下 span 2 会退化成整行） */
+  .nc-ovstrip[data-grp="exec"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .nc-ovstrip[data-grp="exec"] .nc-ovcell { grid-column: auto; }
   .nc-prjprog { grid-template-columns: 1fr; }
 }
 @media (max-width: 640px) {
-  .nc-ovstrip { grid-template-columns: 1fr; }
-  .nc-ovcell + .nc-ovcell { border-left: 0; border-top: 1px solid var(--c-hairline); }
+  .nc-ovstrip, .nc-ovstrip[data-grp="exec"] { grid-template-columns: 1fr; }
+  .nc-ovcell + .nc-ovcell,
+  .nc-ovstrip[data-grp="exec"] .nc-ovcell + .nc-ovcell { border-left: 0; border-top: 1px solid var(--c-hairline); }
 }
 
 /* ============================ 合同详情独立页（由抽屉迁移） ============================ */
@@ -4163,15 +4264,38 @@ button.nc-ovcell:hover .nc-drill, button.nc-ovcell:focus-visible .nc-drill { opa
    概览页与其他子页吃满剩余高度后在内容区整页滚动（层级固定、内容独立滚动）。
    ========================================================================== */
 
-/* ---- 二级导航条：附着在内容区顶部，不随内容滚动 ---- */
+/* ---- 二级导航条：附着在内容区顶部，不随内容滚动 ----
+   11/13-Tab 统一骨架后 WB / JC 页签可能超宽：整行不换行，页签条内部横向滚动。 */
 .nc-pjnav {
-  flex: none; display: flex; align-items: center; flex-wrap: wrap; gap: 10px;
+  flex: none; display: flex; align-items: center; flex-wrap: nowrap; gap: 10px;
   margin-top: 12px; padding: 6px 10px;
   background: var(--c-canvas); border: 1px solid var(--c-hairline);
   border-radius: var(--r-lg); box-shadow: 0 1px 2px rgba(0,0,0,.03);
+  overflow-x: auto; overflow-y: hidden;
 }
-.nc-pjnav-lb { font-size: 12px; color: var(--ink-3); margin-left: 4px; }
-.nc-pjnav .nc-tabs { border-bottom: 0; }
+/* 导航条只放页签，不再放「项目视图」标签与「更新于」——更新时间已回落到各卡页头（按数据源就近） */
+.nc-pjnav .nc-ptabs { flex: 0 0 auto; flex-wrap: nowrap; border-bottom: 0; }
+.nc-pjnav .nc-ptab { white-space: nowrap; }
+/* 导航条内加下拉/右键等窄屏缩略手段时，用「更多 ⋯」收纳尾部页签，避免整条横向滚动藏入口 */
+.nc-pjnav-more { flex: none; margin-left: auto; }
+
+/* ---- 甘特图（项目进度页）：行 = 里程碑，条 = 上一节点计划日 → 本节点计划日，竖线 = 今日 ---- */
+.nc-gantt { padding: 4px 2px 0; }
+.nc-gantt-grid { position: relative; }
+.nc-gantt-vline { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--c-hairline); }
+.nc-gantt-today { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--c-primary); z-index: 1; }
+.nc-gantt-row { position: relative; display: flex; align-items: center; gap: 10px; padding: 5px 0; z-index: 2; }
+.nc-gantt-n { flex: 0 0 168px; font-size: 12px; color: var(--ink-2); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nc-gantt-track { position: relative; flex: 1 1 auto; height: 14px; }
+.nc-gantt-bar { position: absolute; top: 2px; height: 10px; border-radius: 5px; min-width: 6px; }
+.nc-gantt-bar.is-done { background: var(--c-success); opacity: .8; }
+.nc-gantt-bar.is-cur { background: var(--c-primary); opacity: .9; }
+.nc-gantt-bar.is-wait { background: var(--ink-4, #cbd5e1); opacity: .55; }
+.nc-gantt-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; vertical-align: middle; margin-right: 2px; }
+.nc-gantt-dot.is-done { background: var(--c-success); }
+.nc-gantt-dot.is-cur { background: var(--c-primary); }
+.nc-gantt-dot.is-wait { background: var(--ink-4, #cbd5e1); }
+.nc-gantt-dot.is-today { background: transparent; border: 2px solid var(--c-primary); width: 6px; height: 6px; }
 
 /* ---- 内容区：吃满剩余高度后内部滚动，页头与导航条常驻 ---- */
 .nc-pjbody {
@@ -4181,6 +4305,45 @@ button.nc-ovcell:hover .nc-drill, button.nc-ovcell:focus-visible .nc-drill { opa
 /* 子页根容器：flex 子项必须显式 flex:0 0 auto —— 否则 overflow 子项最小尺寸判为 0，
    内容超视口时会被压扁裁切（本项目踩过：434px → 2px）。 */
 .nc-pjsection { flex: 0 0 auto; }
+
+/* ---- 子页标题行：蓝竖条标题 + 右上角操作 / 摘要（与合同详情卡片同一口径） ----
+   竖条与灰字由内层 .nc-sec-title 提供（见 style.css 基础规则）；
+   本层只负责「标题左、操作右」的一行排布：标题 flex:0 1 auto + 操作 margin-left:auto，
+   不用 space-between（两子元素时会把标题与操作拉到两端，中间留大片空白）。 */
+.nc-pjsec-title { display: flex; align-items: flex-start; gap: 12px; padding: 0 0 12px; }
+.nc-pjsec-title > .nc-sec-title { flex: 0 1 auto; margin: 0; min-width: 0; }
+.nc-pjsec-title-extra { margin-left: auto; display: flex; align-items: center; flex: 0 0 auto; }
+.nc-pjsec-title-extra > * { margin-left: 0; }
+/* 头体之间合计 16px（头 12 + 体 4），与 .nc-card-hd + .nc-card-bd 同节奏；
+   不补则 .nc-card-bd 的默认 padding-top:12px 会生效，合计变成 24px、明显偏松。 */
+.nc-pjsec-title + .nc-card-bd { padding-top: 4px; }
+
+/* ---- 项目详情骨架对齐合同详情（面包屑 / 页头 / 导航条 / 内容区 / 底部操作栏） ----
+   项目详情已改用合同详情同一套 .nc-d2-* 结构，本段只补齐两者残余差异：
+   导航条与内容区的间距与内边距一律取 .nc-d2-tabs / .nc-d2-body 的口径
+   （导航条 padding 12px 20px 0 且不带边框圆角；内容区 padding 16px 20px）。
+   全部限定在 .nc-pjpage 作用域内 —— .nc-pjnav / .nc-pjbody 在其它页面不受影响。 */
+.nc-pjpage > .nc-pjnav {
+  margin-top: 0; padding: 12px 20px 0;
+  border: 0; border-radius: 0; box-shadow: none; background: transparent;
+}
+.nc-pjpage > .nc-pjbody { margin-top: 0; padding: 16px 20px; }
+
+.nc-pjsplit-main { min-width: 0; }
+
+/* ---- 风险与待办：台账表（原来一条横幅一行，条目多时纵向过长） ----
+   操作列是卡内最右一列，给足宽度并禁止换行，否则按钮会被卡右内边距裁掉半个字。 */
+.nc-risk-tbl th:last-child, .nc-risk-tbl td:last-child { white-space: nowrap; }
+.nc-risk-tbl td { vertical-align: middle; }
+.nc-risk-tbl .nc-risk-k {
+  display: inline-block; padding: 1px 8px; border-radius: 999px; border: 1px solid;
+  font-size: 12px; font-weight: 600; white-space: nowrap;
+}
+.nc-risk-tbl .nc-risk-k.is-red { background: var(--c-danger-bg); border-color: var(--c-danger-border); color: var(--c-danger); }
+.nc-risk-tbl .nc-risk-k.is-orange { background: var(--c-warning-bg); border-color: var(--c-warning-border); color: var(--c-warning-mid); }
+.nc-risk-tbl .nc-risk-k.is-gold { background: var(--c-notice-bg); border-color: var(--c-notice-border); color: var(--c-warning-mid); }
+.nc-risk-tbl .nc-risk-now { color: var(--ink); }
+.nc-risk-tbl .nc-risk-aim { color: var(--ink-3); font-size: 12.5px; }
 
 /* ---- 概览页：三列摘要 + 风险待办 + 业务域入口 ---- */
 .nc-pjsplit { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.05fr) minmax(0, 1fr); gap: 16px; align-items: start; }

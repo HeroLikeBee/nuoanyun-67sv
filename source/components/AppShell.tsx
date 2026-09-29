@@ -1,5 +1,5 @@
 // 诺安云 6.0 · 应用外壳
-// 顶栏（品牌 + 13 模块 Tab + 右侧工具区）+ 页签栏（可关闭）+ 侧栏（7 组 18 项）+ 内容区
+// 顶栏（品牌 + 9 模块 Tab + 右侧工具区）+ 页签栏（可关闭）+ 侧栏（9 组 20 项）+ 内容区
 import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
   BIDS, MENU, MODULE_TABS, RECEIVABLES, ROLES, PAGE_META, PAGE_PARENT,
@@ -47,6 +47,9 @@ export default function AppShell({ page, onNavigate, role, onRoleChange, pending
      改为按 id 显式取，并最终回落到数组首项。 */
   const cur = ROLES.find((r) => r.id === role) || ROLES.find((r) => r.id === 'sysadmin') || ROLES[0];
   const activeMenu = PAGE_PARENT[page] || page;
+  /* 顶栏模块 Tab 激活：按当前页所属侧栏分组判定（PAGE_META.group 与 MODULE_TABS.name 同名一一对应），
+     子页经 PAGE_PARENT 归属父菜单所在模块。页面不在 PAGE_META 时兜底驾驶舱，顶栏始终有激活模块。 */
+  const activeGroup = PAGE_META[activeMenu]?.group ?? '驾驶舱';
 
   // 页面变化时累加页签（首页固定 + 最多 8 个）
   useEffect(() => {
@@ -168,9 +171,9 @@ export default function AppShell({ page, onNavigate, role, onRoleChange, pending
             {MODULE_TABS.map((t) => (
               <button
                 key={t.id}
-                className={`nc-tab${t.id === 'biz' ? ' is-active' : ''}${t.disabled ? ' is-disabled' : ''}`}
-                title={t.disabled ? `${t.name}（${t.note}，本轮范围外）` : `${t.name}（${t.note}）`}
-                onClick={() => { if (!t.disabled) onNavigate('dashboard'); }}
+                className={`nc-tab${t.name === activeGroup ? ' is-active' : ''}${t.disabled ? ' is-disabled' : ''}`}
+                title={`${t.name}（${t.note}）`}
+                onClick={() => { if (!t.disabled) onNavigate(t.target); }}
               >{t.name}</button>
             ))}
           </nav>

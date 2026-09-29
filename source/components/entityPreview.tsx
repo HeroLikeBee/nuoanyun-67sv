@@ -52,8 +52,6 @@ function SupplierDetail({ id, role }: { id: string; role: string }) {
 function OppDetail({ id, role }: { id: string; role: string }) {
   const o = getOpps().find((x) => x.id === id) ?? OPPS.find((x) => x.id === id);
   if (!o) return <div className="nc-empty-mini">未找到商机 {id}</div>;
-  const oppQuotes = getQuotes().filter((q) => q.opp === id);
-  const oppBids = getBids().filter((b) => b.opp === id);
   return (
     <>
       <Banner tone="info">只读预览 · 完整跟进 / 推进操作请进入商机管理页</Banner>
@@ -71,15 +69,6 @@ function OppDetail({ id, role }: { id: string; role: string }) {
           { k: '最近跟进', v: `${o.last}（${o.lastDays} 天前）` },
           ...(o.status === '输单' ? [{ k: '输单原因', v: `${o.loseReason ?? '—'}${o.loseCompetitor ? ` · 输给 ${o.loseCompetitor}` : ''}` }] : []),
         ]} cols={2} />
-      </Card>
-      <Card hd="关联业务">
-        <div className="nc-cell-sub" style={{ marginBottom: 8 }}>
-          关联报价 {oppQuotes.length} 单 · 关联投标 {oppBids.length} 单
-        </div>
-        {oppQuotes.length > 0 && oppQuotes.map((q) => (
-          <div key={q.id} className="nc-refrow"><div className="nc-refname"><Code>{q.id}</Code> {q.name}<div className="nc-cell-sub">{q.ver} · {q.status}</div></div><span className="nc-refval num"><Money v={q.total} role={role} wan /></span></div>
-        ))}
-        {oppQuotes.length === 0 && oppBids.length === 0 && <div className="nc-cell-sub">暂无关联报价 / 投标</div>}
       </Card>
     </>
   );

@@ -22,29 +22,42 @@ export const ROLES = [
   { id: 'sysadmin', name: '超级管理员', icon: 'gear', desc: '口径维护 · 异常处置' },
   /* 仓管：库存作业（入库/领用/退料/盘点/调拨）可写，主数据只读 */
   { id: 'warehouse', name: '仓管', icon: 'swap', desc: '入库领用退料盘点调拨 · 主数据只读' },
+  /* 作业协同角色（2026-09-29 模块收敛评审补齐）：系统定位是经营管理系统，作业执行在外部系统，
+     这四个角色承载经营侧协同（任务签收 / 报告提交 / 隐患跟踪 / 外部只读），不做作业执行。 */
+  { id: 'wbtech', name: '维保技术员', icon: 'wrench', desc: '巡检任务签收 · 维保回填' },
+  { id: 'jceng', name: '检测工程师', icon: 'search', desc: '检测作业协同 · 报告编制提交' },
+  { id: 'safety', name: '安全管理员', icon: 'shield', desc: '隐患台账 · 整改跟踪' },
+  { id: 'extview', name: '监管/业主（只读）', icon: 'book', desc: '外部只读 · 报告与整改查看' },
 ];
 
-/* ============================ 顶栏 13 模块 Tab（仅「经营管理」可点） ============================ */
+/* ============================ 顶栏 8 模块 Tab（7 业务模块 + 系统设置 · 2026-09-29 菜单重建同步） ============================
+ * 模块口径与侧栏分组一一对应（销售管理 / 资质与档案 / 履约交付 / 供应链与物料 / 财务管理）。
+ * 收敛依据 .spec/reviews/module-structure-review-2026-09-28.md §4.2：
+ *  - 删 6 个物联死壳（项目概况/调度中心/联网监测/工程管理/应急管理/运营监测）——与本系统「经营管理」定位不符；
+ *  - 删 2 个合并残留（工作台→驾驶舱、物品管理→供应链/物料）；
+ *  - 数据报表（报表职能在驾驶舱）/ 知识中心（并入文档中心）/ 平台配置（并入系统设置）暂不启用；
+ *  - 每个模块对应一个侧栏分组，target = 点击后落地的首菜单页。 */
 export const MODULE_TABS = [
-  { id: 'proj-overview', name: '项目概况', disabled: true, note: '物联模块' },
-  { id: 'dispatch', name: '调度中心', disabled: true, note: '物联模块' },
-  { id: 'iot-monitor', name: '联网监测', disabled: true, note: '物联模块' },
-  { id: 'workbench-mod', name: '工作台', disabled: true, note: '已合并入本模块「驾驶舱」（角色视角在页内切换）' },
-  { id: 'engineering', name: '工程管理', disabled: true, note: '物联模块' },
-  { id: 'goods', name: '物品管理', disabled: true, note: '物料 / 服务 / 套件已归入经营管理 · 供应链管理' },
-  { id: 'biz', name: '经营管理', disabled: false, note: '唯一业务模块，承载 6 组侧栏菜单' },
-  { id: 'reports', name: '数据报表', disabled: true, note: '第二批' },
-  { id: 'knowledge', name: '知识中心', disabled: true, note: '第二批' },
-  { id: 'emergency', name: '应急管理', disabled: true, note: '物联模块' },
-  { id: 'platform', name: '平台配置', disabled: true, note: '第二批' },
-  { id: 'ops', name: '运营监测', disabled: true, note: '物联模块' },
-  { id: 'system', name: '系统管理', disabled: true, note: '第二批' },
+  { id: 'dashboard', name: '驾驶舱', disabled: false, note: '经营全局 · 角色视角 · 审批收口', target: 'dashboard' },
+  { id: 'sales', name: '销售管理', disabled: false, note: '客户 · 商机 · 报价 · 投标', target: 'customer' },
+  { id: 'qualification', name: '资质与档案', disabled: false, note: '证书闸门 · 文档中心 · 隐患整改', target: 'cert' },
+  { id: 'fulfill', name: '履约交付', disabled: false, note: '合同 · 项目 · 考勤 · 审批', target: 'contract' },
+  { id: 'supply-material', name: '供应链与物料', disabled: false, note: '供应商 · 物料 · 库存 · 寻源 · 认证', target: 'supplier' },
+  { id: 'finance', name: '财务管理', disabled: false, note: '发票 · 红冲 · 税额', target: 'invoice' },
+  { id: 'system', name: '系统设置', disabled: false, note: '字典 · 审批规则 · 权限', target: 'settings' },
 ];
 
-/* ============================ 侧栏 7 组 18 项（工作台已合并入驾驶舱；供应链组 5 项：供应商 / 物料主数据 / 库存 / 寻源 / 认证与报告） ============================ */
+/* ============================ 侧栏 6 组 15 项（2026-09-29 按目标菜单重建）
+   分组口径：驾驶舱 · 销售管理 · 资质与档案 · 履约交付 · 供应链与物料 · 财务管理 · 系统设置。
+   与旧结构的三点差异：
+    ① 销售不再拆「商机与投标 / 报价与合同」两组，客户/商机/报价/投标四页合并为「销售管理」；
+    ② 「履约交付」= 合同 + 项目 + 考勤 + 审批中心（审批中心随履约节奏走，不再挂驾驶舱）；
+    ③ 供应链与物料合并成一组（供应商 / 物料主数据 / 库存管理 / 采购寻源 / 认证与报告）。
+   ⚠️ project-center 已从 MENU 移除（侧栏不再有独立入口），但**路由与 12 处下钻跳转全部保留**
+      —— 进入路径改为「项目管理」页内点击具体项目，口径同 material-kit 的兜底路由。 ============================ */
 // roles：菜单可见角色白名单（缺省 = 全角色可见）。总经理默认包含在所有菜单 → 与截图全量菜单一致；
 // 切换角色后无权限菜单自动隐藏（A-01 权限裁剪），徽标数值由业务数据派生（见 AppShell）。
-const ALL_ROLES = ['boss', 'deputy', 'sales', 'pm', 'finance', 'admin', 'contractadmin', 'bidlead', 'docadmin', 'sysadmin'];
+const ALL_ROLES = ['boss', 'deputy', 'sales', 'pm', 'finance', 'admin', 'contractadmin', 'bidlead', 'docadmin', 'sysadmin', 'wbtech', 'jceng', 'safety', 'extview'];
 /** 物料域可见角色：5 个二级菜单共用同一份白名单，避免逐个抄漏导致「有的进得来有的进不来」 */
 const MATERIAL_ROLES = ['boss', 'deputy', 'pm', 'finance', 'contractadmin', 'docadmin', 'sysadmin', 'warehouse'];
 export const MENU: {
@@ -56,7 +69,7 @@ export const MENU: {
   }[];
 }[] = [
   {
-    group: '工作台',
+    group: '驾驶舱',
     items: [
       { id: 'dashboard', label: '驾驶舱', icon: 'chart', roles: ALL_ROLES },
     ],
@@ -71,34 +84,28 @@ export const MENU: {
     ],
   },
   {
-    group: '资质与档案',
-    items: [
-      { id: 'cert', label: '证书管理', icon: 'scroll', badgeKey: 'cert', roles: ['boss', 'deputy', 'pm', 'admin', 'bidlead', 'sysadmin'] },
-      { id: 'doc', label: '文档中心', icon: 'folder', roles: ALL_ROLES },
-    ],
-  },
-  {
+    /* 履约交付 = 合同签订后的执行链路（合同 → 项目 → 用工考勤 → 审批收口）。
+       ⚠️ project-center（项目经营中心）已移除侧栏入口，改由「项目管理」页内点击项目进入。 */
     group: '履约交付',
     items: [
       { id: 'contract', label: '合同管理', icon: 'receipt', roles: ['boss', 'deputy', 'sales', 'pm', 'finance', 'contractadmin', 'sysadmin'] },
-      { id: 'project', label: '项目管理', icon: 'building', roles: ['boss', 'deputy', 'pm', 'finance', 'sysadmin'] },
-      { id: 'attendance', label: '考勤管理', icon: 'clipboard', roles: ['boss', 'deputy', 'pm', 'finance', 'sysadmin'] },
-      /* 审批中心：各业务页提交的审批统一收口到这里（四 Tab：待我审批 / 我已审批 / 我发起的 / 抄送我的）。
-         全角色可见 —— 每个人都会有「我发起的」与「抄送我的」。 */
+      { id: 'project', label: '项目管理', icon: 'building', roles: ['boss', 'deputy', 'pm', 'finance', 'sysadmin', 'wbtech', 'jceng', 'safety', 'extview'] },
+      /* 考勤管理：外包用工月度矩阵，人工成本的唯一归集来源（项目成本页只读消费）。
+         可见角色 = 金额可见六角色 + 现场作业三角色（wbtech/jceng/safety 需在现场录入）；
+         extview（外部只读）不进 —— 按 M10「可见即可写」，只读角色不给考勤写权限。 */
+      { id: 'attendance', label: '考勤管理', icon: 'clock', roles: ['boss', 'deputy', 'pm', 'finance', 'contractadmin', 'sysadmin', 'wbtech', 'jceng', 'safety'] },
+      /* 审批中心：各业务页提交的审批统一收口（四 Tab：待我审批 / 我已审批 / 我发起的 / 抄送我的）。
+         随履约节奏走，故挂本组；全角色可见，与驾驶舱「我的待办」同域（待办聚合消费审批角标）。 */
       { id: 'approval', label: '审批中心', icon: 'checkCircle', badgeKey: 'approval', roles: ALL_ROLES },
     ],
   },
   {
-    /**
-     * 供应链管理：与其余分组一样**统一二级**，不再有「物料与资源」三级折叠。
-     * 改造前全站只有这一项带 children，点父级还得再展开一层才能选子页，
-     * 与「文档中心 / 合同管理」等页面的「点即到」手感不一致。
-     */
+    /* 供应链与物料 = 采购泳道 + 仓储泳道 + 物料主数据 + 认证台账
+       （部门命名约定：供应商 / 询比价 / 下单 / 催货 / 考评；认证与报告服务缺证拦截） */
     group: '供应链与物料',
     items: [
       { id: 'supplier', label: '供应商管理', icon: 'package', roles: ['boss', 'deputy', 'pm', 'finance', 'contractadmin', 'sysadmin'] },
       { id: 'material-list', label: '物料主数据', icon: 'module', roles: MATERIAL_ROLES },
-
       { id: 'material-stock', label: '库存管理', icon: 'swap', roles: MATERIAL_ROLES },
       { id: 'material-src', label: '采购寻源', icon: 'card', roles: MATERIAL_ROLES },
       /* 认证与报告：CCCF / 国标 / 型式检验 / 强制标记台账，独立二级菜单页（物料主数据页不再挂认证瓦片） */
@@ -106,8 +113,24 @@ export const MENU: {
     ],
   },
   {
+    /* 资质与档案：证书闸门 + 文档归档 + 隐患整改——均为横贯全程的资质/合规属性 */
+    group: '资质与档案',
+    items: [
+      { id: 'cert', label: '证书管理', icon: 'scroll', badgeKey: 'cert', roles: ['boss', 'deputy', 'pm', 'admin', 'bidlead', 'sysadmin'] },
+      { id: 'doc', label: '文档中心', icon: 'folder', roles: ALL_ROLES },
+      /* 隐患与整改：六步闭环台账（评审 P0）。wbtech/jceng 签收与提交整改，safety 复核闭环；
+         extview（外部只读）不进菜单——按 M10「可见即可写」口径，外部只读角色的整改查看走项目经营中心。 */
+      { id: 'hazard', label: '隐患与整改', icon: 'shield', roles: ['boss', 'deputy', 'pm', 'safety', 'wbtech', 'jceng', 'sysadmin'] },
+    ],
+  },
+  {
     group: '财务管理',
-    items: [{ id: 'invoice', label: '发票管理', icon: 'coin', roles: ['boss', 'deputy', 'finance', 'sysadmin'] }],
+    items: [
+      { id: 'invoice', label: '发票管理', icon: 'coin', roles: ['boss', 'deputy', 'finance', 'sysadmin'] },
+      /* 应收应付台账：统一收款/付款主体，期次级台账（评审 P1，替代散落三处的应收视图）。
+         白名单与 canSeeMoney 一致——非金额权限角色不进。 */
+      { id: 'fund', label: '应收应付台账', icon: 'card', roles: ['boss', 'deputy', 'finance', 'pm', 'contractadmin', 'sysadmin'] },
+    ],
   },
   {
     group: '系统设置',
@@ -119,7 +142,7 @@ export const MENU: {
 
 /* ============================ 页面注册表（路由 + 页签标题） ============================ */
 export const PAGE_META: Record<string, { title: string; group: string }> = {
-  dashboard: { title: '驾驶舱', group: '工作台' },
+  dashboard: { title: '驾驶舱', group: '驾驶舱' },
   customer: { title: '客户管理', group: '销售管理' },
   opp: { title: '商机管理', group: '销售管理' },
   quote: { title: '报价台账', group: '销售管理' },
@@ -129,6 +152,7 @@ export const PAGE_META: Record<string, { title: string; group: string }> = {
   'bid-detail': { title: '投标详情', group: '销售管理' },
   cert: { title: '证书管理', group: '资质与档案' },
   doc: { title: '文档中心', group: '资质与档案' },
+  hazard: { title: '隐患与整改', group: '资质与档案' },
   contract: { title: '合同管理', group: '履约交付' },
   'contract-new': { title: '新建合同', group: '履约交付' },
   'contract-detail': { title: '合同详情', group: '履约交付' },
@@ -146,6 +170,7 @@ export const PAGE_META: Record<string, { title: string; group: string }> = {
   'material-src': { title: '采购寻源', group: '供应链与物料' },
   'material-cert': { title: '认证与报告', group: '供应链与物料' },
   invoice: { title: '发票管理', group: '财务管理' },
+  fund: { title: '应收应付台账', group: '财务管理' },
   settings: { title: '系统设置', group: '系统设置' },
 };
 
@@ -168,19 +193,19 @@ export const PAGE_PARENT: Record<string, string> = {
 
 /* ============================ 客户（KH + 6 位流水） ============================ */
 export const CUSTOMERS = [
-  { id: 'KH20260312001', name: '昆明万达广场商业管理有限公司', grade: 'A', status: '成交', industry: '商业综合体', region: '昆明', source: '自主开发', owner: '蓝峰', contact: '王志豪', phone: '138****1101', fullPhone: '13888001101', lastFollow: '2026-09-18', lastFollowDays: 2, dealAmt: 12800000, recv: 1560000, since: '2024-03', note: '决策链：区域总 → 工程部 → 招采' },
-  { id: 'KH20260312002', name: '云南师范大学附属中学', grade: 'A', status: '成交', industry: '教育', region: '昆明', source: '老客户转介绍', owner: '李思敏', contact: '李教授', phone: '138****2203', fullPhone: '13888002203', lastFollow: '2026-09-17', lastFollowDays: 3, dealAmt: 8600000, recv: 430000, since: '2023-09', note: '寒暑假施工窗口，工期敏感' },
-  { id: 'KH20260418003', name: '昆明市第一人民医院', grade: 'A', status: '成交', industry: '医疗', region: '昆明', source: '政府平台招标', owner: '王志海', contact: '张教授', phone: '137****3105', fullPhone: '13788003105', lastFollow: '2026-09-16', lastFollowDays: 4, dealAmt: 9600000, recv: 2800000, since: '2024-06', note: '院感要求高，施工需夜间作业' },
-  { id: 'KH20250902004', name: '楚雄州人民医院', grade: 'A', status: '成交', industry: '医疗', region: '楚雄', source: '属地排查', owner: '赵薇', contact: '刘国栋', phone: '136****4402', fullPhone: '13688004402', lastFollow: '2026-09-12', lastFollowDays: 8, dealAmt: 7800000, recv: 920000, since: '2023-11', note: '州级集采入库供应商' },
-  { id: 'KH20260506005', name: '文山三七产业园管委会', grade: 'B', status: '意向', industry: '园区/政府平台', region: '文山', source: '招投标平台', owner: '刘宇', contact: '陈主任', phone: '138****5506', fullPhone: '13888005506', lastFollow: '2026-09-08', lastFollowDays: 12, dealAmt: 3200000, recv: 0, since: '2026-05', note: '园区二期规划中，2027 年立项' },
-  { id: 'KH20260620006', name: '广西柳州钢铁集团有限公司', grade: 'B', status: '成交', industry: '电力/制造', region: '广西', source: '同行引荐', owner: '赵薇', contact: '徐志强', phone: '187****6606', fullPhone: '18788006606', lastFollow: '2026-09-14', lastFollowDays: 6, dealAmt: 5600000, recv: 1400000, since: '2026-06', note: '省外首个大单，跨区域服务能力验证' },
-  { id: 'KH20260115007', name: '昆明长水国际机场后勤保障部', grade: 'B', status: '成交', industry: '交通枢纽', region: '昆明', source: '老客户转介绍', owner: '蓝峰', contact: '孙飞', phone: '138****7707', fullPhone: '13888007707', lastFollow: '2026-09-15', lastFollowDays: 5, dealAmt: 4200000, recv: 2100000, since: '2026-01', note: '不停航施工，仅夜间作业窗口 4 小时' },
-  { id: 'KH20260728008', name: '曲靖万达广场商业管理有限公司', grade: 'B', status: '意向', industry: '商业综合体', region: '曲靖', source: '招投标平台', owner: '李慧敏', contact: '周总', phone: '137****8804', fullPhone: '13788008804', lastFollow: '2026-09-01', lastFollowDays: 19, dealAmt: 2600000, recv: 0, since: '2026-07', note: '与昆明万达同体系，可复用交付标准' },
-  { id: 'KH20250823009', name: '昆明滇池国家旅游度假区', grade: 'B', status: '成交', industry: '文旅', region: '昆明', source: '政府平台招标', owner: '刘宇', contact: '吴锦锦', phone: '138****9909', fullPhone: '13888009909', lastFollow: '2026-06-20', lastFollowDays: 92, dealAmt: 1800000, recv: 0, since: '2023-08', note: '已结项，2027 年有续保机会' },
-  { id: 'KH20260928010', name: '云南建工集团有限公司', grade: 'C', status: '潜在', industry: '地产', region: '昆明', source: '自主开发', owner: '李慧敏', contact: '赵总', phone: '138****1010', fullPhone: '13888001010', lastFollow: '2026-09-10', lastFollowDays: 10, dealAmt: 0, recv: 0, since: '2026-08', note: '总包分包合作，需先建立信任' },
-  { id: 'KH20260511011', name: '大理古城文旅运营管理有限公司', grade: 'C', status: '潜在', industry: '文旅', region: '大理', source: '行业展会', owner: '李思敏', contact: '杨总', phone: '139****1121', fullPhone: '13988001121', lastFollow: '2026-08-12', lastFollowDays: 39, dealAmt: 0, recv: 0, since: '2026-05', note: '古建消防特殊要求，防火与风貌平衡' },
-  { id: 'KH20260330012', name: '普洱云岭茶业有限公司', grade: 'C', status: '潜在', industry: '其他', region: '普洱', source: '属地排查', owner: '刘宇', contact: '岩温', phone: '139****1222', fullPhone: '13988001222', lastFollow: '2026-09-05', lastFollowDays: 15, dealAmt: 0, recv: 0, since: '2026-03', note: '厂区消防基础薄弱，改造意愿强' },
-  { id: 'KH20260710013', name: '云南××磷化工有限公司', grade: 'B', status: '成交', industry: '化工', region: '安宁', source: '属地排查', owner: '赵薇', contact: '李安环', phone: '138****4418', fullPhone: '13888004418', lastFollow: '2026-09-16', lastFollowDays: 5, dealAmt: 1280000, recv: 384000, since: '2026-07', note: '危化区域动火审批严格，检测需配合停产窗口' },
+  { id: 'KH20260312001', name: '昆明万达广场商业管理有限公司', grade: 'A', status: '成交', industry: '商业综合体', region: '昆明', source: '自主开发', owner: '蓝峰', contact: '王志豪', phone: '138****1101', fullPhone: '13888001101', lastFollow: '2026-09-18', lastFollowDays: 2, dealAmt: 12800000, recv: 1560000, since: '2024-03', note: '决策链：区域总 → 工程部 → 招采', legalRep: '李建成', address: '云南省昆明市西山区前兴路 888 号万达广场 A 座 15 层', bank: '中国建设银行昆明西山区支行', bankAcct: '5300 1234 5678 9000 1122' },
+  { id: 'KH20260312002', name: '云南师范大学附属中学', grade: 'A', status: '成交', industry: '教育', region: '昆明', source: '老客户转介绍', owner: '李思敏', contact: '李教授', phone: '138****2203', fullPhone: '13888002203', lastFollow: '2026-09-17', lastFollowDays: 3, dealAmt: 8600000, recv: 430000, since: '2023-09', note: '寒暑假施工窗口，工期敏感', legalRep: '赵明远', address: '云南省昆明市五华区一二一大街 298 号', bank: '中国工商银行昆明五华支行', bankAcct: '2502 1122 3344 5566 778' },
+  { id: 'KH20260418003', name: '昆明市第一人民医院', grade: 'A', status: '成交', industry: '医疗', region: '昆明', source: '政府平台招标', owner: '王志海', contact: '张教授', phone: '137****3105', fullPhone: '13788003105', lastFollow: '2026-09-16', lastFollowDays: 4, dealAmt: 9600000, recv: 2800000, since: '2024-06', note: '院感要求高，施工需夜间作业', legalRep: '陈立群', address: '云南省昆明市西山区金碧路 157 号', bank: '中国银行昆明金碧路支行', bankAcct: '1302 8899 0011 2233 445' },
+  { id: 'KH20250902004', name: '楚雄州人民医院', grade: 'A', status: '成交', industry: '医疗', region: '楚雄', source: '属地排查', owner: '赵薇', contact: '刘国栋', phone: '136****4402', fullPhone: '13688004402', lastFollow: '2026-09-12', lastFollowDays: 8, dealAmt: 7800000, recv: 920000, since: '2023-11', note: '州级集采入库供应商', legalRep: '刘国栋', address: '云南省楚雄彝族自治州楚雄市鹿城东路 128 号', bank: '中国农业银行楚雄分行营业部', bankAcct: '2101 4567 8899 0011 223' },
+  { id: 'KH20260506005', name: '文山三七产业园管委会', grade: 'B', status: '意向', industry: '园区/政府平台', region: '文山', source: '招投标平台', owner: '刘宇', contact: '陈主任', phone: '138****5506', fullPhone: '13888005506', lastFollow: '2026-09-08', lastFollowDays: 12, dealAmt: 3200000, recv: 0, since: '2026-05', note: '园区二期规划中，2027 年立项', legalRep: '陈文斌', address: '云南省文山壮族苗族自治州文山市开化街道产业园 1 号', bank: '中国农业银行文山分行', bankAcct: '2401 3344 5566 7788 990' },
+  { id: 'KH20260620006', name: '广西柳州钢铁集团有限公司', grade: 'B', status: '成交', industry: '电力/制造', region: '广西', source: '同行引荐', owner: '赵薇', contact: '徐志强', phone: '187****6606', fullPhone: '18788006606', lastFollow: '2026-09-14', lastFollowDays: 6, dealAmt: 5600000, recv: 1400000, since: '2026-06', note: '省外首个大单，跨区域服务能力验证', legalRep: '甘贵平', address: '广西壮族自治区柳州市北雀路 117 号', bank: '中国银行柳州分行营业部', bankAcct: '1380 1122 3344 5566 778' },
+  { id: 'KH20260115007', name: '昆明长水国际机场后勤保障部', grade: 'B', status: '成交', industry: '交通枢纽', region: '昆明', source: '老客户转介绍', owner: '蓝峰', contact: '孙飞', phone: '138****7707', fullPhone: '13888007707', lastFollow: '2026-09-15', lastFollowDays: 5, dealAmt: 4200000, recv: 2100000, since: '2026-01', note: '不停航施工，仅夜间作业窗口 4 小时', legalRep: '孙建平', address: '云南省昆明市官渡区春城路 1 号长水国际机场', bank: '中国建设银行昆明官渡支行', bankAcct: '5301 9900 1122 3344 556' },
+  { id: 'KH20260728008', name: '曲靖万达广场商业管理有限公司', grade: 'B', status: '意向', industry: '商业综合体', region: '曲靖', source: '招投标平台', owner: '李慧敏', contact: '周总', phone: '137****8804', fullPhone: '13788008804', lastFollow: '2026-09-01', lastFollowDays: 19, dealAmt: 2600000, recv: 0, since: '2026-07', note: '与昆明万达同体系，可复用交付标准', legalRep: '周建国', address: '云南省曲靖市麒麟区文昌街 88 号万达广场 B 座', bank: '中国工商银行曲靖麒麟支行', bankAcct: '2509 2233 4455 6677 889' },
+  { id: 'KH20250823009', name: '昆明滇池国家旅游度假区', grade: 'B', status: '成交', industry: '文旅', region: '昆明', source: '政府平台招标', owner: '刘宇', contact: '吴锦锦', phone: '138****9909', fullPhone: '13888009909', lastFollow: '2026-06-20', lastFollowDays: 92, dealAmt: 1800000, recv: 0, since: '2023-08', note: '已结项，2027 年有续保机会', legalRep: '吴锦锦', address: '云南省昆明市西山区滇池路 1288 号', bank: '中国银行昆明滇池路支行', bankAcct: '1351 6677 8899 0011 223' },
+  { id: 'KH20260928010', name: '云南建工集团有限公司', grade: 'C', status: '潜在', industry: '地产', region: '昆明', source: '自主开发', owner: '李慧敏', contact: '赵总', phone: '138****1010', fullPhone: '13888001010', lastFollow: '2026-09-10', lastFollowDays: 10, dealAmt: 0, recv: 0, since: '2026-08', note: '总包分包合作，需先建立信任', legalRep: '赵世坤', address: '云南省昆明市官渡区春城路 155 号建工大厦', bank: '中国建设银行昆明官渡支行', bankAcct: '5305 4455 6677 8899 001' },
+  { id: 'KH20260511011', name: '大理古城文旅运营管理有限公司', grade: 'C', status: '潜在', industry: '文旅', region: '大理', source: '行业展会', owner: '李思敏', contact: '杨总', phone: '139****1121', fullPhone: '13988001121', lastFollow: '2026-08-12', lastFollowDays: 39, dealAmt: 0, recv: 0, since: '2026-05', note: '古建消防特殊要求，防火与风貌平衡', legalRep: '杨海涛', address: '云南省大理白族自治州大理市古城复兴路 68 号', bank: '中国农业银行大理古城支行', bankAcct: '2410 7788 9900 1122 334' },
+  { id: 'KH20260330012', name: '普洱云岭茶业有限公司', grade: 'C', status: '潜在', industry: '其他', region: '普洱', source: '属地排查', owner: '刘宇', contact: '岩温', phone: '139****1222', fullPhone: '13988001222', lastFollow: '2026-09-05', lastFollowDays: 15, dealAmt: 0, recv: 0, since: '2026-03', note: '厂区消防基础薄弱，改造意愿强', legalRep: '岩温罕', address: '云南省普洱市思茅区茶城大道 56 号', bank: '云南省农村信用社普洱思茅支行', bankAcct: '6701 1122 3344 5566 778' },
+  { id: 'KH20260710013', name: '云南××磷化工有限公司', grade: 'B', status: '成交', industry: '化工', region: '安宁', source: '属地排查', owner: '赵薇', contact: '李安环', phone: '138****4418', fullPhone: '13888004418', lastFollow: '2026-09-16', lastFollowDays: 5, dealAmt: 1280000, recv: 384000, since: '2026-07', note: '危化区域动火审批严格，检测需配合停产窗口', legalRep: '李安环', address: '云南省昆明市安宁市草铺工业园区 6 号', bank: '中国工商银行安宁草铺支行', bankAcct: '2506 9900 1122 3344 556' },
 ];
 
 /* ============================ 商机（SJ + 6 位） ============================ */
@@ -241,6 +266,106 @@ export const OPPS = [
   { id: 'SJ000503', name: '大理古城客栈群消防改造', customer: '大理古城文旅运营管理有限公司', customerId: 'KH20260511011', stage: '投标', status: '输单', loseReason: '其他', loseCompetitor: '本地××消防工程公司', amt: 1200000, owner: '李思敏', type: '改造', biz: 'GC', last: '2026-08-12', lastDays: 39, quotes: 1, signDate: '', industry: '文旅' },
   { id: 'SJ000508', name: '普洱茶厂消防设施维护保养', customer: '普洱云岭茶业有限公司', customerId: 'KH20260330012', stage: '签约', status: '输单', loseReason: '价格', loseCompetitor: '普洱××消防服务商', amt: 380000, owner: '刘宇', type: '维护保养', biz: 'WB', last: '2026-07-28', lastDays: 54, quotes: 1, signDate: '', industry: '其他' },
   { id: 'SJ000512', name: '云南××中学消防改造', customer: '××市教育局', stage: '投标', status: '跟进中', amt: 860000, owner: '李强', type: '改造', biz: 'GC', last: '2026-09-20', lastDays: 2, quotes: 0, signDate: '', industry: '教育' },
+];
+
+/* ============================ 商机勘察记录（现场踏勘存档） ============================
+ * 勘察记录是「商机 → 报价单」的上游依据：工程量清单逐行进报价明细。
+ * 此前它只存在 OppPage 的 useState 里 —— 切页即丢；种子还按商机阶段**凭空生成**、
+ * quoteId 写死 BJ000011（那是 SJ000470 的报价单），任何过 gate 的商机都挂着别人的单号。
+ * 现收敛为真正的 store 实体：有勘察的商机才有，quoteId 与真实报价单一一对应。
+ * ================================================================================= */
+/** 工程量行：名称 / 单位取自物料主数据（选料 / 模板库 / OCR 带出），数量现场填，备注默认带参考单价 */
+export type SvyQtyRow = { code: string; n: string; u: string; q: string; r: string };
+export type Svy = {
+  id: string;
+  /** 归属商机（外键 OPPS.id） */
+  oppId: string;
+  at: string; persons: string[]; sys: string; desc: string; photos: number;
+  rows: SvyQtyRow[];
+  /** 已生成报价单号（外键 QUOTES.id）；有值即整条锁定只读（修改 = 新建一条） */
+  quoteId?: string;
+};
+export const SVYS: Svy[] = [
+  {
+    id: 'SRV-2026-470', oppId: 'SJ000470', at: '2026-09-05', persons: ['王志海'], sys: '火灾自动报警系统 / 自动喷淋',
+    desc: '现场踏勘：主机房 2 处、报警回路 24 路；喷洒头原型号 ZSTX-15 老化需全部更换；消防泵房设备需同步改造；弱电井桥架可利用。',
+    photos: 4,
+    rows: [
+      { code: 'EQ000002', n: '感烟探测器', u: '只', q: '860', r: '含底座' },
+      { code: 'CL000145', n: '喷淋头（上喷）', u: '个', q: '1240', r: '下垂型' },
+      { code: 'EQ000001', n: '火灾报警控制器', u: '台', q: '4', r: '2 回路' },
+      { code: 'CL000226', n: '消防水泵接合器', u: '套', q: '6', r: '含止回阀' },
+    ],
+    quoteId: 'BJ000011',
+  },
+  {
+    id: 'SRV-2026-456', oppId: 'SJ000456', at: '2026-09-02', persons: ['蓝峰', '李思敏'], sys: '火灾自动报警系统 / 防排烟系统',
+    desc: '商场营业时段不可停业施工，须夜间分区作业；既有报警主机为海湾 JB-QB 系列，部分回路可保留；防排烟风机控制柜需整体更换。',
+    photos: 6,
+    rows: [
+      { code: 'EQ000001', n: '火灾报警控制器', u: '台', q: '2', r: '夜间安装' },
+      { code: 'CL000233', n: '输入/输出模块', u: '只', q: '180', r: '含底座' },
+      { code: 'CL000177', n: '防火阀', u: '个', q: '64', r: 'FHF-400' },
+      { code: 'CL000201', n: '应急照明灯具', u: '套', q: '320', r: '疏散指示' },
+      { code: 'SV000004', n: '安装调试服务', u: '项', q: '1', r: '含联动调试' },
+    ],
+    quoteId: 'BJ000007',
+  },
+  {
+    id: 'SRV-2026-482', oppId: 'SJ000482', at: '2026-08-18', persons: ['赵薇'], sys: '消防水系统',
+    desc: '厂区管网腐蚀严重，多处砂眼；室外消火栓 32 套需更换；泵房原有 2 台消防泵效率不足，需增设备用泵；施工须避开高炉检修窗口。',
+    photos: 8,
+    rows: [
+      { code: 'CL000123', n: '镀锌钢管', u: '米', q: '2400', r: 'DN100' },
+      { code: 'CL000158', n: '消火栓箱', u: '套', q: '32', r: '含栓阀' },
+      { code: 'CL000226', n: '消防水泵接合器', u: '套', q: '8', r: '含止回阀' },
+      { code: 'SV000003', n: '综合工日-焊工', u: '工日', q: '120', r: '管道焊接' },
+    ],
+    quoteId: 'BJ000001',
+  },
+  {
+    id: 'SRV-2026-495', oppId: 'SJ000495', at: '2026-09-01', persons: ['赵薇'], sys: '全系统',
+    desc: '上年度维保范围内的 12 类设施全部续保；住院楼新增 1 个病区需并入范围；院方要求月度巡检 + 季度联动测试，响应时限 2 小时。',
+    photos: 2,
+    rows: [
+      { code: 'SV000005', n: '消防设施年度维保', u: '年', q: '1', r: '12 类设施' },
+      { code: 'SV000006', n: '消防设施检测', u: '次', q: '4', r: '季度联动' },
+    ],
+    quoteId: 'BJ000004',
+  },
+  {
+    id: 'SRV-2026-461', oppId: 'SJ000461', at: '2026-08-22', persons: ['李思敏'], sys: '火灾自动报警系统 / 应急照明与疏散',
+    desc: '教学楼 3 栋、宿舍楼 2 栋；报警回路 18 路，感烟探测器约 700 只；疏散指示与应急照明老化，需整体更换；只能寒暑假施工。',
+    photos: 5,
+    rows: [
+      { code: 'EQ000002', n: '感烟探测器', u: '只', q: '700', r: '含底座' },
+      { code: 'EQ000001', n: '火灾报警控制器', u: '台', q: '3', r: '联动型' },
+      { code: 'CL000201', n: '应急照明灯具', u: '套', q: '260', r: '疏散指示' },
+      { code: 'SV000004', n: '安装调试服务', u: '项', q: '1', r: '含联动调试' },
+    ],
+    quoteId: 'BJ000002',
+  },
+  {
+    id: 'SRV-2026-478', oppId: 'SJ000478', at: '2026-09-10', persons: ['李慧敏'], sys: '全系统',
+    desc: '商业综合体 6 万㎡，含影院与超市业态；消防设施 9 类；影院区域须闭店后作业；上年度维保由第三方承接，交接资料待补。',
+    photos: 3,
+    rows: [
+      { code: 'SV000005', n: '消防设施年度维保', u: '年', q: '1', r: '9 类设施' },
+      { code: 'SV000006', n: '消防设施检测', u: '次', q: '2', r: '含年度检测' },
+    ],
+    quoteId: 'BJ000021',
+  },
+  {
+    id: 'SRV-2026-475', oppId: 'SJ000475', at: '2026-09-06', persons: ['刘宇'], sys: '火灾自动报警系统',
+    desc: '园区 8 栋厂房 + 1 栋综合楼；需接入物联网平台做远程监控；既有报警主机品牌混杂，须统一协议网关。',
+    photos: 4,
+    rows: [
+      { code: 'SW000001', n: '消防物联网云平台年费', u: '年', q: '3', r: '含运维' },
+      { code: 'SW000002', n: '火灾报警监控软件 V3.0', u: '套', q: '1', r: '含授权' },
+      { code: 'CL000233', n: '输入/输出模块', u: '只', q: '96', r: '协议网关' },
+    ],
+    quoteId: 'BJ000017',
+  },
 ];
 
 /* ============================ 报价（BJ + 6 位流水，5 状态机） ============================ */
@@ -961,10 +1086,87 @@ export type Installment = {
   note?: string;
 };
 
+/**
+ * 付款单（付款类合同的资金流水）—— 与收款类合同的 Installment 对称。
+ * 采购合同的钱是我方付出去的，「应收 / 已收 / 开票」那套期次口径不适用，
+ * 改为挂在合同上的付款单：一笔一行，状态区分 审批中 / 已付款。
+ * 唯一事实源：合同「已付」= Σ 状态为「已付款」的付款单（paidOf），不另存冗余金额字段。
+ */
+export type PaymentOrder = {
+  /** 付款单号，前缀 PF */
+  id: string;
+  /** 事由 */
+  name: string;
+  /** 相对方（供应商 / 分包方） */
+  party: string;
+  /** 付款金额（元） */
+  amt: number;
+  /** 类型：采购付款 / 分包付款 / 费用付款 … */
+  type: string;
+  /** 状态：审批中 / 已付款 / 已驳回 */
+  status: string;
+  /** 申请日期 */
+  date: string;
+  /** 校验结论 */
+  check: string;
+};
+
+/** 付款类合同（我方付钱）：目前仅「采购合同」。
+ *  其余（销售 / 检测 / 维护保养 / 综合 / 框架协议）均为收款类。
+ *  进度二选一：付款类取 已付/执行额（paidPctOf），收款类取 已收/执行额（recvPct）。 */
+export const isPayContract = (c: { type: string }): boolean => c.type === '采购合同';
+
+/* ---------- 我方签约主体（集团多主体口径） ----------
+ * 合同「我方主体」列 / 常用筛选 / 新建合同的主体选择器共用同一份字典。
+ * ⚠️ 名称与 data.ts 电子签章段落的 OUR 常量（诺盾博达消防科技有限公司）同源，勿另起名称；
+ *    「云南诺安消防工程有限公司」（文档种子 DOC0014）与导出默认租户名属历史遗留，待统一。
+ * 采购合同与销售合同都要填我方主体 —— 一份合同必然由某个我方主体签出，没有例外。 */
+export type OurEntity = {
+  /** 主体编码（ENT + 3 位） */
+  id: string;
+  /** 主体全称（合同正文 / 电子签章落款用） */
+  name: string;
+  /** 简称（列表 Tag / 选择器主行用，控制列宽） */
+  short: string;
+  /** 主体类型：集团总部 / 分公司 / 专业子公司 */
+  kind: string;
+  /** 统一社会信用代码（演示值，按原型惯例做掩码） */
+  uscc: string;
+  /** 默认主体：新建合同时预选 */
+  def?: boolean;
+};
+export const OUR_ENTITIES: OurEntity[] = [
+  { id: 'ENT001', name: '诺盾博达消防科技有限公司', short: '诺盾博达 · 总部', kind: '集团总部', uscc: '91530100MA6KND××01', def: true },
+  { id: 'ENT002', name: '诺盾博达消防科技有限公司检测分公司', short: '诺盾博达 · 检测', kind: '分公司', uscc: '91530100MA6KND××02' },
+  { id: 'ENT003', name: '诺盾博达智慧消防科技有限公司', short: '诺盾智慧', kind: '专业子公司', uscc: '91530100MA6KND××03' },
+  { id: 'ENT004', name: '诺盾博达消防科技有限公司曲靖分公司', short: '诺盾博达 · 曲靖', kind: '分公司', uscc: '91530100MA6KND××04' },
+];
+/** 我方主体全称（找不到回落原值，避免空列） */
+export const entityNameOf = (id: string): string =>
+  OUR_ENTITIES.find((e) => e.id === id)?.name ?? id;
+/** 我方主体简称（列表列展示用） */
+export const entityShortOf = (id: string): string =>
+  OUR_ENTITIES.find((e) => e.id === id)?.short ?? id;
+/** 默认我方主体 id（新建合同预选） */
+export const DEFAULT_ENTITY = OUR_ENTITIES.find((e) => e.def)?.id ?? OUR_ENTITIES[0].id;
+
+/** 合同税率档（%）：建筑服务 9 / 货物 13 / 服务 6 —— 与报价侧同一口径 */
+export const CONTRACT_TAX_RATES = [6, 9, 13] as const;
+
 export type Contract = {
   id: string; name: string; type: string; party: string; project: string;
   amt: number; execAmt: number; status: string; recvPct: number; recv: number;
+  /** 我方签约主体（OUR_ENTITIES 的 id） */
+  ourEntity: string;
+  /** 合同税率（%）：建筑服务 9 / 货物 13 / 服务 6 */
+  taxRate: number;
+  /** 金额口径：inc = amt 即含税金额（默认）；exc = amt 为不含税金额，含税额按税率还原 */
+  cal: 'inc' | 'exc';
   owner: string; sign: string; start: string; end: string; nodes: string;
+  /** 合同生效日期（2026-09-28 列表改版新增）：缺省回落 = 签署日期（未签署回落 start） */
+  effectiveDate?: string;
+  /** 合同结束日期（原「到期日」改名口径，独立成列）：缺省回落 = end */
+  effectiveEnd?: string;
   overdue: boolean; overpay: boolean; renewedTo?: string;
   contractRole?: 'primary' | 'supplement_price' | 'supplement_service' | 'maintenance';
   parentId?: string;
@@ -978,8 +1180,10 @@ export type Contract = {
   quoteId?: string;
   /** 来源商机ID（商机赢单后直接转合同草稿时写入，供合同回溯商机） */
   oppId?: string;
-  /** 收款期次明细（仅收款类合同有；付款类合同的付款计划走付款申请） */
+  /** 收款期次明细（仅收款类合同有）—— 与 payOrders 互斥，同一份合同只会有一侧 */
   installments?: Installment[];
+  /** 付款单明细（仅付款类合同即采购合同有）—— 与 installments 对称 */
+  payOrders?: PaymentOrder[];
 };
 
 /** C5：收款逾期 / 超付预警由收款期次派生（不再读种子静态 overdue/overpay 字段）。
@@ -990,62 +1194,99 @@ export const contractOverdue = (c: Contract): boolean =>
 export const contractOverpay = (c: Contract): boolean =>
   (c.installments ?? []).reduce((s, i) => s + (i.got ?? 0), 0) > c.execAmt;
 
+/* 付款侧派生值（唯一入口）—— 与收款侧 recv / contractOverdue / contractOverpay 严格对称。
+   全站任何地方要「采购合同付了多少钱」，都走这里；别再读 recv（那是收款类字段，采购恒 0）。 */
+/** 已付 = Σ 状态为「已付款」的付款单 */
+export const paidOf = (c: Contract): number =>
+  (c.payOrders ?? []).filter((p) => p.status === '已付款').reduce((s, p) => s + p.amt, 0);
+/** 待付 = 执行额 − 已付 */
+export const openPayOf = (c: Contract): number => Math.max(c.execAmt - paidOf(c), 0);
+/** 付款进度 %（一位小数，分母与 recvPct 同取执行额 execAmt） */
+export const paidPctOf = (c: Contract): number =>
+  c.execAmt ? Math.round((paidOf(c) / c.execAmt) * 1000) / 10 : 0;
+/** 付款超限：已付 > 执行额 */
+export const contractOverpayed = (c: Contract): boolean => paidOf(c) > c.execAmt;
+
+/* ---------- 合同金额价税分离（唯一入口） ----------
+ * 合同列表的「合同含税金额」列、详情页金额卡、导出都走这里，别再各算各的。
+ * 口径：cal='inc' 时 amt 已是含税金额（种子全部为此口径，故与全站金额完全一致，不影响任何勾稽）；
+ *      cal='exc' 时 amt 为不含税金额，含税额按税率还原。 */
+/** 含税金额 */
+export const contractInclAmt = (c: Contract): number =>
+  c.cal === 'exc' ? Math.round(c.amt * (1 + c.taxRate / 100)) : c.amt;
+/** 不含税金额 */
+export const contractExclAmt = (c: Contract): number =>
+  c.cal === 'exc' ? c.amt : Math.round(c.amt / (1 + c.taxRate / 100));
+/** 税额 = 含税 − 不含税 */
+export const contractTaxAmt = (c: Contract): number => contractInclAmt(c) - contractExclAmt(c);
+
 export const CONTRACTS: Contract[] = [
   /* XM000123 主合同：合同额冻结为签约价 180 万（立项锚点）；执行额 195 万 = 180 + 已生效价格调整补充 +15 万。
      recv=银行已到账 54 万；已开票未到账 33.75 万挂应收账龄（见 RECEIVABLES），不计入 recv。 */
-  { id: 'HT000009', name: '昆明万达广场消防改造工程合同', type: '销售合同', party: '昆明万达广场商业管理有限公司', project: 'XM000123', amt: 1800000, execAmt: 1950000, status: '履约中', signStatus: '已签', contractRole: 'primary', recvPct: 27.7, recv: 540000, owner: '蓝峰', sign: '2026-09-12', start: '2026-09-20', end: '2027-03-31', nodes: '预付 30% · 进度 40% · 竣工 25% · 质保 5%', overdue: false, overpay: false, bidId: 'TB000038',
+  { id: 'HT000009', ourEntity: 'ENT001', taxRate: 9, cal: 'inc', name: '昆明万达广场消防改造工程合同', type: '销售合同', party: '昆明万达广场商业管理有限公司', project: 'XM000123', amt: 1800000, execAmt: 1950000, status: '履约中', signStatus: '已签', contractRole: 'primary', recvPct: 27.7, recv: 540000, owner: '蓝峰', sign: '2026-09-12', start: '2026-09-20', end: '2027-03-31', nodes: '预付 30% · 进度 40% · 竣工 25% · 质保 5%', overdue: false, overpay: false, bidId: 'TB000038',
     installments: [
       { n: '收款期次 1 · 预付款（30%）', amt: 540000, plan: '2026-09-19', got: 540000, gotDate: '2026-09-12', inv: '已开票', note: '银行已到账 · 首笔到账触发「履约中」' },
       { n: '收款期次 2 · 进度款（40%）', amt: 337500, plan: '2026-10-31', got: 0, gotDate: '—', inv: '已开票', note: '已开票未到账 · 账龄 75 天（计入应收账龄，不计回款）' },
       { n: '收款期次 3 · 竣工结算款（25%）', amt: 1072500, plan: '2027-03-31', got: 0, gotDate: '—', inv: '未开票', note: '竣工验收合格后结算' },
     ] },
   /* 价格调整类补充协议：挂 HT000009 下，amt 存增量 +15 万；已签署 → 联动 BG0001 生效并刷新 execAmt */
-  { id: 'HT000009S1', name: '昆明万达广场消防改造工程价格调整补充协议', type: '销售合同', party: '昆明万达广场商业管理有限公司', project: 'XM000123', amt: 150000, execAmt: 150000, status: '已签约', signStatus: '已签', contractRole: 'supplement_price', parentId: 'HT000009', recvPct: 0, recv: 0, owner: '蓝峰', sign: '2026-09-18', start: '2026-09-18', end: '2027-03-31', nodes: '随主合同执行', overdue: false, overpay: false },
+  { id: 'HT000009S1', ourEntity: 'ENT001', taxRate: 9, cal: 'inc', name: '昆明万达广场消防改造工程价格调整补充协议', type: '销售合同', party: '昆明万达广场商业管理有限公司', project: 'XM000123', amt: 150000, execAmt: 150000, status: '已签约', signStatus: '已签', contractRole: 'supplement_price', parentId: 'HT000009', recvPct: 0, recv: 0, owner: '蓝峰', sign: '2026-09-18', start: '2026-09-18', end: '2027-03-31', nodes: '随主合同执行', overdue: false, overpay: false, bidId: 'TB000038', oppId: 'SJ000462' },
   /* 新增服务类补充协议：独立成行 8 万 */
-  { id: 'HT000009S2', name: '昆明万达广场消防改造工程新增服务补充协议（联动调试培训）', type: '销售合同', party: '昆明万达广场商业管理有限公司', project: 'XM000123', amt: 80000, execAmt: 80000, status: '已签约', signStatus: '已签', contractRole: 'supplement_service', recvPct: 0, recv: 0, owner: '蓝峰', sign: '2026-09-20', start: '2027-01-01', end: '2027-03-31', nodes: '完工验收后一次性', overdue: false, overpay: false,
+  { id: 'HT000009S2', ourEntity: 'ENT001', taxRate: 6, cal: 'inc', name: '昆明万达广场消防改造工程新增服务补充协议（联动调试培训）', type: '销售合同', party: '昆明万达广场商业管理有限公司', project: 'XM000123', amt: 80000, execAmt: 80000, status: '已签约', signStatus: '已签', contractRole: 'supplement_service', recvPct: 0, recv: 0, owner: '蓝峰', sign: '2026-09-20', start: '2027-01-01', end: '2027-03-31', nodes: '完工验收后一次性', overdue: false, overpay: false, bidId: 'TB000038', oppId: 'SJ000462',
     installments: [
       { n: '收款期次 1 · 完工验收款（100%）', amt: 80000, plan: '2027-03-31', got: 0, gotDate: '—', inv: '未开票', note: '联动调试培训完成并验收后一次性支付' },
     ] },
   /* 维保合同：独立成行 12 万（签约在改造验收之后） */
-  { id: 'WB000123', name: '昆明万达广场消防改造工程维保合同（验收后一年）', type: '维护保养合同', party: '昆明万达广场商业管理有限公司', project: 'XM000123', amt: 120000, execAmt: 120000, status: '待审批', signStatus: '未发起', contractRole: 'maintenance', recvPct: 0, recv: 0, owner: '蓝峰', sign: '—', start: '2027-04-01', end: '2028-03-31', nodes: '年付 100%', overdue: false, overpay: false,
+  { id: 'WB000123', ourEntity: 'ENT001', taxRate: 6, cal: 'inc', name: '昆明万达广场消防改造工程维保合同（验收后一年）', type: '维护保养合同', party: '昆明万达广场商业管理有限公司', project: 'XM000123', amt: 120000, execAmt: 120000, status: '待审批', signStatus: '未发起', contractRole: 'maintenance', recvPct: 0, recv: 0, owner: '蓝峰', sign: '—', start: '2027-04-01', end: '2028-03-31', nodes: '年付 100%', overdue: false, overpay: false, oppId: 'SJ000462',
     installments: [
       { n: '收款期次 1 · 年度服务费（100%）', amt: 120000, plan: '2027-04-01', got: 0, gotDate: '—', inv: '未开票', note: '服务期起始月一次付清' },
     ] },
-  { id: 'WB000003', name: '楚雄州人民医院消防维护保养合同（2027）', type: '维护保养合同', party: '楚雄州人民医院', project: 'XM000118', amt: 960000, execAmt: 960000, status: '履约中', contractRole: 'maintenance', recvPct: 62.5, recv: 600000, owner: '赵薇', sign: '2026-09-01', start: '2026-09-01', end: '2027-08-31', nodes: '半年付 50% × 2', overdue: false, overpay: false,
+  { id: 'WB000003', ourEntity: 'ENT001', taxRate: 6, cal: 'inc', name: '楚雄州人民医院消防维护保养合同（2027）', type: '维护保养合同', party: '楚雄州人民医院', project: 'XM000118', amt: 960000, execAmt: 960000, status: '履约中', contractRole: 'maintenance', recvPct: 62.5, recv: 600000, owner: '赵薇', sign: '2026-09-01', start: '2026-09-01', end: '2027-08-31', nodes: '半年付 50% × 2', overdue: false, overpay: false, bidId: 'TB000052', oppId: 'SJ000495',
     installments: [
       { n: '收款期次 1 · 上半年服务费（50%）', amt: 480000, plan: '2026-09-01', got: 480000, gotDate: '2026-09-01', inv: '已开票', note: '服务期起始日一次性付清' },
       { n: '收款期次 2 · 下半年服务费（50%）', amt: 480000, plan: '2027-03-01', got: 120000, gotDate: '2026-09-20', inv: '已开票', note: '已预收部分款项' },
     ] },
-  { id: 'HT000005', name: '丽江景区智慧消防平台合同', type: '销售合同', party: '丽江××文旅开发集团', project: 'XM000105', amt: 2400000, execAmt: 2400000, status: '已签约', contractRole: 'primary', recvPct: 25, recv: 600000, owner: '陈静', sign: '2026-08-18', start: '2026-09-01', end: '2027-01-31', nodes: '预付 25% · 验收 75%', overdue: false, overpay: false,
+  { id: 'HT000005', ourEntity: 'ENT003', taxRate: 13, cal: 'inc', name: '丽江景区智慧消防平台合同', type: '销售合同', party: '丽江××文旅开发集团', project: 'XM000105', amt: 2400000, execAmt: 2400000, status: '已签约', contractRole: 'primary', recvPct: 25, recv: 600000, owner: '陈静', sign: '2026-08-18', start: '2026-09-01', end: '2027-01-31', nodes: '预付 25% · 验收 75%', overdue: false, overpay: false,
     installments: [
       { n: '收款期次 1 · 预付款（25%）', amt: 600000, plan: '2026-08-25', got: 600000, gotDate: '2026-08-18', inv: '已开票', note: '银行已到账' },
       { n: '收款期次 2 · 验收款（75%）', amt: 1800000, plan: '2027-01-31', got: 0, gotDate: '—', inv: '未开票', note: '平台验收合格后支付' },
     ] },
-  { id: 'HT000002', name: '产业园一期消防工程合同', type: '销售合同', party: '××工业园区开发有限公司', project: 'XM000087', amt: 2600000, execAmt: 2600000, status: '履约中', contractRole: 'primary', recvPct: 78, recv: 2028000, owner: '周斌', sign: '2026-07-30', start: '2026-08-01', end: '2026-12-31', nodes: '预付 30% · 进度 40% · 竣工 27% · 质保 3%', overdue: false, overpay: true, bidId: 'TB000028',
+  { id: 'HT000002', ourEntity: 'ENT001', taxRate: 9, cal: 'inc', name: '产业园一期消防工程合同', type: '销售合同', party: '××工业园区开发有限公司', project: 'XM000087', amt: 2600000, execAmt: 2600000, status: '履约中', contractRole: 'primary', recvPct: 78, recv: 2028000, owner: '周斌', sign: '2026-07-30', start: '2026-08-01', end: '2026-12-31', nodes: '预付 30% · 进度 40% · 竣工 27% · 质保 3%', overdue: false, overpay: true, bidId: 'TB000028',
     installments: [
       { n: '收款期次 1 · 预付款（30%）', amt: 780000, plan: '2026-08-06', got: 780000, gotDate: '2026-08-05', inv: '已开票', note: '银行已到账' },
       { n: '收款期次 2 · 进度款（40%）', amt: 1040000, plan: '2026-09-30', got: 1040000, gotDate: '2026-09-20', inv: '已开票', note: '形象进度确认后支付' },
       { n: '收款期次 3 · 竣工结算款（27%）', amt: 702000, plan: '2026-12-31', got: 208000, gotDate: '2026-09-22', inv: '已开票', note: '提前部分结算 · 已触发超额收款预警' },
       { n: '收款期次 4 · 质保金（3%）', amt: 78000, plan: '2027-12-31', got: 0, gotDate: '—', inv: '未开票', note: '质保期满无质量问题后无息退还' },
     ] },
-  { id: 'CG000003', name: '消防设备采购合同（报警系统）', type: '采购合同', party: '云南××消防设备有限公司', project: 'XM000123', amt: 860000, execAmt: 860000, status: '履约中', signStatus: '已签', contractRole: 'primary', recvPct: 0, recv: 0, owner: '蓝峰', sign: '2026-09-01', start: '2026-09-05', end: '2026-11-30', nodes: '到货 70% · 验收 30%', overdue: false, overpay: false },
-  { id: 'CG000005', name: '劳务分包合同（喷淋安装）', type: '采购合同', party: '昆明××建筑劳务有限公司', project: 'XM000123', amt: 580000, execAmt: 580000, status: '履约中', contractRole: 'primary', recvPct: 0, recv: 0, owner: '蓝峰', sign: '2026-09-02', start: '2026-09-10', end: '2026-12-20', nodes: '进度 60% · 完工 40%', overdue: false, overpay: false },
+  { id: 'CG000003', ourEntity: 'ENT001', taxRate: 13, cal: 'inc', name: '消防设备采购合同（报警系统）', type: '采购合同', party: '云南××消防设备有限公司', project: 'XM000123', amt: 860000, execAmt: 860000, status: '履约中', signStatus: '已签', contractRole: 'primary', recvPct: 0, recv: 0, owner: '蓝峰', sign: '2026-09-01', start: '2026-09-05', end: '2026-11-30', nodes: '到货 70% · 验收 30%', overdue: false, overpay: false ,
+    payOrders: [
+      { id: 'PF000024', name: '报警系统设备预付款', party: '云南××消防设备有限公司', amt: 200000, type: '采购付款', status: '已付款', date: '2026-09-08', check: '预付 20% ≤ 执行金额 × 100% ✓' },
+      { id: 'PF000031', name: '消防设备采购付款（报警系统）', party: '云南××消防设备有限公司', amt: 258000, type: '采购付款', status: '审批中', date: '2026-09-21', check: '已付 + 本次 ≤ 执行金额 × 100% ✓' },
+    ] },
+  { id: 'CG000005', ourEntity: 'ENT001', taxRate: 9, cal: 'inc', name: '劳务分包合同（喷淋安装）', type: '采购合同', party: '昆明××建筑劳务有限公司', project: 'XM000123', amt: 580000, execAmt: 580000, status: '履约中', contractRole: 'primary', recvPct: 0, recv: 0, owner: '蓝峰', sign: '2026-09-02', start: '2026-09-10', end: '2026-12-20', nodes: '进度 60% · 完工 40%', overdue: false, overpay: false ,
+    payOrders: [
+      { id: 'PF000025', name: '安全文明施工措施费', party: '昆明××建筑劳务有限公司', amt: 46000, type: '费用付款', status: '已付款', date: '2026-09-05', check: '校验通过' },
+      { id: 'PF000028', name: '劳务分包进度款（第一期）', party: '昆明××建筑劳务有限公司', amt: 180000, type: '分包付款', status: '已付款', date: '2026-09-10', check: '校验通过' },
+    ] },
   /* 框架协议：amt=框架总额度（冻结）；execAmt=已执行额度=Σ 其下执行单(supplement_service,parentId 指向本协议)，
      由 store.recomputeFrameworkExecAmt 动态维护；当前仅 FK000008 一份 38 万。 */
-  { id: 'FK000001', name: '昆明万达广场消防维护保养框架协议', type: '框架协议', party: '昆明万达广场商业管理有限公司', project: '', amt: 5000000, execAmt: 380000, status: '履约中', recvPct: 0, recv: 0, owner: '蓝峰', sign: '2026-06-01', start: '2026-06-01', end: '2029-05-31', nodes: '按执行单工作量结算', overdue: false, overpay: false },
-  { id: 'WB000001', name: '楚雄州人民医院消防综合维保合同（2025-2026）', type: '综合合同', party: '楚雄州人民医院', project: 'XM000118', amt: 900000, execAmt: 900000, status: '已续签', contractRole: 'maintenance', recvPct: 100, recv: 900000, owner: '赵薇', sign: '2025-09-01', start: '2025-09-01', end: '2026-08-31', nodes: '半年付 50% × 2', overdue: false, overpay: false, renewedTo: 'WB000003',
+  { id: 'FK000001', ourEntity: 'ENT001', taxRate: 6, cal: 'inc', name: '昆明万达广场消防维护保养框架协议', type: '框架协议', party: '昆明万达广场商业管理有限公司', project: '', amt: 5000000, execAmt: 380000, status: '履约中', recvPct: 0, recv: 0, owner: '蓝峰', sign: '2026-06-01', start: '2026-06-01', end: '2029-05-31', nodes: '按执行单工作量结算', overdue: false, overpay: false },
+  { id: 'WB000001', ourEntity: 'ENT001', taxRate: 6, cal: 'inc', name: '楚雄州人民医院消防综合维保合同（2025-2026）', type: '综合合同', party: '楚雄州人民医院', project: 'XM000118', amt: 900000, execAmt: 900000, status: '已续签', contractRole: 'maintenance', recvPct: 100, recv: 900000, owner: '赵薇', sign: '2025-09-01', start: '2025-09-01', end: '2026-08-31', nodes: '半年付 50% × 2', overdue: false, overpay: false, renewedTo: 'WB000003', oppId: 'SJ000495',
     installments: [
       { n: '收款期次 1 · 上半年服务费（50%）', amt: 450000, plan: '2025-09-01', got: 450000, gotDate: '2025-09-01', inv: '已开票', note: '服务期起始日一次性付清' },
       { n: '收款期次 2 · 下半年服务费（50%）', amt: 450000, plan: '2026-03-01', got: 450000, gotDate: '2026-03-02', inv: '已开票', note: '已结清并续签 WB000003' },
     ] },
   /* 框架执行单（原“框架子合同”）：contractRole=supplement_service，parentId 指向框架协议 FK000001；
      类型归位为“维护保养合同”，不再混入“框架协议”筛选；金额在框架协议维度汇总。 */
-  { id: 'FK000008', name: '万达广场秋季维保服务', type: '维护保养合同', party: '昆明万达广场商业管理有限公司', project: 'XM000123', amt: 380000, execAmt: 380000, status: '履约中', recvPct: 30, recv: 114000, owner: '蓝峰', sign: '2026-09-10', start: '2026-09-15', end: '2026-12-15', nodes: '完工 100%', overdue: false, overpay: false, contractRole: 'supplement_service', parentId: 'FK000001',
+  { id: 'FK000008', ourEntity: 'ENT001', taxRate: 6, cal: 'inc', name: '万达广场秋季维保服务', type: '维护保养合同', party: '昆明万达广场商业管理有限公司', project: 'XM000123', amt: 380000, execAmt: 380000, status: '履约中', recvPct: 30, recv: 114000, owner: '蓝峰', sign: '2026-09-10', start: '2026-09-15', end: '2026-12-15', nodes: '完工 100%', overdue: false, overpay: false, contractRole: 'supplement_service', parentId: 'FK000001',
     installments: [
       { n: '收款期次 1 · 完工款（100%）', amt: 380000, plan: '2026-12-15', got: 114000, gotDate: '2026-09-20', inv: '已开票', note: '框架协议下按执行单工作量结算 · 已预收 30%' },
     ] },
-  { id: 'CG000002', name: '××酒店灭火器批次采购合同', type: '采购合同', party: '云南××消防设备有限公司', project: 'XM000105', amt: 120000, execAmt: 120000, status: '已终止', terminateType: '解除', signStatus: '已签', contractRole: 'primary', recvPct: 0, recv: 0, owner: '陈静', sign: '2026-04-15', start: '2026-04-20', end: '2026-06-30', nodes: '到货 100%', overdue: false, overpay: false },
-  { id: 'HT000011', name: '柳州钢铁厂区消防管网改造合同', type: '销售合同', party: '广西柳州钢铁集团有限公司', project: 'XM000131', amt: 5600000, execAmt: 5600000, status: '履约中', signStatus: '已签', contractRole: 'primary', recvPct: 0, recv: 0, owner: '赵薇', sign: '2026-07-25', start: '2026-07-31', end: '2026-10-31', nodes: '预付 20% · 进度 50% · 竣工 27% · 质保 3%', overdue: true, overpay: false, bidId: 'TB000056',
+  { id: 'CG000002', ourEntity: 'ENT001', taxRate: 13, cal: 'inc', name: '××酒店灭火器批次采购合同', type: '采购合同', party: '云南××消防设备有限公司', project: 'XM000105', amt: 120000, execAmt: 120000, status: '已终止', terminateType: '解除', signStatus: '已签', contractRole: 'primary', recvPct: 0, recv: 0, owner: '陈静', sign: '2026-04-15', start: '2026-04-20', end: '2026-06-30', nodes: '到货 100%', overdue: false, overpay: false ,
+    payOrders: [
+      { id: 'PF000019', name: '灭火器批次货款（到货 50%）', party: '云南××消防设备有限公司', amt: 60000, type: '采购付款', status: '已付款', date: '2026-05-12', check: '校验通过 · 合同已解除，余款不再支付' },
+    ] },
+  { id: 'HT000011', ourEntity: 'ENT001', taxRate: 9, cal: 'inc', name: '柳州钢铁厂区消防管网改造合同', type: '销售合同', party: '广西柳州钢铁集团有限公司', project: 'XM000131', amt: 5600000, execAmt: 5600000, status: '履约中', signStatus: '已签', contractRole: 'primary', recvPct: 0, recv: 0, owner: '赵薇', sign: '2026-07-25', start: '2026-07-31', end: '2026-10-31', nodes: '预付 20% · 进度 50% · 竣工 27% · 质保 3%', overdue: true, overpay: false, bidId: 'TB000056', oppId: 'SJ000482',
     installments: [
       { n: '收款期次 1 · 预付款（20%）', amt: 1120000, plan: '2026-08-01', got: 0, gotDate: '—', inv: '未开票', note: '逾期 53 天未到账 · 已进入驾驶舱「逾期应收」榜' },
       { n: '收款期次 2 · 进度款（50%）', amt: 2800000, plan: '2026-09-15', got: 0, gotDate: '—', inv: '未开票', note: '逾期 8 天未到账' },
@@ -1056,32 +1297,32 @@ export const CONTRACTS: Contract[] = [
        补齐后：每个 contractAmt > 0 的项目都能反查到合同，文档模块的合同引用不再悬空，
        项目中心的合同树不再出现「有合同额但无合同」的空枝；唯一无合同的项目是 XM000098（应急抢修，业务设定如此）。
        期次金额合计 = execAmt；Σgot = recv；recv ÷ execAmt = recvPct，三者互相校验。 ── */
-  { id: 'HT000004', name: '昆明长水国际机场航站楼消防设施年度检测合同', type: '销售合同', party: '昆明长水国际机场后勤保障部', project: 'XM000136', amt: 1560000, execAmt: 1560000, status: '履约中', signStatus: '已签', contractRole: 'primary', recvPct: 50, recv: 780000, owner: '蓝峰', sign: '2026-06-25', start: '2026-07-01', end: '2027-06-30', nodes: '预付 50% · 报告验收 47% · 质保 3%', overdue: false, overpay: false,
+  { id: 'HT000004', ourEntity: 'ENT002', taxRate: 6, cal: 'inc', name: '昆明长水国际机场航站楼消防设施年度检测合同', type: '销售合同', party: '昆明长水国际机场后勤保障部', project: 'XM000136', amt: 1560000, execAmt: 1560000, status: '履约中', signStatus: '已签', contractRole: 'primary', recvPct: 50, recv: 780000, owner: '蓝峰', sign: '2026-06-25', start: '2026-07-01', end: '2027-06-30', nodes: '预付 50% · 报告验收 47% · 质保 3%', overdue: false, overpay: false,
     installments: [
       { n: '收款期次 1 · 预付款（50%）', amt: 780000, plan: '2026-07-01', got: 780000, gotDate: '2026-06-28', inv: '已开票', note: '年度检测进场前预付，已到账' },
       { n: '收款期次 2 · 报告验收款（47%）', amt: 733200, plan: '2027-01-31', got: 0, gotDate: '—', inv: '未开票', note: '年度检测报告通过甲方验收后支付' },
       { n: '收款期次 3 · 质保金（3%）', amt: 46800, plan: '2027-06-30', got: 0, gotDate: '—', inv: '未开票', note: '质保期满无质量问题后无息退还' },
     ] },
-  { id: 'HT000007', name: '云南××磷化工有限公司厂区消防设施检测合同', type: '销售合同', party: '云南××磷化工有限公司', project: 'XM000142', amt: 1280000, execAmt: 1280000, status: '履约中', signStatus: '已签', contractRole: 'primary', recvPct: 30, recv: 384000, owner: '赵薇', sign: '2026-08-12', start: '2026-08-20', end: '2026-11-30', nodes: '预付 30% · 报告验收 67% · 质保 3%', overdue: false, overpay: false,
+  { id: 'HT000007', ourEntity: 'ENT002', taxRate: 6, cal: 'inc', name: '云南××磷化工有限公司厂区消防设施检测合同', type: '销售合同', party: '云南××磷化工有限公司', project: 'XM000142', amt: 1280000, execAmt: 1280000, status: '履约中', signStatus: '已签', contractRole: 'primary', recvPct: 30, recv: 384000, owner: '赵薇', sign: '2026-08-12', start: '2026-08-20', end: '2026-11-30', nodes: '预付 30% · 报告验收 67% · 质保 3%', overdue: false, overpay: false,
     installments: [
       { n: '收款期次 1 · 预付款（30%）', amt: 384000, plan: '2026-08-20', got: 384000, gotDate: '2026-08-18', inv: '已开票', note: '技术协议签署后预付，已到账' },
       { n: '收款期次 2 · 报告验收款（67%）', amt: 857600, plan: '2026-12-15', got: 0, gotDate: '—', inv: '未开票', note: '阶段性检测报告验收后支付' },
       { n: '收款期次 3 · 质保金（3%）', amt: 38400, plan: '2027-11-30', got: 0, gotDate: '—', inv: '未开票', note: '质保期满无质量问题后无息退还' },
     ] },
-  { id: 'HT000003', name: '曲靖一院消控室改造工程合同', type: '销售合同', party: '曲靖××第一人民医院', project: 'XM000096', amt: 680000, execAmt: 680000, status: '已终止', terminateType: '正常结束', signStatus: '已签', contractRole: 'primary', recvPct: 95, recv: 646000, owner: '周斌', sign: '2026-02-20', start: '2026-03-01', end: '2026-08-31', nodes: '预付 30% · 竣工 65% · 质保 5%', overdue: false, overpay: false,
+  { id: 'HT000003', ourEntity: 'ENT004', taxRate: 9, cal: 'inc', name: '曲靖一院消控室改造工程合同', type: '销售合同', party: '曲靖××第一人民医院', project: 'XM000096', amt: 680000, execAmt: 680000, status: '已终止', terminateType: '正常结束', signStatus: '已签', contractRole: 'primary', recvPct: 95, recv: 646000, owner: '周斌', sign: '2026-02-20', start: '2026-03-01', end: '2026-08-31', nodes: '预付 30% · 竣工 65% · 质保 5%', overdue: false, overpay: false,
     installments: [
       { n: '收款期次 1 · 预付款（30%）', amt: 204000, plan: '2026-03-01', got: 204000, gotDate: '2026-02-27', inv: '已开票', note: '银行已到账' },
       { n: '收款期次 2 · 竣工结算款（65%）', amt: 442000, plan: '2026-09-10', got: 442000, gotDate: '2026-09-05', inv: '已开票', note: '竣工验收合格后结算' },
       { n: '收款期次 3 · 质保金（5%）', amt: 34000, plan: '2027-08-31', got: 0, gotDate: '—', inv: '未开票', note: '质保期 12 个月满后无息退还；主合同义务已履行完毕，按「正常结束」终止' },
     ] },
-  { id: 'HT000010', name: '××政务服务中心消防改造工程合同', type: '销售合同', party: '××政务服务中心', project: 'XM000150', amt: 1850000, execAmt: 1850000, status: '履约中', signStatus: '已签', contractRole: 'primary', recvPct: 20, recv: 370000, owner: '刘宇', sign: '2026-05-25', start: '2026-06-01', end: '2026-12-31', nodes: '预付 20% · 进度 50% · 竣工 27% · 质保 3%', overdue: false, overpay: false,
+  { id: 'HT000010', ourEntity: 'ENT001', taxRate: 9, cal: 'inc', name: '××政务服务中心消防改造工程合同', type: '销售合同', party: '××政务服务中心', project: 'XM000150', amt: 1850000, execAmt: 1850000, status: '履约中', signStatus: '已签', contractRole: 'primary', recvPct: 20, recv: 370000, owner: '刘宇', sign: '2026-05-25', start: '2026-06-01', end: '2026-12-31', nodes: '预付 20% · 进度 50% · 竣工 27% · 质保 3%', overdue: false, overpay: false,
     installments: [
       { n: '收款期次 1 · 预付款（20%）', amt: 370000, plan: '2026-06-01', got: 370000, gotDate: '2026-05-29', inv: '已开票', note: '银行已到账' },
       { n: '收款期次 2 · 进度款（50%）', amt: 925000, plan: '2026-10-31', got: 0, gotDate: '—', inv: '未开票', note: '项目已暂停，期次顺延（暂停原因见项目详情留痕）' },
       { n: '收款期次 3 · 竣工结算款（27%）', amt: 499500, plan: '2026-12-31', got: 0, gotDate: '—', inv: '未开票', note: '竣工验收合格后结算' },
       { n: '收款期次 4 · 质保金（3%）', amt: 55500, plan: '2027-12-31', got: 0, gotDate: '—', inv: '未开票', note: '质保期满无质量问题后无息退还' },
     ] },
-  { id: 'WB000002', name: '玉溪××酒店消防维护保养合同（2025-2026）', type: '维护保养合同', party: '玉溪××酒店管理有限公司', project: 'XM000079', amt: 420000, execAmt: 420000, status: '已终止', terminateType: '正常结束', signStatus: '已签', contractRole: 'maintenance', recvPct: 100, recv: 420000, owner: '赵薇', sign: '2025-06-20', start: '2025-07-01', end: '2026-06-30', nodes: '季付 25% × 4', overdue: false, overpay: false,
+  { id: 'WB000002', ourEntity: 'ENT001', taxRate: 6, cal: 'inc', name: '玉溪××酒店消防维护保养合同（2025-2026）', type: '维护保养合同', party: '玉溪××酒店管理有限公司', project: 'XM000079', amt: 420000, execAmt: 420000, status: '已终止', terminateType: '正常结束', signStatus: '已签', contractRole: 'maintenance', recvPct: 100, recv: 420000, owner: '赵薇', sign: '2025-06-20', start: '2025-07-01', end: '2026-06-30', nodes: '季付 25% × 4', overdue: false, overpay: false,
     installments: [
       { n: '收款期次 1 · 第一季度服务费（25%）', amt: 105000, plan: '2025-07-01', got: 105000, gotDate: '2025-07-01', inv: '已开票', note: '服务期起始日支付' },
       { n: '收款期次 2 · 第二季度服务费（25%）', amt: 105000, plan: '2025-10-01', got: 105000, gotDate: '2025-09-30', inv: '已开票', note: '银行已到账' },
@@ -1090,57 +1331,67 @@ export const CONTRACTS: Contract[] = [
     ] },
   /* ---------- 演示补充：在办项目配套合同（与下方 PROJECTS 补充段一一对应） ----------
      均为「主合同（contractRole: primary / maintenance）」，执行额 = 签约额；收款期次 Σ=execAmt、Σ已收=recv。 */
-  { id: 'HT000012', name: '昆明市第一人民医院门诊楼消防设施改造合同', type: '销售合同', party: '昆明市第一人民医院', project: 'XM000156', amt: 1420000, execAmt: 1420000, status: '履约中', signStatus: '已签', contractRole: 'primary', recvPct: 30, recv: 426000, owner: '刘宇', sign: '2026-08-05', start: '2026-08-10', end: '2027-01-31', nodes: '预付 30% · 进度 40% · 竣工 27% · 质保 3%', overdue: false, overpay: false,
+  { id: 'HT000012', ourEntity: 'ENT001', taxRate: 9, cal: 'inc', name: '昆明市第一人民医院门诊楼消防设施改造合同', type: '销售合同', party: '昆明市第一人民医院', project: 'XM000156', amt: 1420000, execAmt: 1420000, status: '履约中', signStatus: '已签', contractRole: 'primary', recvPct: 30, recv: 426000, owner: '刘宇', sign: '2026-08-05', start: '2026-08-10', end: '2027-01-31', nodes: '预付 30% · 进度 40% · 竣工 27% · 质保 3%', overdue: false, overpay: false,
     installments: [
       { n: '收款期次 1 · 预付款（30%）', amt: 426000, plan: '2026-08-15', got: 426000, gotDate: '2026-08-14', inv: '已开票', note: '银行已到账' },
       { n: '收款期次 2 · 进度款（40%）', amt: 568000, plan: '2026-11-15', got: 0, gotDate: '—', inv: '未开票', note: '管线安装完成 60% 后计量' },
       { n: '收款期次 3 · 竣工结算款（27%）', amt: 383400, plan: '2027-02-28', got: 0, gotDate: '—', inv: '未开票', note: '竣工验收合格后结算' },
       { n: '收款期次 4 · 质保金（3%）', amt: 42600, plan: '2028-01-31', got: 0, gotDate: '—', inv: '未开票', note: '质保期满无质量问题后无息退还' },
     ] },
-  { id: 'HT000013', name: '云南师范大学附属中学教学楼消防设施检测合同', type: '销售合同', party: '云南师范大学附属中学', project: 'XM000161', amt: 560000, execAmt: 560000, status: '已签约', signStatus: '已签', contractRole: 'primary', recvPct: 0, recv: 0, owner: '赵薇', sign: '2026-10-05', start: '2026-10-08', end: '2027-01-20', nodes: '预付 30% · 报告交付 70%', overdue: false, overpay: false,
+  { id: 'HT000013', ourEntity: 'ENT002', taxRate: 6, cal: 'inc', name: '云南师范大学附属中学教学楼消防设施检测合同', type: '销售合同', party: '云南师范大学附属中学', project: 'XM000161', amt: 560000, execAmt: 560000, status: '已签约', signStatus: '已签', contractRole: 'primary', recvPct: 0, recv: 0, owner: '赵薇', sign: '2026-10-05', start: '2026-10-08', end: '2027-01-20', nodes: '预付 30% · 报告交付 70%', overdue: false, overpay: false,
     installments: [
       { n: '收款期次 1 · 预付款（30%）', amt: 168000, plan: '2026-10-10', got: 0, gotDate: '—', inv: '未开票', note: '进场前支付' },
       { n: '收款期次 2 · 检测报告交付款（70%）', amt: 392000, plan: '2027-01-20', got: 0, gotDate: '—', inv: '未开票', note: '报告交付并备案后支付' },
     ] },
-  { id: 'HT000014', name: '昆明滇池国家旅游度假区智慧消防新建工程合同', type: '销售合同', party: '昆明滇池国家旅游度假区', project: 'XM000165', amt: 3200000, execAmt: 3200000, status: '履约中', signStatus: '已签', contractRole: 'primary', recvPct: 25, recv: 800000, owner: '蓝峰', sign: '2026-08-20', start: '2026-08-25', end: '2027-06-30', nodes: '预付 25% · 进度 45% · 竣工 27% · 质保 3%', overdue: false, overpay: false,
+  { id: 'HT000014', ourEntity: 'ENT001', taxRate: 9, cal: 'inc', name: '昆明滇池国家旅游度假区智慧消防新建工程合同', type: '销售合同', party: '昆明滇池国家旅游度假区', project: 'XM000165', amt: 3200000, execAmt: 3200000, status: '履约中', signStatus: '已签', contractRole: 'primary', recvPct: 25, recv: 800000, owner: '蓝峰', sign: '2026-08-20', start: '2026-08-25', end: '2027-06-30', nodes: '预付 25% · 进度 45% · 竣工 27% · 质保 3%', overdue: false, overpay: false,
     installments: [
       { n: '收款期次 1 · 预付款（25%）', amt: 800000, plan: '2026-09-01', got: 800000, gotDate: '2026-08-29', inv: '已开票', note: '银行已到账' },
       { n: '收款期次 2 · 进度款（45%）', amt: 1440000, plan: '2027-01-15', got: 0, gotDate: '—', inv: '未开票', note: '设备进场安装 50% 后计量' },
       { n: '收款期次 3 · 竣工结算款（27%）', amt: 864000, plan: '2027-07-31', got: 0, gotDate: '—', inv: '未开票', note: '竣工验收合格后结算' },
       { n: '收款期次 4 · 质保金（3%）', amt: 96000, plan: '2028-06-30', got: 0, gotDate: '—', inv: '未开票', note: '质保期满无质量问题后无息退还' },
     ] },
-  { id: 'WB000004', name: '楚雄州人民医院消防设施维护保养合同（二期）', type: '维护保养合同', party: '楚雄州人民医院', project: 'XM000170', amt: 780000, execAmt: 780000, status: '履约中', signStatus: '已签', contractRole: 'maintenance', recvPct: 50, recv: 390000, owner: '赵薇', sign: '2026-06-25', start: '2026-07-01', end: '2027-06-30', nodes: '首期 50% · 二期 50%', overdue: false, overpay: false,
+  { id: 'WB000004', ourEntity: 'ENT001', taxRate: 6, cal: 'inc', name: '楚雄州人民医院消防设施维护保养合同（二期）', type: '维护保养合同', party: '楚雄州人民医院', project: 'XM000170', amt: 780000, execAmt: 780000, status: '履约中', signStatus: '已签', contractRole: 'maintenance', recvPct: 50, recv: 390000, owner: '赵薇', sign: '2026-06-25', start: '2026-07-01', end: '2027-06-30', nodes: '首期 50% · 二期 50%', overdue: false, overpay: false,
     installments: [
       { n: '收款期次 1 · 首期服务费（50%）', amt: 390000, plan: '2026-07-01', got: 390000, gotDate: '2026-06-30', inv: '已开票', note: '服务期起始日支付' },
       { n: '收款期次 2 · 二期服务费（50%）', amt: 390000, plan: '2027-01-01', got: 0, gotDate: '—', inv: '未开票', note: '上半年巡检报告确认后支付' },
     ] },
-  { id: 'HT000015', name: '曲靖万达广场消防设施改造合同', type: '销售合同', party: '曲靖万达广场商业管理有限公司', project: 'XM000174', amt: 980000, execAmt: 980000, status: '已签约', signStatus: '已签', contractRole: 'primary', recvPct: 0, recv: 0, owner: '陈静', sign: '2026-10-15', start: '2026-10-15', end: '2027-03-31', nodes: '预付 30% · 进度 40% · 竣工 27% · 质保 3%', overdue: false, overpay: false,
+  { id: 'HT000015', ourEntity: 'ENT004', taxRate: 9, cal: 'inc', name: '曲靖万达广场消防设施改造合同', type: '销售合同', party: '曲靖万达广场商业管理有限公司', project: 'XM000174', amt: 980000, execAmt: 980000, status: '已签约', signStatus: '已签', contractRole: 'primary', recvPct: 0, recv: 0, owner: '陈静', sign: '2026-10-15', start: '2026-10-15', end: '2027-03-31', nodes: '预付 30% · 进度 40% · 竣工 27% · 质保 3%', overdue: false, overpay: false,
     installments: [
       { n: '收款期次 1 · 预付款（30%）', amt: 294000, plan: '2026-10-20', got: 0, gotDate: '—', inv: '未开票', note: '合同生效后支付' },
       { n: '收款期次 2 · 进度款（40%）', amt: 392000, plan: '2027-01-31', got: 0, gotDate: '—', inv: '未开票', note: '管线安装 60% 后计量' },
       { n: '收款期次 3 · 竣工结算款（27%）', amt: 264600, plan: '2027-04-30', got: 0, gotDate: '—', inv: '未开票', note: '竣工验收合格后结算' },
       { n: '收款期次 4 · 质保金（3%）', amt: 29400, plan: '2028-03-31', got: 0, gotDate: '—', inv: '未开票', note: '质保期满无质量问题后无息退还' },
     ] },
-  { id: 'HT000016', name: '云南建工集团办公楼消防设施检测合同', type: '销售合同', party: '云南建工集团有限公司', project: 'XM000178', amt: 1450000, execAmt: 1450000, status: '履约中', signStatus: '已签', contractRole: 'primary', recvPct: 40, recv: 580000, owner: '赵薇', sign: '2026-08-30', start: '2026-09-01', end: '2026-12-20', nodes: '预付 40% · 报告交付 57% · 质保 3%', overdue: false, overpay: false,
+  { id: 'HT000016', ourEntity: 'ENT002', taxRate: 6, cal: 'inc', name: '云南建工集团办公楼消防设施检测合同', type: '销售合同', party: '云南建工集团有限公司', project: 'XM000178', amt: 1450000, execAmt: 1450000, status: '履约中', signStatus: '已签', contractRole: 'primary', recvPct: 40, recv: 580000, owner: '赵薇', sign: '2026-08-30', start: '2026-09-01', end: '2026-12-20', nodes: '预付 40% · 报告交付 57% · 质保 3%', overdue: false, overpay: false,
     installments: [
       { n: '收款期次 1 · 预付款（40%）', amt: 580000, plan: '2026-09-05', got: 580000, gotDate: '2026-09-04', inv: '已开票', note: '银行已到账' },
       { n: '收款期次 2 · 检测报告交付款（57%）', amt: 826500, plan: '2026-12-20', got: 0, gotDate: '—', inv: '未开票', note: '报告交付并备案后支付' },
       { n: '收款期次 3 · 质保金（3%）', amt: 43500, plan: '2027-12-20', got: 0, gotDate: '—', inv: '未开票', note: '质保期满无质量问题后无息退还' },
     ] },
-  { id: 'HT000017', name: '文山三七产业园消防工程合同', type: '销售合同', party: '文山三七产业园管委会', project: 'XM000183', amt: 6800000, execAmt: 6800000, status: '履约中', signStatus: '已签', contractRole: 'primary', recvPct: 80, recv: 5440000, owner: '蓝峰', sign: '2026-03-20', start: '2026-03-25', end: '2026-10-31', nodes: '预付 20% · 进度 50% · 竣工 27% · 质保 3%', overdue: false, overpay: false,
+  { id: 'HT000017', ourEntity: 'ENT001', taxRate: 9, cal: 'inc', name: '文山三七产业园消防工程合同', type: '销售合同', party: '文山三七产业园管委会', project: 'XM000183', amt: 6800000, execAmt: 6800000, status: '履约中', signStatus: '已签', contractRole: 'primary', recvPct: 80, recv: 5440000, owner: '蓝峰', sign: '2026-03-20', start: '2026-03-25', end: '2026-10-31', nodes: '预付 20% · 进度 50% · 竣工 27% · 质保 3%', overdue: false, overpay: false,
     installments: [
       { n: '收款期次 1 · 预付款（20%）', amt: 1360000, plan: '2026-04-01', got: 1360000, gotDate: '2026-03-30', inv: '已开票', note: '银行已到账' },
       { n: '收款期次 2 · 进度款（50%）', amt: 3400000, plan: '2026-07-31', got: 3400000, gotDate: '2026-07-30', inv: '已开票', note: '银行已到账' },
       { n: '收款期次 3 · 竣工结算款（27%）', amt: 1836000, plan: '2026-11-30', got: 680000, gotDate: '2026-09-10', inv: '已开票', note: '部分到账 68 万，余款待竣工验收合格后结算' },
       { n: '收款期次 4 · 质保金（3%）', amt: 204000, plan: '2027-11-30', got: 0, gotDate: '—', inv: '未开票', note: '质保期满无质量问题后无息退还' },
     ] },
-  { id: 'WB000005', name: '大理古城文旅街区消防维护保养合同', type: '维护保养合同', party: '大理古城文旅运营管理有限公司', project: 'XM000188', amt: 620000, execAmt: 620000, status: '履约中', signStatus: '已签', contractRole: 'maintenance', recvPct: 25, recv: 155000, owner: '周斌', sign: '2026-09-05', start: '2026-09-10', end: '2027-09-09', nodes: '首期 25% · 二期 25% · 三期 50%', overdue: false, overpay: false,
+  { id: 'WB000005', ourEntity: 'ENT001', taxRate: 6, cal: 'inc', name: '大理古城文旅街区消防维护保养合同', type: '维护保养合同', party: '大理古城文旅运营管理有限公司', project: 'XM000188', amt: 620000, execAmt: 620000, status: '履约中', signStatus: '已签', contractRole: 'maintenance', recvPct: 25, recv: 155000, owner: '周斌', sign: '2026-09-05', start: '2026-09-10', end: '2027-09-09', nodes: '首期 25% · 二期 25% · 三期 50%', overdue: false, overpay: false,
     installments: [
       { n: '收款期次 1 · 首期服务费（25%）', amt: 155000, plan: '2026-09-10', got: 155000, gotDate: '2026-09-09', inv: '已开票', note: '服务期起始日支付' },
       { n: '收款期次 2 · 二期服务费（25%）', amt: 155000, plan: '2026-12-10', got: 0, gotDate: '—', inv: '未开票', note: '第四季度巡检报告确认后支付' },
       { n: '收款期次 3 · 三期服务费（50%）', amt: 310000, plan: '2027-06-10', got: 0, gotDate: '—', inv: '未开票', note: '年度消防设施完好率达标后支付' },
     ] },
 ];
+
+/* 合同生效日期 / 结束日期（2026-09-28 列表改版新增字段的种子后处理）：
+   采用铁律允许的「数组闭合后 forEach 后处理」方式补缺省值，不动 300+ 行字面量本体——
+   模块加载时即写入原数组条目，resetStore() 的 JSON 深拷贝还原后字段依然在；
+   新签合同的生效日期在向导提交时直接写入。生效日期缺省回落 = 签署日期（未签署回落 start），
+   结束日期缺省回落 = end（原「到期日」改名口径，独立成列）。 */
+CONTRACTS.forEach((c) => {
+  c.effectiveDate = c.effectiveDate || (c.sign && c.sign !== '—' ? c.sign : c.start);
+  c.effectiveEnd = c.effectiveEnd || c.end;
+});
 
 
 /* ============================ 电子签章（CON-02 · 落签地配置 + 签署链） ============================
@@ -1623,6 +1874,24 @@ const PROJ_FACILITY_SEED: Record<string, { builtArea: number; points: ProjPoint[
   XM000150: { builtArea: 24000, assetAmt: 2280000, points: [
     { kind: '火灾探测器', qty: 460 }, { kind: '手报 / 模块', qty: 90 }, { kind: '喷淋头', qty: 640 },
     { kind: '消火栓', qty: 72 }, { kind: '防火卷帘', qty: 12 }] },
+
+  /* ---- 以下补齐在办维保 / 检测项目台账（每个 WB / JC 项目都应有计量基数） ---- */
+  /* 医院维保二期 26,000㎡（覆盖部分楼宇）× 190 元/㎡ */
+  XM000170: { builtArea: 26000, assetAmt: 4940000, points: [
+    { kind: '火灾探测器', qty: 700 }, { kind: '手报 / 模块', qty: 120 }, { kind: '喷淋头', qty: 980 },
+    { kind: '消火栓', qty: 78 }, { kind: '防火卷帘', qty: 13 }] },
+  /* 文旅街区维保 18,000㎡ × 100 元/㎡（景区公共建筑） */
+  XM000188: { builtArea: 18000, assetAmt: 1800000, points: [
+    { kind: '火灾探测器', qty: 250 }, { kind: '手报 / 模块', qty: 52 }, { kind: '喷淋头', qty: 310 },
+    { kind: '消火栓', qty: 44 }, { kind: '防火卷帘', qty: 6 }] },
+  /* 教学楼检测 13,000㎡ × 100 元/㎡（教育建筑，面积小、检测档位单价高） */
+  XM000161: { builtArea: 13000, assetAmt: 1300000, points: [
+    { kind: '火灾探测器', qty: 250 }, { kind: '手报 / 模块', qty: 48 }, { kind: '喷淋头', qty: 330 },
+    { kind: '消火栓', qty: 38 }, { kind: '防火卷帘', qty: 6 }] },
+  /* 办公楼检测 36,000㎡ × 110 元/㎡ */
+  XM000178: { builtArea: 36000, assetAmt: 3960000, points: [
+    { kind: '火灾探测器', qty: 410 }, { kind: '手报 / 模块', qty: 84 }, { kind: '喷淋头', qty: 620 },
+    { kind: '消火栓', qty: 66 }, { kind: '防火卷帘', qty: 14 }] },
 };
 PROJECTS.forEach((p) => {
   const f = PROJ_FACILITY_SEED[p.id];
@@ -1738,11 +2007,11 @@ export const PROJECT_TEAM: Record<string, { name: string; role: string; phone: s
     { name: '孙工', role: '巡检工程师', phone: '138****9027' },
   ],
 };
-/** 取项目团队（缺省给一套通用班组，保证 Tab 不空） */
+/** 取项目团队（缺省给一套通用班组，保证 Tab 不空；安全员避开 pm 常用名，防同屏两行同名） */
 export const teamOfProject = (pid: string, pm: string) =>
   PROJECT_TEAM[pid] || [
     { name: pm, role: '项目经理', phone: '138****0000' },
-    { name: '陈工', role: '安全员', phone: '138****4418' },
+    { name: '杨工', role: '安全员', phone: '138****4418' },
   ];
 
 
@@ -2198,7 +2467,7 @@ export function catOptions(root: 'prod' | 'mat'): { id: string; label: string }[
  *   ① 套件的「人工 / 其他」是自由填写的数字，不引用任何主数据 → 成本与台账脱节；
  *   ② 强制认证标记与合规证书两处各自维护 → 同一物料证书类型两页说法不一；
  *   ③ 合规页出现台账中根本不存在的「孤儿物料」。
- * 现在统一为 ITEMS 一张表，用 ty 区分三类：
+ * 现在统一为 ITEMS 一张表，用 ty 区分四类：
  *   材料 | 有库存（仓库分账 + 安全线） | CCCF 等证书        | 成本 = 采购价
  *   设备 | 有库存                     | CCCF 等证书        | 成本 = 采购价
  *   服务 | 无实物库存                 | 资质要求字段        | 成本 = 人工构成 + 耗材行
@@ -2630,7 +2899,7 @@ export const PRODUCTS = [...SERVICES, ...KITS];
  * 编辑已被引用的配置 → 自动生成新版本，旧版永久保留（报价引用快照）。
  * ================================================================== */
 export type RecipeLine = {
-  /** 行类型：物料 / 服务 / 子套件 */
+  /** 行类型：物料 / 服务 / 软件 / 子套件 */
   kind: ItemKind;
   /** 引用对象（只能是 ITEMS 中已存在的主数据编码） */
   code: string;
@@ -2982,6 +3251,35 @@ export const RECEIVABLES = [
   { id: 'YS000005', contract: 'HT000011', customer: '广西柳州钢铁集团有限公司', node: '预付款 20%', amt: 1120000, dueDate: '2026-10-08', status: '可请款', overdueDays: 0, owner: '赵薇' },
 ];
 
+/* ============================ 应付期次（应收应付台账 · fund 页） ============================
+ * 与采购/分包合同金额勾稽可口算：CG000003（86万）= 预付 30% 25.8万 + 到货 60% 51.6万；
+ * CG000005（58万）= 进度 50% 29万 + 结算 30% 17.4万。status：待付 / 部分付 / 已付清 / 未到期；
+ * overdueDays 为静态演示值（与 RECEIVABLES 同口径）。 */
+export const PAYABLES = [
+  { id: 'YF000001', contract: 'CG000003', supplier: '云南××消防设备有限公司', node: '预付款 30%', amt: 258000, paidAmt: 258000, dueDate: '2026-08-10', status: '已付清', overdueDays: 0, owner: '周斌' },
+  { id: 'YF000002', contract: 'CG000003', supplier: '云南××消防设备有限公司', node: '到货款 60%', amt: 516000, paidAmt: 0, dueDate: '2026-09-30', status: '待付', overdueDays: 0, owner: '周斌' },
+  { id: 'YF000003', contract: 'CG000005', supplier: '昆明××建筑劳务有限公司', node: '进度款 50%', amt: 290000, paidAmt: 100000, dueDate: '2026-09-05', status: '部分付', overdueDays: 15, owner: '周斌' },
+  { id: 'YF000004', contract: 'CG000005', supplier: '昆明××建筑劳务有限公司', node: '结算款 30%', amt: 174000, paidAmt: 0, dueDate: '2026-11-15', status: '未到期', overdueDays: 0, owner: '周斌' },
+];
+
+/* ============================ 隐患台账（合规与档案 · hazard 页） ============================
+ * 六步闭环（2026-09-28 评审 P0）：发现 → 定级（一般/重大）→ 整改单 → 整改 → 复核 → 闭环。
+ * status：待整改 / 整改中 / 复核中 / 已闭环；逾期 = status!=='已闭环' && limitDate < TODAY（页内派生，
+ * 写操作改状态后自动正确）。重大隐患限期未闭环走「上报监管」出口（仅台账登记，作业执行在外部系统）。
+ * source：维保巡检 / 检测判定 / 施工自查 / 验收整改 / 外部检查；owner 为整改责任人（演示人名）。 */
+export const HAZARDS = [
+  { id: 'YH000001', title: '地下车库 B2 北区 3 只喷头渗漏', level: '重大', source: '维保巡检', project: 'XM000123', location: 'B2 车库北区', foundDate: '2026-09-02', limitDate: '2026-09-12', owner: '杨帆', status: '整改中' },
+  { id: 'YH000002', title: '消防泵房 2# 泵启泵压力开关失灵', level: '重大', source: '维保巡检', project: 'XM000170', location: '地下泵房', foundDate: '2026-09-08', limitDate: '2026-09-25', owner: '杨帆', status: '待整改' },
+  { id: 'YH000003', title: '三层走廊感烟探测器误报频发', level: '一般', source: '维保巡检', project: 'XM000118', location: '3F 走廊', foundDate: '2026-08-28', limitDate: '2026-09-10', owner: '杨帆', status: '复核中' },
+  { id: 'YH000004', title: '常闭防火门被木楔固定常开 ×2', level: '一般', source: '检测判定', project: 'XM000142', location: '2# 厂房东侧', foundDate: '2026-09-11', limitDate: '2026-09-26', owner: '李锐', status: '整改中' },
+  { id: 'YH000005', title: '灭火器压力表指针低于绿区 ×4', level: '一般', source: '检测判定', project: 'XM000161', location: '实验楼 B 栋', foundDate: '2026-09-12', limitDate: '2026-09-27', owner: '李锐', status: '待整改' },
+  { id: 'YH000006', title: '应急照明灯断电后未点亮 ×6', level: '一般', source: '验收整改', project: 'XM000174', location: '1# 楼梯间', foundDate: '2026-08-20', limitDate: '2026-09-05', owner: '王磊', status: '已闭环', closedDate: '2026-09-03' },
+  { id: 'YH000007', title: '消防水池液位计显示失真', level: '一般', source: '维保巡检', project: 'XM000188', location: '泵房', foundDate: '2026-09-15', limitDate: '2026-09-30', owner: '杨帆', status: '整改中' },
+  { id: 'YH000008', title: '排烟风机联动测试末端风阀未动作', level: '一般', source: '施工自查', project: 'XM000183', location: '地下车库', foundDate: '2026-09-16', limitDate: '2026-10-08', owner: '王磊', status: '整改中' },
+  { id: 'YH000009', title: '疏散指示标志缺失 ×9', level: '一般', source: '外部检查', project: 'XM000096', location: '门诊楼 3 层', foundDate: '2026-08-15', limitDate: '2026-08-30', owner: '王磊', status: '已闭环', closedDate: '2026-08-28' },
+  { id: 'YH000010', title: '报警主机备电故障告警', level: '一般', source: '维保巡检', project: 'XM000118', location: '消控室', foundDate: '2026-09-18', limitDate: '2026-10-10', owner: '杨帆', status: '复核中' },
+];
+
 /* ============================ 工具函数 ============================ */
 export const fmt = (n: number) => '¥' + Math.round(n).toLocaleString('en-US');
 export const fmtWan = (n: number) => {
@@ -3090,7 +3388,7 @@ export function addDays(ds: string, n: number): string {
 }
 
 /* ==================================================================
- * 物料 / 服务与套件主数据 · 配套数据集
+ * 物料 / 服务 / 软件 / 套件主数据 · 配套数据集
  * 说明：以下数据集原先硬编码在 MaterialPage 页内（无法溯源），
  *       现已下沉到数据层，使页面展示的每一条记录都可追溯到明确数据源。
  * ================================================================== */

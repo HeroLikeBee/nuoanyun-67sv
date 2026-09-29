@@ -9,16 +9,16 @@
 import React from 'react';
 import type { PROJECTS } from '../data';
 import type {
-  PjArrivalRow, PjChangeRow, PjCheckInfo, PjHiddenRow, PjOpRow, PjPartyGroup,
-  PjRectifyRound, PjSafeRow, PjScene, PjSiteLog, PjVisaRow,
+  PjArrivalRow, PjChangeRow, PjCheckInfo, PjDeliver, PjHiddenRow, PjInvIn, PjOpRow, PjPartyGroup,
+  PjRectifyRound, PjSafeRow, PjScene, PjSiteLog, PjTask, PjVisaRow,
 } from './seed';
 
 export type Project = typeof PROJECTS[number];
 
 /* 子页数据行类型统一由 seed.ts 定义并在此转出，避免子页各自声明同名类型 */
 export type {
-  PjArrivalRow, PjChangeRow, PjCheckInfo, PjHiddenRow, PjOpRow, PjPartyGroup,
-  PjRectifyRound, PjSafeRow, PjScene, PjSiteLog, PjVisaRow,
+  PjArrivalRow, PjChangeRow, PjCheckInfo, PjDeliver, PjHiddenRow, PjInvIn, PjOpRow, PjPartyGroup,
+  PjRectifyRound, PjSafeRow, PjScene, PjSiteLog, PjTask, PjVisaRow,
 };
 
 /** 子页统一 props：go 用于跨页穿透，pj 用于回到项目自身子页 */
@@ -39,6 +39,11 @@ export type PjCtx = {
    * 不传 contractId 时落到本项目第一份收款类合同。
    */
   gotoContractChange: (contractId?: string) => void;
+  /**
+   * 收付款登记一律回合同侧（合同详情「收付款计划」Tab）：项目侧是只读投影，不在项目页登记。
+   * 不传 contractId 时落到本项目第一份收款类合同。
+   */
+  gotoContractPlan: (contractId?: string) => void;
   toast: (msg: string, tone?: 'ok' | 'err') => void;
   /** 全局「操作记录」抽屉 */
   openLog: () => void;
@@ -105,13 +110,9 @@ export type PjCtx = {
   machSum: number;
   matRows: PjMatRow[];
   matSum: number;
-  /** 收支明细（已按资金域筛选器过滤） */
-  payRows: PjPayRow[];
-  /** 收支明细全集 —— 与资金域筛选器无关。
-      收入类口径（回款四段、无合同付款挂账）必须用它，否则资金域一筛选就把别处的账清空。 */
+  /** 收支明细全集（收入 / 支出 / 无合同付款同源）——
+      收款口径按 kind='收入' 过滤、付款口径取其余，页级筛选状态收敛到各子页内部，不上浮 ctx。 */
   payRowsAll: PjPayRow[];
-  payFilter: string;
-  setPayFilter: (v: string) => void;
   SUM_IN: number;
   SUM_OUT: number;
   /** 应收账龄（已开票未到账）最长天数 */
@@ -145,7 +146,7 @@ export type PjCtx = {
   /* ---------- 质量域台账 ---------- */
   arrivals: PjArrivalRow[];
   hidden: PjHiddenRow[];
-  /** 安全检查（HSE）—— 归执行履约域，不属质量验收 */
+  /** 安全检查（HSE）—— 归质量安全域（质量 + 现场安全），原履约域区块重构后迁入 */
   safeRows: PjSafeRow[];
   rectifyRounds: PjRectifyRound[];
   checkInfo: PjCheckInfo;
@@ -156,6 +157,16 @@ export type PjCtx = {
   siteLogs: PjSiteLog[];
   parties: PjPartyGroup[];
   ops: PjOpRow[];
+
+  /* ---------- 11-Tab 重构新增：任务 / 交付物 / 发票 ---------- */
+  /** 项目任务（三线工单实体：施工任务 / 巡检工单 / 检测作业，kind 区分） */
+  tasks: PjTask[];
+  /** 交付物进展（里程碑必传资料的编制 → 提交 → 确认） */
+  delivers: PjDeliver[];
+  /** 进项发票（收票口径，与付款类合同四流合一，只读镜像） */
+  invIn: PjInvIn[];
+  /** 销项发票（本项目建设合同开出的票，蓝红票子页签共用，只读镜像） */
+  invOut: { id: string; no: string; date: string; buyer: string; amt: number; tax: number; total: number; status: string; contract: string }[];
 };
 
 /* ---------- 子页共用的行类型（放在 ctx 内，避免子页各自声明同名类型） ---------- */

@@ -1,15 +1,14 @@
-// 项目详情 · 合同变更子页
+// 项目详情 · 合同信息子页
 //
 // 回答「合同怎么签的、收款期次怎么安排、变更签证怎么算」。
 // 合同树按收款 / 付款方向分组，收款期次展开看合同安排；
 // 变更与签证是合同单据（要签补充协议）—— 项目侧只承接结果，发起回落到合同详情「变更与签证」。
+// 消防设施台账（维保 / 检测的计量与计价依据）已独立成「设施台账与计价」页，不在本 Tab；
 // 资金实际收支 / 保证金在「资金台账」，成本在「成本管控」，本页不重复。
 import React, { useState } from 'react';
 import { Btn, Code, EntityLink, IdCell, Op, Steps, Tag, Tip } from '../ui';
 import { Ico } from '../icons';
 import { PjSection } from './PjSection';
-import { BILL_BASIS_CN, fmt, SERVICES, srvRateOf, wbQuoteOf } from '../data';
-import type { BillBasis } from '../data';
 import type { PjCtx, PjPayRow, PjSaleContract } from './ctx';
 
 /** 无合同付款行状态（合同树内挂账区用） */
@@ -42,7 +41,7 @@ function ContractTree({ C }: { C: PjCtx }) {
 
   return (
     <PjSection
-      title={<><Ico n="card" size={16} /> 项目合同树</>}
+      title={<>项目合同树</>}
       extra={<>
         <span className="nc-cell-sub">收款类 {C.saleCt.length} 份 · {saleSum.toLocaleString()} 元　付款类 {C.buyCt.length} 份 · {buySum.toLocaleString()} 元</span>
         <Tip w={380} text="按收款 / 付款方向分组：同一份合同在项目侧与合同详情侧双向可见。执行中项目若无销售合同，会进驾驶舱「无合同施工」风险榜。" />
@@ -160,7 +159,7 @@ function ChangeVisa({ C }: { C: PjCtx }) {
   const orphan = C.visas.filter((v) => v.chg === '—');
   return (
     <PjSection
-      title={<><Ico n="swap" size={16} /> 变更与签证</>}
+      title={<>变更与签证</>}
       extra={<>
         <span className="nc-cell-sub">执行额 = 合同额 + 已生效变更 {C.CHG_EFFECTIVE.toLocaleString()}{C.CHG_PENDING > 0 ? ` · 审批中 +${C.CHG_PENDING.toLocaleString()}` : ''}</span>
         <Tip w={400} text="变更属合同单据（生效后要签补充协议），因此只能由合同发起：项目侧展示它落到本项目的结果，发起请回到对应合同的「变更与签证」。" />
@@ -232,114 +231,10 @@ function ChangeVisa({ C }: { C: PjCtx }) {
   );
 }
 
-/**
- * 消防设施台账：回答「服务对象有多大」——建筑面积、各类点位数量、设施资产原值。
- * 维保 / 检测报价不数材料，数的就是这三个基数：后续报价行按台账自动带入，台账缺项则报价行无依据。
- */
-function FacilityLedger({ C }: { C: PjCtx }) {
-  const area = C.P.builtArea || 0;
-  const pts = C.P.points || [];
-  const asset = C.P.assetAmt || 0;
-  const totalPts = pts.reduce((s, p) => s + p.qty, 0);
-  const empty = !area && !pts.length && !asset;
-
-  /* 价卡按业务线选定：维保项目挂「年度维保」、检测项目挂「消防设施检测」，
-     不再写死某一张价卡 —— 否则检测项目展示的始终是维保单价与「元/年」。 */
-  const svc = SERVICES.find((s) => (C.P.biz === 'JC'
-    ? /检测/.test(s.name)
-    : /维保/.test(s.name)));
-  const rateCode = svc?.code;
-  const unitCn = svc?.unit === '年' ? '元/年' : `元/${svc?.unit ?? '次'}`;
-
-  const rate = srvRateOf(rateCode);
-  const tryIt = (b: BillBasis) => (rate ? wbQuoteOf(rateCode!, { area, points: pts, assetAmt: asset }, b) : undefined);
-  const areaQ = tryIt('area');
-  const pointQ = tryIt('point');
-  const assetQ = tryIt('asset');
-
-  return (
-    <PjSection
-      title={<><Ico n="building" size={16} /> 消防设施台账</>}
-      extra={<>
-        <span className="nc-cell-sub">
-          建筑面积 {area ? area.toLocaleString('en-US') : '—'} ㎡ · 点位 {totalPts ? totalPts.toLocaleString('en-US') : '—'} 个 ·
-          设施资产原值 {asset ? fmt(asset) : '—'}
-        </span>
-        <Tip w={380} text="维保 / 检测报价的计量基数取自本台账：按面积（阶梯单价）、按点位（分设备单价）、按设施造价（百分比）三种口径各有取值。台账缺项时报价只能在报价页手工补录，事后须回来补齐。" />
-      </>}
-    >
-      {empty ? (
-        <div className="nc-empty-mini">
-          本项目尚未登记消防设施台账。做维保 / 检测报价时会缺少计量基数，需在报价页手工补录后回来补齐。
-        </div>
-      ) : (
-        <>
-          <table className="nc-tbl" style={{ minWidth: 880 }}>
-            <thead><tr>
-              <th>点位类别</th><th style={{ width: 100 }}>计量单位</th>
-              <th style={{ width: 120, textAlign: 'right' }}>数量</th>
-              <th style={{ width: 150, textAlign: 'right' }}>单价（{unitCn}）</th>
-              <th style={{ width: 130, textAlign: 'right' }}>年度小计（元）</th>
-            </tr></thead>
-            <tbody>
-              {pts.map((p) => {
-                const pr = rate?.pointRates?.find((x) => x.kind === p.kind);
-                return (
-                  <tr key={p.kind}>
-                    <td>{p.kind}</td>
-                    <td className="nc-tiny">{pr?.unit || '—'}</td>
-                    <td className="is-num num">{p.qty.toLocaleString('en-US')}</td>
-                    <td className="is-num num">{pr ? fmt(pr.price) : '—'}</td>
-                    <td className="is-num num"><b>{pr ? fmt(pr.price * p.qty) : '—'}</b></td>
-                  </tr>
-                );
-              })}
-              {!pts.length && <tr><td colSpan={5} className="nc-empty-mini">无点位台账</td></tr>}
-            </tbody>
-          </table>
-
-          <div className="nc-ledhd" style={{ marginTop: 16 }}>按本项目台账试算{C.P.biz === 'JC' ? '单次检测' : '年度维保'}
-            <Tip w={420} text="同一套台账、三种行业口径的价格差异一目了然 —— 报给甲方选哪种，取决于结算习惯与「哪种口径对我方更有利」，因此报价时还能再切换。" />
-          </div>
-          <table className="nc-tbl" style={{ minWidth: 880 }}>
-            <thead><tr>
-              <th style={{ width: 150 }}>计价口径</th><th>算式</th>
-              <th style={{ width: 140, textAlign: 'right' }}>金额（元/年）</th>
-            </tr></thead>
-            <tbody>
-              {[
-                { b: 'area' as BillBasis, q: areaQ },
-                { b: 'point' as BillBasis, q: pointQ },
-                { b: 'asset' as BillBasis, q: assetQ },
-              ].map(({ b, q }) => (
-                <tr key={b}>
-                  <td>{BILL_BASIS_CN[b]}</td>
-                  <td className="nc-tiny nc-muted">
-                    {q && q.total > 0
-                      ? q.rows.map((r) => (r.qty > 1 ? `${r.label} × ${r.unitPrice}` : r.label)).join('；')
-                      : '台账缺该口径所需基数'}
-                    {q?.hitMin ? ` · 低于最低限价，按 ${fmt(q.minFee)} 保底` : ''}
-                  </td>
-                  <td className="is-num num"><b>{q && q.total > 0 ? fmt(q.total) : '—'}</b></td>
-                </tr>
-        ))}
-            </tbody>
-          </table>
-          <div className="nc-cell-sub" style={{ marginTop: 8 }}>
-            三种口径结果不同属行业常态：面积 / 点位对应常规年度巡检，按设施造价对应全包型合同（含配件更换 / 驻点）。
-            签约前须选定一种写入合同，选定后该口径即为结算依据。
-          </div>
-        </>
-      )}
-    </PjSection>
-  );
-}
-
 export default function BizSub({ C }: { C: PjCtx }) {
   return (
     <>
       <ContractTree C={C} />
-      <FacilityLedger C={C} />
       <ChangeVisa C={C} />
     </>
   );

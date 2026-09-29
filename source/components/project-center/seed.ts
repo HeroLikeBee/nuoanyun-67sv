@@ -299,6 +299,10 @@ export type PjDemo = {
   siteLogs: PjSiteLog[];
   parties: PjPartyGroup[];
   ops: PjOpRow[];
+  /** 项目任务（三线工单实体）· 交付物进展 · 进项发票（11-Tab 重构新增） */
+  tasks: PjTask[];
+  delivers: PjDeliver[];
+  invIn: PjInvIn[];
 };
 
 export type PjChangeRow = { id: string; title: string; amt: number; st: string; by: string; date: string; contract: string; cat: string; flowIdx?: number };
@@ -311,6 +315,22 @@ export type PjCheckInfo = { org: string; no: string; date: string; res: string; 
 export type PjSiteLog = { date: string; weather: string; text: string; photos: number; att: string };
 export type PjPartyGroup = { key: string; g: string; tone: 'blue' | 'green' | 'orange' | 'purple'; rows: { name: string; role: string; org: string; phone: string; st: string }[] };
 export type PjOpRow = { t: string; w: string; tag: string; d: string };
+/** 项目任务（三线共用工单实体）：GC 施工任务 / WB 巡检工单 / JC 检测作业，字段同构、kind 区分 */
+export type PjTask = {
+  id: string; name: string; kind: string; mile: string;
+  owner: string; team: string; start: string; end: string;
+  st: '未开始' | '进行中' | '已完成' | '已逾期'; note: string;
+};
+/** 交付物进展：里程碑必传资料的「编制 → 提交 → 确认」推进（归项目进度页） */
+export type PjDeliver = {
+  id: string; name: string; mile: string; due: string;
+  st: '未开始' | '编制中' | '已提交' | '已确认'; by: string;
+};
+/** 进项发票（收票口径）：与付款类合同四流合一，项目侧只读镜像 */
+export type PjInvIn = {
+  id: string; contract: string; party: string; amt: number;
+  date: string; st: '已收票' | '待收票'; note: string;
+};
 
 const CT_TERMINAL = ['已终止', '已关闭', '作废'];
 const isBuyCt = (c: Contract) => c.type === '采购合同' || c.type === '分包合同';
@@ -418,11 +438,14 @@ export function buildPjDemo(P: Project, contracts: Contract[]): PjDemo {
   let pfSeq = 0;
   let hcSeq = 0;
 
-  /* 收入：收款类合同（非补充协议、非已终止）的期次 —— 到账的进「已到账」，开票未到账的挂账龄 */
+  /* 收入：收款类合同（非补充协议、非已终止）的期次 —— 到账的进「已到账」，开票未到账的挂账龄。
+     已续签合同排除：它已被新周期合同替代（renewedTo），收款发生在上一个服务周期，
+     与当前合同的合同额/执行额不可比（若计入会出现回款率 > 100%，如 XM000118 两份续签合同合计 150 万 > 96 万）；
+     旧周期流水随旧合同归档，在合同详情仍可查，但不进当前项目现金口径（与 P.recvPct 同源）。 */
   saleCtAll
     /* 纳入主合同 + 服务类合同（独立服务补充、框架执行单，凡挂本项目且有自己期次）的真实收付；
-       仅排除价格调整补充（无独立期次，随主合同结算）与已终止合同。 */
-    .filter((c) => c.contractRole !== 'supplement_price' && !CT_TERMINAL.includes(c.status))
+       仅排除价格调整补充（无独立期次，随主合同结算）、已终止与已续签合同。 */
+    .filter((c) => c.contractRole !== 'supplement_price' && !CT_TERMINAL.includes(c.status) && c.status !== '已续签')
     .forEach((c) => {
       (c.installments ?? []).forEach((i: Installment) => {
         if (i.got > 0) {
@@ -564,8 +587,12 @@ export function buildPjDemo(P: Project, contracts: Contract[]): PjDemo {
   }));
   const matSum = matRows.reduce((s, r) => s + r.amt, 0);
 
-  /* ---------- 4.7 商务：变更 / 签证 / 保证金 ---------- */
-  const mainCt = saleCtAll.find((c) => c.contractRole === 'primary') ?? saleCtAll[0];
+  /* ---------- 4.7 商务：变更 / 签证 / 保证金 ----------
+     主合同锚点：优先 contractRole=primary；否则取未被续签替代的当前周期合同（已续签 = 旧周期，
+     变更 / 签证不再挂它），不依赖数组顺序。 */
+  const mainCt = saleCtAll.find((c) => c.contractRole === 'primary')
+    ?? saleCtAll.find((c) => c.status !== '已续签')
+    ?? saleCtAll[0];
   const mainId = mainCt?.id ?? '';
   const execDelta = mainCt ? Math.max(0, mainCt.execAmt - mainCt.amt) : 0;
   const changes: PjChangeRow[] = [];
@@ -858,6 +885,66 @@ export function buildPjDemo(P: Project, contracts: Contract[]): PjDemo {
     ...(curMileName ? [{ t: `${TODAY} 09:30`, w: '系统', tag: '自动', d: `里程碑推进至「${curMileName}」· 节点准入资料待补齐` }] : []),
   ];
 
+  /* ---------- 4.10 任务 / 交付物 / 进项票（11-Tab 重构新增实体） ----------
+     任务 = 三线共用工单实体（kind 区分施工任务 / 巡检工单 / 检测作业，复用「项目任务」Tab 承载派工）；
+     交付物 = 里程碑必传资料的「编制 → 提交 → 确认」进展；
+     进项票 = 付款类合同对应的供应商发票（收票口径，与付款四流合一）。 */
+  const TASK_SRC: Record<string, { kind: string; rows: [string, string][] }> = {
+    GC: { kind: '施工任务', rows: [
+      ['喷淋管网安装（一区）', '管工班'], ['报警管线敷设（二区）', '电工班'],
+      ['探测器安装与编址', '电工班'], ['防排烟风管制作', '风管班'], ['系统联动调试', '调试组'],
+    ] },
+    WB: { kind: '巡检工单', rows: [
+      ['月度例行巡检（主楼）', '维保一组'], ['月度例行巡检（地库）', '维保二组'],
+      ['灭火器年检换粉', '维保一组'], ['季度联动测试', '调试组'], ['末端试水装置保养', '维保二组'],
+    ] },
+    JC: { kind: '检测作业', rows: [
+      ['火灾报警系统检测', '检测一组'], ['消火栓系统检测', '检测二组'],
+      ['喷淋系统检测', '检测一组'], ['防排烟系统检测', '检测二组'], ['汇总检测数据出报告', '报告组'],
+    ] },
+  };
+  const taskSrc = TASK_SRC[P.biz] ?? TASK_SRC.GC;
+  const tasks: PjTask[] = taskSrc.rows.map(([name, team], i) => {
+    const mile = tpl[Math.min(tpl.length - 1, Math.floor((i / taskSrc.rows.length) * tpl.length))].name;
+    const start = past(pick(`${proj}tk${i}s`, 30, 60) + i * 3);
+    const end = addDays(start, pick(`${proj}tk${i}d`, 6, 18));
+    const done = daysBetween(end, TODAY) > 0 && (i / taskSrc.rows.length) * 100 <= progActual;
+    return {
+      id: `RW${String(1200 + i).padStart(6, '0')}`, name, kind: taskSrc.kind,
+      mile, owner: owners[i % owners.length], team, start, end,
+      st: done ? '已完成'
+        : !done && daysBetween(end, TODAY) > 0 ? '已逾期'
+          : daysBetween(start, TODAY) >= 0 ? '进行中' : '未开始',
+      note: `${mile} 配套作业`,
+    };
+  });
+  const delivers: PjDeliver[] = attach
+    .filter((g) => g.req.length > 0)
+    .flatMap((g, gi) => g.req.map((r, ri) => {
+      const node = tpl.find((n) => n.name === g.mile)!;
+      const done = node.pct <= progActual;
+      const isCur = g.mile === curMileName;
+      return {
+        id: `DV${String(300 + gi * 5 + ri).padStart(4, '0')}`, name: r, mile: g.mile,
+        due: mileRows[gi]?.plan ?? P.end,
+        st: done ? '已确认' : isCur ? (ri % 2 ? '已提交' : '编制中') : '未开始',
+        by: g.files[0]?.by ?? owners[gi % owners.length],
+      };
+    }));
+  const invIn: PjInvIn[] = buyCt.flatMap((b, i) => {
+    const rows: PjInvIn[] = [{
+      id: `JN${String(710 + i * 2).padStart(4, '0')}`, contract: b.id, party: b.party,
+      amt: Math.round(b.amt * 0.6), date: past(pick(`${proj}jv${i}a`, 12, 40)), st: '已收票',
+      note: '增值税专用发票 · 材料款',
+    }];
+    if (b.status !== '待审批') rows.push({
+      id: `JN${String(711 + i * 2).padStart(4, '0')}`, contract: b.id, party: b.party,
+      amt: Math.round(b.amt * 0.25), date: addDays(TODAY, pick(`${proj}jv${i}b`, 3, 20)), st: '待收票',
+      note: '进度款发票 · 开票中',
+    });
+    return rows;
+  });
+
   return {
     scene,
     mileRows, attach, attCnt, curMileName, curReq, curFiles, curMiss, mileAxis,
@@ -867,6 +954,7 @@ export function buildPjDemo(P: Project, contracts: Contract[]): PjDemo {
     changes, visas, deposits,
     arrivals, hidden, safeRows, rectifyRounds, checkInfo,
     siteLogs, parties, ops,
+    tasks, delivers, invIn,
   };
 }
 

@@ -7,7 +7,6 @@
 // ⚠️ 数据全部经 PjCtx（buildPjDemo 按本项目派生），不持有跨项目常量。
 import React, { useMemo, useState } from 'react';
 import { Banner, Btn, Card, Code, EntityLink, Tag, Tip } from '../ui';
-import { Ico } from '../icons';
 import { TODAY } from '../data';
 import { PjSection } from './PjSection';
 import type { PjCtx } from './ctx';
@@ -30,7 +29,7 @@ function Team({ C }: { C: PjCtx }) {
   }, [C.teamRows]);
   return (
     <PjSection
-      title={<><Ico n="user" size={16} /> 项目团队</>}
+      title={<>项目团队</>}
       extra={<>
         <span className="nc-cell-sub">{rows.length} 人 · 项目经理 {C.P.pm}</span>
         <Btn size="sm" onClick={() => C.openM('team')}>调整团队</Btn>
@@ -49,7 +48,7 @@ function Team({ C }: { C: PjCtx }) {
             <tbody>
               {rows.map((m, i) => (
                 <tr key={`${m.name}-${i}`}>
-                  <td><b>{m.name}</b>{m.name === C.P.pm && <Tag tone="blue">项目经理</Tag>}</td>
+                  <td><b>{m.name}</b>{m.role === '项目经理' && <Tag tone="blue">项目经理</Tag>}</td>
                   <td>{m.role !== '—' ? m.role : m.trade}</td>
                   <td className="nc-cell-sub">{m.org}</td>
                   <td className="num">{m.phone}</td>
@@ -87,7 +86,7 @@ function Certs({ C }: { C: PjCtx }) {
   const soon = rows.filter((r) => r.soon);
   return (
     <PjSection
-      title={<><Ico n="shield" size={16} /> 证书占用</>}
+      title={<>证书占用</>}
       extra={<>
         <span className="nc-cell-sub">{rows.length} 项在占{expired.length ? ` · 已过期 ${expired.length} 项` : ''}{soon.length ? ` · 项目周期内到期 ${soon.length} 项` : ''}</span>
         <Tip w={400} text="证书是独立实体，通过占用记录与项目关联；项目周期内到期的证书须提前续期，否则影响节点准入与验收签字。" />
@@ -128,19 +127,19 @@ function Certs({ C }: { C: PjCtx }) {
 function Parties({ C }: { C: PjCtx }) {
   if (C.parties.length === 0) {
     return (
-      <PjSection title={<><Ico n="user" size={16} /> 外部干系人</>}>
+      <PjSection title={<>外部干系人</>}>
         <div className="nc-empty">本项目暂无外部干系人记录。</div>
       </PjSection>
     );
   }
   return (
     <PjSection
-      title={<><Ico n="user" size={16} /> 外部干系人</>}
+      title={<>外部干系人</>}
       extra={<span className="nc-cell-sub">{C.parties.map((g) => g.g).join(' / ')} · 对接人与联系方式</span>}
     >
       <div className="nc-2col">
         {C.parties.map((g) => (
-          <Card key={g.key} hd={<span><Tag tone={g.tone}>{g.g}</Tag> <span className="nc-cell-sub">{g.rows.length} 人</span></span>}>
+          <Card key={g.key} sub hd={<span><Tag tone={g.tone}>{g.g}</Tag> <span className="nc-cell-sub">{g.rows.length} 人</span></span>}>
             <table className="nc-tbl">
               <thead><tr>
                 <th style={{ width: 90 }}>姓名</th><th style={{ width: 140 }}>角色</th>

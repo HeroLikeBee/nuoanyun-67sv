@@ -3,8 +3,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   Alert, Banner, Btn, Card, ChainBar, Check, DataTable, Drawer, Field, KvGrid, ListToolbar, Modal,
   EntityLink, Money, Op, OpSep, PageHead, TableFoot, Tag, Tabs, Tile, Timeline, maskPhone, canSeePhone, useToast, type Col, pressProps,} from '../components/ui';
-import { CONTRACTS, ITEMS, MATERIALS, SUPPLIERS, TODAY, fmt, fmtWan, supScore } from '../components/data';
-import { getFocus } from '../components/store';
+import { CONTRACTS, ITEMS, ITEM_KINDS, MATERIALS, SUP_CATS, SUPPLIERS, TODAY, fmt, fmtWan, supScore } from '../components/data';
+import { getFocus, setPendingCtDir } from '../components/store';
 import { Ico } from '../components/icons';
 import { ExportButton, useExport, getUserName, ExportDialog, type ExportField } from '../components/export';
 import { RecognitionWorkbench, type RecognitionField } from '../components/RecognitionWorkbench';
@@ -74,10 +74,10 @@ export default function SupplierPage({ go, role, nav }: { go: (p: string) => voi
   const [nBizScope, setNBizScope] = useState('');
   const [nDocType, setNDocType] = useState('营业执照');
   const [nUploadedDocs, setNUploadedDocs] = useState<string[]>([]);
-  /* 供货范围「引用主数据」：从物料主数据勾选该供应商供应的物料 / 服务，保留手填品类 */
+  /* 供货范围「引用主数据」：从物料主数据勾选该供应商供应的物料 / 服务 / 软件 / 套件，保留手填品类 */
   const [scopePickOpen, setScopePickOpen] = useState(false);
   const [scopePicked, setScopePicked] = useState<string[]>([]);
-  const SCOPE_KINDS = ['物料', '服务', '套件', '软件'] as const;
+  const SCOPE_KINDS = ITEM_KINDS;
   /** 新增供应商表单：打开时与提交后统一重置 */
   const resetNewSup = () => { setNName(''); setNCats(['物料']); setNContact(''); setNPhone(''); setNValid('2027-06-30'); setNCertGrade('无'); setNAmt(''); setNYears(''); setNLevel('C'); setNCreditCode(''); setNBizScope(''); setNDocType('营业执照'); setNUploadedDocs([]); setScopePicked([]); };
 
@@ -233,7 +233,7 @@ export default function SupplierPage({ go, role, nav }: { go: (p: string) => voi
     { key: 'validTo', title: '资质有效期', width: 120, align: 'right', render: (s) => s.validTo ? <span style={{ whiteSpace: 'nowrap' }} className={`num${s.validTo < TODAY ? ' nc-v-red' : ''}`} title={s.validTo < TODAY ? '资质已过期，不可参与询比价与下单' : undefined}>{s.validTo}{s.validTo < TODAY ? ' 已过期' : ''}</span> : <span className="nc-muted">—</span> },
     { key: 'status', title: '准入状态', width: 100, render: (s) => <Tag tone={ST_TONE[s.status] as 'orange'}>{s.status}</Tag> },
     {
-      key: 'op', title: '操作', width: 150, render: (s) => (
+      key: 'op', title: '操作', width: 190, render: (s) => (
         <span onClick={(e) => e.stopPropagation()}>
           <Op onClick={() => setDetail(s)}>详情</Op>
           {s.status === '待准入' && <>
@@ -242,7 +242,11 @@ export default function SupplierPage({ go, role, nav }: { go: (p: string) => voi
             <OpSep />
             <Op danger onClick={() => { setReject(s); setRejectTxt(''); }}>拒绝</Op>
           </>}
-          {s.status === '已准入' && <><OpSep /><Op danger onClick={() => { setFreeze(s); setFreezeTxt(''); setFreezeBlack(!!s.blacklist); }}>冻结</Op></>}
+          {s.status === '已准入' && <>
+            <OpSep />
+            {!s.blacklist && <Op gold onClick={() => { setPendingCtDir({ dir: 'purchase', supplier: s.name }); go('contract-new'); }} title="跳转新建合同向导：预选采购合同类型（锁定）并带入该供应商为相对方">生成采购合同</Op>}
+            <Op danger onClick={() => { setFreeze(s); setFreezeTxt(''); setFreezeBlack(!!s.blacklist); }}>冻结</Op>
+          </>}
           {(s.status === '已冻结' || s.status === '已拒绝') && <><OpSep /><Op onClick={() => setStatus(s, '已准入')}>解冻 / 恢复</Op></>}
         </span>
       ),
@@ -307,7 +311,7 @@ export default function SupplierPage({ go, role, nav }: { go: (p: string) => voi
                 label: '范围', value: cat, onChange: (k) => { setCat(k); setPage(1); },
                 items: [
                   { key: 'all', label: '全部范围', cnt: rows.length },
-                  ...['物料', '分包', '服务', '机械', '检测'].map((c) => ({ key: c, label: c, cnt: rows.filter((s) => s.cats.includes(c)).length })),
+                  ...SUP_CATS.map((c) => ({ key: c, label: c, cnt: rows.filter((s) => s.cats.includes(c)).length })),
                 ],
               },
             ]}
@@ -336,7 +340,11 @@ export default function SupplierPage({ go, role, nav }: { go: (p: string) => voi
             <Btn onClick={() => { setReject(detail); setRejectTxt(''); }} danger>拒绝准入</Btn>
             <Btn kind="primary" onClick={() => docOk(detail) ? setStatus(detail, '已准入') : toast('必需资料不齐，不可准入', 'err')}>通过准入</Btn>
           </>}
-          {detail.status === '已准入' && <><Btn onClick={() => toast('已发起年度复评')}>发起复评</Btn><Btn kind="danger" onClick={() => { setFreeze(detail); setFreezeTxt(''); setFreezeBlack(!!detail.blacklist); }}>冻结供应商</Btn></>}
+          {detail.status === '已准入' && <>
+            {!detail.blacklist && <Btn onClick={() => { setPendingCtDir({ dir: 'purchase', supplier: detail.name }); go('contract-new'); }} title="预选采购合同类型（锁定）并带入该供应商为相对方">生成采购合同</Btn>}
+            <Btn onClick={() => toast('已发起年度复评')}>发起复评</Btn>
+            <Btn kind="danger" onClick={() => { setFreeze(detail); setFreezeTxt(''); setFreezeBlack(!!detail.blacklist); }}>冻结供应商</Btn>
+          </>}
           {(detail.status === '已冻结' || detail.status === '已拒绝') && <Btn kind="primary" onClick={() => setStatus(detail, '已准入')}>解冻 / 恢复合作</Btn>}
         </>)}>
         {detail && <>
@@ -474,9 +482,9 @@ export default function SupplierPage({ go, role, nav }: { go: (p: string) => voi
               <div className="nc-tiny nc-muted" style={{ background: 'var(--bg-2,#f5f6f8)', padding: 8, borderRadius: 6 }}>{nBizScope}</div>
             </Field>
           )}
-          <Field label="供货范围" req note="先选大类；可再「引用主数据」勾选具体供应的物料 / 服务，保留手填">
+          <Field label="供货范围" req note="先选大类；可再「引用主数据」勾选具体供应的物料 / 服务 / 软件 / 套件，保留手填">
             <div className="nc-pick-inline">
-              {['物料', '分包', '服务', '机械', '检测'].map((c) => (
+              {SUP_CATS.map((c) => (
                 <label key={c} className={`nc-pick-chip${nCats.includes(c) ? ' is-on' : ''}`}>
                   <input type="checkbox" className="nc-check" checked={nCats.includes(c)}
                     onChange={(e) => setNCats((cs) => (e.target.checked ? [...cs, c] : cs.filter((x) => x !== c)))} />
@@ -550,11 +558,11 @@ export default function SupplierPage({ go, role, nav }: { go: (p: string) => voi
         <div className="nc-empty-mini" style={{ marginTop: 12 }}><Ico n="file" size={16} /> 拖拽 .xlsx 到此处，或点击「下载模板」按格式填写</div>
       </Modal>
 
-      {/* 供货范围「引用主数据」：从物料主数据勾选该供应商供应的物料 / 服务 */}
+      {/* 供货范围「引用主数据」：从物料主数据勾选该供应商供应的物料 / 服务 / 软件 / 套件 */}
       <Modal open={scopePickOpen} onClose={() => setScopePickOpen(false)} width={720} title="引用物料主数据 · 选择供应范围"
         foot={<><Btn onClick={() => setScopePickOpen(false)}>取消</Btn>
-          <Btn kind="primary" onClick={() => { setScopePickOpen(false); toast(`已关联 ${scopePicked.length} 项物料 / 服务主数据`); }}>确定（已选 {scopePicked.length} 项）</Btn></>}>
-        <Banner tone="info">勾选该供应商可供货的物料 / 服务 / 套件；与上方大类「供货范围」并存，保留手填能力。</Banner>
+          <Btn kind="primary" onClick={() => { setScopePickOpen(false); toast(`已关联 ${scopePicked.length} 项物料 / 服务 / 软件 / 套件主数据`); }}>确定（已选 {scopePicked.length} 项）</Btn></>}>
+        <Banner tone="info">勾选该供应商可供货的物料 / 服务 / 软件 / 套件；与上方大类「供货范围」并存，保留手填能力。</Banner>
         {SCOPE_KINDS.map((k) => {
           const list = ITEMS.filter((it) => it.ty === k && it.status === '启用');
           if (!list.length) return null;

@@ -89,11 +89,23 @@
       "kind": "source"
     },
     {
+      "path": "components/project-center/DocsSub.tsx",
+      "kind": "source"
+    },
+    {
       "path": "components/project-center/ExecSub.tsx",
       "kind": "source"
     },
     {
-      "path": "components/project-center/FundSub.tsx",
+      "path": "components/project-center/FacilitySub.tsx",
+      "kind": "source"
+    },
+    {
+      "path": "components/project-center/InfoSub.tsx",
+      "kind": "source"
+    },
+    {
+      "path": "components/project-center/InvoiceSub.tsx",
       "kind": "source"
     },
     {
@@ -101,7 +113,7 @@
       "kind": "source"
     },
     {
-      "path": "components/project-center/OverviewSub.tsx",
+      "path": "components/project-center/PaySub.tsx",
       "kind": "source"
     },
     {
@@ -109,11 +121,31 @@
       "kind": "source"
     },
     {
+      "path": "components/project-center/ProgressSub.tsx",
+      "kind": "source"
+    },
+    {
+      "path": "components/project-center/PurchaseSub.tsx",
+      "kind": "source"
+    },
+    {
       "path": "components/project-center/QualitySub.tsx",
       "kind": "source"
     },
     {
+      "path": "components/project-center/RecvSub.tsx",
+      "kind": "source"
+    },
+    {
+      "path": "components/project-center/Sections.tsx",
+      "kind": "source"
+    },
+    {
       "path": "components/project-center/seed.ts",
+      "kind": "source"
+    },
+    {
+      "path": "components/project-center/TasksSub.tsx",
       "kind": "source"
     },
     {
@@ -186,6 +218,14 @@
     },
     {
       "path": "pages/DocPage.tsx",
+      "kind": "source"
+    },
+    {
+      "path": "pages/FundPage.tsx",
+      "kind": "source"
+    },
+    {
+      "path": "pages/HazardPage.tsx",
       "kind": "source"
     },
     {
